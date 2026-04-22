@@ -1,14 +1,10 @@
 # libsais-rs
 
-Bitwise-faithful Rust translation work for the upstream `libsais` core, developed bottom-up from the original C source in [`libsais/src/libsais.c`](libsais/src/libsais.c).
+Bitwise-faithful Rust translation work for the upstream [`IlyaGrebnov/libsais`](https://github.com/IlyaGrebnov/libsais), commit `b6e52ef33fe14f9d5c14c580d162b6fd2c27f2a8`
 
-The upstream project is [`IlyaGrebnov/libsais`](https://github.com/IlyaGrebnov/libsais).
+* 2026-04-22: This code *might* now be functional, with speed on par with the original code. More testing will be needed, use with care
 
-This repository keeps the upstream C code in the `libsais/` subdirectory at commit `b6e52ef33fe14f9d5c14c580d162b6fd2c27f2a8` from that upstream repository and implements the Rust translation in [`src/lib.rs`](src/lib.rs). The current approach is:
-
-**This crate is still under development; not for production use**
-
-**Most text here is LLM-generated. Do not trust**
+**Most text here is LLM-generated. Do not trust below**
 
 ## This is an LLM-mediated faithful (hopefully) translation, not the original code! 
 
@@ -54,6 +50,38 @@ Run a focused parity test:
 ```bash
 cargo test libsais_main_32s_entry_matches_upstream_c_on_large_generated_6k_case -- --nocapture
 ```
+
+## Library Usage
+
+Add the crate to `Cargo.toml`:
+
+```toml
+[dependencies]
+libsais-rs = { path = "/path/to/libsais" }
+```
+
+Minimal suffix-array example:
+
+```rust
+use libsais_rs::{libsais, SaSint};
+
+fn main() {
+    let text = b"banana";
+    let mut sa = vec![0 as SaSint; text.len()];
+
+    let rc = libsais(text, &mut sa, 0, None);
+    assert_eq!(rc, 0, "libsais failed with status {rc}");
+
+    println!("{sa:?}");
+}
+```
+
+Notes:
+
+- `sa` must have length at least `text.len() + fs`
+- `fs` is the amount of extra scratch space made available at the tail of `sa`
+- for the basic case above, `fs = 0` is valid
+- if you want symbol frequencies, pass `Some(&mut freq)` where `freq.len() >= 256`
 
 ## Current Benchmark Snapshot
 
