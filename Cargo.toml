@@ -1,0 +1,17 @@
+[package]
+name = "libsais-rs"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[lib]
+name = "libsais_rs"
+path = "src/lib.rs"
+
+[build-dependencies]
+cc = "1"
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+panic = "abort"
