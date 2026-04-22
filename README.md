@@ -2,15 +2,13 @@
 
 Bitwise-faithful Rust translation work for the upstream `libsais` core, developed bottom-up from the original C source in [`libsais/src/libsais.c`](libsais/src/libsais.c).
 
-This repository keeps the upstream C code in the `libsais/` subdirectory at commit `b6e52ef33fe14f9d5c14c580d162b6fd2c27f2a8` and implements the Rust translation in [`src/lib.rs`](src/lib.rs). The current approach is:
+The upstream project is [`IlyaGrebnov/libsais`](https://github.com/IlyaGrebnov/libsais).
 
-- keep the C structure recognizable
-- prefer one Rust function per original C function
-- verify behavior directly against upstream C wherever practical
+This repository keeps the upstream C code in the `libsais/` subdirectory at commit `b6e52ef33fe14f9d5c14c580d162b6fd2c27f2a8` from that upstream repository and implements the Rust translation in [`src/lib.rs`](src/lib.rs). The current approach is:
 
-*This crate is still under development; not for production use*
+**This crate is still under development; not for production use**
 
-*Most text here is LLM-generated. Do not trust*
+**Most text here is LLM-generated. Do not trust**
 
 ## This is an LLM-mediated faithful (hopefully) translation, not the original code! 
 
@@ -35,40 +33,6 @@ But:
 
 This blurb might be out of date. Go to [this page](https://github.com/henriksson-lab/rustification) for the latest information and further information about how we approach translation
 
-## Verification Model
-
-Verification is layered:
-
-- ordinary Rust unit tests for local helper behavior
-- small end-to-end correctness checks against brute-force suffix arrays
-- real-world round-trip tests
-- direct Rust-vs-upstream-C parity tests using a local C probe build
-
-The local C probe is built from [`cprobe/libsais_probe.c`](cprobe/libsais_probe.c), which includes the upstream C implementation directly and exports wrappers around selected internal functions.
-
-Current test coverage includes:
-
-- helper-level parity for several internal LMS renumber/gather routines
-- dispatcher and recursion-path parity for `libsais_main_32s_entry`
-- branch-forced parity for 6k / 4k / 2k / 1k recursion families
-- larger deterministic generated parity cases
-
-At the time this README was written, the full Rust test suite passed locally:
-
-- `158 passed; 0 failed`
-
-## Important Caveat
-
-For `fs > 0` paths, the upstream implementation may use pointer-relative aligned scratch space inside the `SA` tail. Because of that:
-
-- `SA[..n]` is the observable output and must match
-- scratch bytes beyond the observable output can depend on exact allocation layout
-
-The parity harness now handles this deliberately:
-
-- for cases where full-tail identity is meaningful, it compares the full `SA`
-- for `fs > 0` cases, it compares observable output instead of treating allocator-dependent scratch bytes as a public contract
-
 ## Repository Layout
 
 - [`src/lib.rs`](src/lib.rs): Rust translation
@@ -90,3 +54,27 @@ Run a focused parity test:
 ```bash
 cargo test libsais_main_32s_entry_matches_upstream_c_on_large_generated_6k_case -- --nocapture
 ```
+
+## Current Benchmark Snapshot
+
+The repository includes [`examples/bench_vs_c.rs`](examples/bench_vs_c.rs), which compares the current Rust translation against the vendored upstream C implementation in a single-threaded suffix-array-construction configuration.
+
+Latest locally confirmed run:
+
+```text
+README.md                            len=    6824 iter=200  rust=   0.225 ms  c=   0.234 ms  ratio= 0.96x
+libsais/src/libsais.c                len=  388397 iter= 40  rust=  10.614 ms  c=  10.062 ms  ratio= 1.05x
+generated/mixed-1MiB                 len= 1048576 iter= 10  rust=  35.951 ms  c=  35.528 ms  ratio= 1.01x
+```
+
+Command used:
+
+```bash
+cargo run --release --example bench_vs_c
+```
+
+These measurements are noisy enough that one run should be treated as a snapshot, not a hard claim. The medium and large recursive cases are currently close to parity with the upstream C code, but repeated runs can move by a few percent.
+
+## License
+
+Apache License 2.0 (same as original code)

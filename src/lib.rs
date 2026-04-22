@@ -518,17 +518,16 @@ pub fn count_and_gather_lms_suffixes_8u(
     omp_block_size: FastSint,
 ) -> SaSint {
     buckets.fill(0);
-    let n_usize = usize::try_from(n).expect("n must be non-negative");
-    let block_start = usize::try_from(omp_block_start).expect("omp_block_start must be non-negative");
-    let block_size = usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
-    let mut m = block_start + block_size - 1;
+    let n = n as FastSint;
+    let mut m = omp_block_start + omp_block_size - 1;
 
     if omp_block_size > 0 {
+        let prefetch_distance = 256 as FastSint;
         let mut j = m + 1;
-        let mut c0 = t[m] as FastSint;
+        let mut c0 = t[m as usize] as FastSint;
         let mut c1 = -1;
-        while j < n_usize {
-            c1 = t[j] as FastSint;
+        while j < n {
+            c1 = t[j as usize] as FastSint;
             if c1 != c0 {
                 break;
             }
@@ -537,57 +536,58 @@ pub fn count_and_gather_lms_suffixes_8u(
 
         let mut f0 = usize::from(c0 >= c1);
         let mut f1 = 0usize;
-        let mut i = m as FastSint - 1;
-        let limit = block_start + 3;
+        let mut i = m - 1;
+        let limit = omp_block_start + 3;
 
-        while i >= limit as FastSint {
+        while i >= limit {
+            let _prefetch_index = i - prefetch_distance;
             c1 = t[i as usize] as FastSint;
             f1 = usize::from(c1 > (c0 - f0 as FastSint));
-            sa[m] = (i + 1) as SaSint;
-            m -= f1 & !f0;
+            sa[m as usize] = (i + 1) as SaSint;
+            m -= (f1 & !f0) as FastSint;
             buckets[buckets_index4(c0 as usize, f0 + f0 + f1)] += 1;
 
             c0 = t[(i - 1) as usize] as FastSint;
             f0 = usize::from(c0 > (c1 - f1 as FastSint));
-            sa[m] = i as SaSint;
-            m -= f0 & !f1;
+            sa[m as usize] = i as SaSint;
+            m -= (f0 & !f1) as FastSint;
             buckets[buckets_index4(c1 as usize, f1 + f1 + f0)] += 1;
 
             c1 = t[(i - 2) as usize] as FastSint;
             f1 = usize::from(c1 > (c0 - f0 as FastSint));
-            sa[m] = (i - 1) as SaSint;
-            m -= f1 & !f0;
+            sa[m as usize] = (i - 1) as SaSint;
+            m -= (f1 & !f0) as FastSint;
             buckets[buckets_index4(c0 as usize, f0 + f0 + f1)] += 1;
 
             c0 = t[(i - 3) as usize] as FastSint;
             f0 = usize::from(c0 > (c1 - f1 as FastSint));
-            sa[m] = (i - 2) as SaSint;
-            m -= f0 & !f1;
+            sa[m as usize] = (i - 2) as SaSint;
+            m -= (f0 & !f1) as FastSint;
             buckets[buckets_index4(c1 as usize, f1 + f1 + f0)] += 1;
 
             i -= 4;
         }
 
-        let tail_limit = limit as FastSint - 3;
+        let tail_limit = limit - 3;
         while i >= tail_limit {
             c1 = c0;
             c0 = t[i as usize] as FastSint;
             f1 = f0;
             f0 = usize::from(c0 > (c1 - f1 as FastSint));
-            sa[m] = (i + 1) as SaSint;
-            m -= f0 & !f1;
+            sa[m as usize] = (i + 1) as SaSint;
+            m -= (f0 & !f1) as FastSint;
             buckets[buckets_index4(c1 as usize, f1 + f1 + f0)] += 1;
             i -= 1;
         }
 
         c1 = if i >= 0 { t[i as usize] as FastSint } else { -1 };
         f1 = usize::from(c1 > (c0 - f0 as FastSint));
-        sa[m] = (i + 1) as SaSint;
-        m -= f1 & !f0;
+        sa[m as usize] = (i + 1) as SaSint;
+        m -= (f1 & !f0) as FastSint;
         buckets[buckets_index4(c0 as usize, f0 + f0 + f1)] += 1;
     }
 
-    (block_start + block_size - 1 - m) as SaSint
+    (omp_block_start + omp_block_size - 1 - m) as SaSint
 }
 
 pub fn count_and_gather_lms_suffixes_8u_omp(
@@ -674,19 +674,18 @@ pub fn count_and_gather_lms_suffixes_32s_4k(
     omp_block_size: FastSint,
 ) -> SaSint {
     buckets.fill(0);
-    let n_usize = usize::try_from(n).expect("n must be non-negative");
-    let _k_usize = usize::try_from(k).expect("k must be non-negative");
-    let block_start = usize::try_from(omp_block_start).expect("omp_block_start must be non-negative");
-    let block_size = usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
-    let mut m = block_start + block_size - 1;
+    let n = n as FastSint;
+    let _k = k as FastSint;
+    let mut m = omp_block_start + omp_block_size - 1;
 
     if omp_block_size > 0 {
+        let prefetch_distance = 64 as FastSint;
         let mut j = m + 1;
-        let mut c0 = t[m] as FastSint;
+        let mut c0 = t[m as usize] as FastSint;
         let mut c1 = -1;
 
-        while j < n_usize {
-            c1 = t[j] as FastSint;
+        while j < n {
+            c1 = t[j as usize] as FastSint;
             if c1 != c0 {
                 break;
             }
@@ -695,57 +694,58 @@ pub fn count_and_gather_lms_suffixes_32s_4k(
 
         let mut f0 = usize::from(c0 >= c1);
         let mut f1 = 0usize;
-        let mut i = m as FastSint - 1;
-        let limit = block_start as FastSint + 3;
+        let mut i = m - 1;
+        let limit = omp_block_start + prefetch_distance + 3;
 
         while i >= limit {
+            let _prefetch_index = i - 2 * prefetch_distance;
             c1 = t[i as usize] as FastSint;
             f1 = usize::from(c1 > (c0 - f0 as FastSint));
-            sa[m] = (i + 1) as SaSint;
-            m -= f1 & !f0;
+            sa[m as usize] = (i + 1) as SaSint;
+            m -= (f1 & !f0) as FastSint;
             buckets[buckets_index4(c0 as usize, f0 + f0 + f1)] += 1;
 
             c0 = t[(i - 1) as usize] as FastSint;
             f0 = usize::from(c0 > (c1 - f1 as FastSint));
-            sa[m] = i as SaSint;
-            m -= f0 & !f1;
+            sa[m as usize] = i as SaSint;
+            m -= (f0 & !f1) as FastSint;
             buckets[buckets_index4(c1 as usize, f1 + f1 + f0)] += 1;
 
             c1 = t[(i - 2) as usize] as FastSint;
             f1 = usize::from(c1 > (c0 - f0 as FastSint));
-            sa[m] = (i - 1) as SaSint;
-            m -= f1 & !f0;
+            sa[m as usize] = (i - 1) as SaSint;
+            m -= (f1 & !f0) as FastSint;
             buckets[buckets_index4(c0 as usize, f0 + f0 + f1)] += 1;
 
             c0 = t[(i - 3) as usize] as FastSint;
             f0 = usize::from(c0 > (c1 - f1 as FastSint));
-            sa[m] = (i - 2) as SaSint;
-            m -= f0 & !f1;
+            sa[m as usize] = (i - 2) as SaSint;
+            m -= (f0 & !f1) as FastSint;
             buckets[buckets_index4(c1 as usize, f1 + f1 + f0)] += 1;
 
             i -= 4;
         }
 
-        let tail_limit = block_start as FastSint;
+        let tail_limit = omp_block_start;
         while i >= tail_limit {
             c1 = c0;
             c0 = t[i as usize] as FastSint;
             f1 = f0;
             f0 = usize::from(c0 > (c1 - f1 as FastSint));
-            sa[m] = (i + 1) as SaSint;
-            m -= f0 & !f1;
+            sa[m as usize] = (i + 1) as SaSint;
+            m -= (f0 & !f1) as FastSint;
             buckets[buckets_index4(c1 as usize, f1 + f1 + f0)] += 1;
             i -= 1;
         }
 
         c1 = if i >= 0 { t[i as usize] as FastSint } else { -1 };
         f1 = usize::from(c1 > (c0 - f0 as FastSint));
-        sa[m] = (i + 1) as SaSint;
-        m -= f1 & !f0;
+        sa[m as usize] = (i + 1) as SaSint;
+        m -= (f1 & !f0) as FastSint;
         buckets[buckets_index4(c0 as usize, f0 + f0 + f1)] += 1;
     }
 
-    (block_start + block_size - 1 - m) as SaSint
+    (omp_block_start + omp_block_size - 1 - m) as SaSint
 }
 
 pub fn count_and_gather_lms_suffixes_32s_2k(
@@ -758,19 +758,18 @@ pub fn count_and_gather_lms_suffixes_32s_2k(
     omp_block_size: FastSint,
 ) -> SaSint {
     buckets.fill(0);
-    let n_usize = usize::try_from(n).expect("n must be non-negative");
-    let _k_usize = usize::try_from(k).expect("k must be non-negative");
-    let block_start = usize::try_from(omp_block_start).expect("omp_block_start must be non-negative");
-    let block_size = usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
-    let mut m = block_start + block_size - 1;
+    let n = n as FastSint;
+    let _k = k as FastSint;
+    let mut m = omp_block_start + omp_block_size - 1;
 
     if omp_block_size > 0 {
+        let prefetch_distance = 64 as FastSint;
         let mut j = m + 1;
-        let mut c0 = t[m] as FastSint;
+        let mut c0 = t[m as usize] as FastSint;
         let mut c1 = -1;
 
-        while j < n_usize {
-            c1 = t[j] as FastSint;
+        while j < n {
+            c1 = t[j as usize] as FastSint;
             if c1 != c0 {
                 break;
             }
@@ -779,57 +778,58 @@ pub fn count_and_gather_lms_suffixes_32s_2k(
 
         let mut f0 = usize::from(c0 >= c1);
         let mut f1 = 0usize;
-        let mut i = m as FastSint - 1;
-        let limit = block_start as FastSint + 3;
+        let mut i = m - 1;
+        let limit = omp_block_start + prefetch_distance + 3;
 
         while i >= limit {
+            let _prefetch_index = i - 2 * prefetch_distance;
             c1 = t[i as usize] as FastSint;
             f1 = usize::from(c1 > (c0 - f0 as FastSint));
-            sa[m] = (i + 1) as SaSint;
-            m -= f1 & !f0;
+            sa[m as usize] = (i + 1) as SaSint;
+            m -= (f1 & !f0) as FastSint;
             buckets[buckets_index2(c0 as usize, f1 & !f0)] += 1;
 
             c0 = t[(i - 1) as usize] as FastSint;
             f0 = usize::from(c0 > (c1 - f1 as FastSint));
-            sa[m] = i as SaSint;
-            m -= f0 & !f1;
+            sa[m as usize] = i as SaSint;
+            m -= (f0 & !f1) as FastSint;
             buckets[buckets_index2(c1 as usize, f0 & !f1)] += 1;
 
             c1 = t[(i - 2) as usize] as FastSint;
             f1 = usize::from(c1 > (c0 - f0 as FastSint));
-            sa[m] = (i - 1) as SaSint;
-            m -= f1 & !f0;
+            sa[m as usize] = (i - 1) as SaSint;
+            m -= (f1 & !f0) as FastSint;
             buckets[buckets_index2(c0 as usize, f1 & !f0)] += 1;
 
             c0 = t[(i - 3) as usize] as FastSint;
             f0 = usize::from(c0 > (c1 - f1 as FastSint));
-            sa[m] = (i - 2) as SaSint;
-            m -= f0 & !f1;
+            sa[m as usize] = (i - 2) as SaSint;
+            m -= (f0 & !f1) as FastSint;
             buckets[buckets_index2(c1 as usize, f0 & !f1)] += 1;
 
             i -= 4;
         }
 
-        let tail_limit = block_start as FastSint;
+        let tail_limit = omp_block_start;
         while i >= tail_limit {
             c1 = c0;
             c0 = t[i as usize] as FastSint;
             f1 = f0;
             f0 = usize::from(c0 > (c1 - f1 as FastSint));
-            sa[m] = (i + 1) as SaSint;
-            m -= f0 & !f1;
+            sa[m as usize] = (i + 1) as SaSint;
+            m -= (f0 & !f1) as FastSint;
             buckets[buckets_index2(c1 as usize, f0 & !f1)] += 1;
             i -= 1;
         }
 
         c1 = if i >= 0 { t[i as usize] as FastSint } else { -1 };
         f1 = usize::from(c1 > (c0 - f0 as FastSint));
-        sa[m] = (i + 1) as SaSint;
-        m -= f1 & !f0;
+        sa[m as usize] = (i + 1) as SaSint;
+        m -= (f1 & !f0) as FastSint;
         buckets[buckets_index2(c0 as usize, f1 & !f0)] += 1;
     }
 
-    (block_start + block_size - 1 - m) as SaSint
+    (omp_block_start + omp_block_size - 1 - m) as SaSint
 }
 
 pub fn count_and_gather_compacted_lms_suffixes_32s_2k(
@@ -1615,34 +1615,40 @@ pub fn radix_sort_lms_suffixes_8u(
     omp_block_start: FastSint,
     omp_block_size: FastSint,
 ) {
+    let prefetch_distance = 64 as FastSint;
     let mut i = omp_block_start + omp_block_size - 1;
-    let mut j = omp_block_start + 67;
+    let mut j = omp_block_start + prefetch_distance + 3;
 
     while i >= j {
         let p0 = sa[i as usize];
-        induction_bucket[buckets_index2(t[p0 as usize] as usize, 0)] -= 1;
-        sa[induction_bucket[buckets_index2(t[p0 as usize] as usize, 0)] as usize] = p0;
+        let idx0 = buckets_index2(t[p0 as usize] as usize, 0);
+        induction_bucket[idx0] -= 1;
+        sa[induction_bucket[idx0] as usize] = p0;
 
         let p1 = sa[(i - 1) as usize];
-        induction_bucket[buckets_index2(t[p1 as usize] as usize, 0)] -= 1;
-        sa[induction_bucket[buckets_index2(t[p1 as usize] as usize, 0)] as usize] = p1;
+        let idx1 = buckets_index2(t[p1 as usize] as usize, 0);
+        induction_bucket[idx1] -= 1;
+        sa[induction_bucket[idx1] as usize] = p1;
 
         let p2 = sa[(i - 2) as usize];
-        induction_bucket[buckets_index2(t[p2 as usize] as usize, 0)] -= 1;
-        sa[induction_bucket[buckets_index2(t[p2 as usize] as usize, 0)] as usize] = p2;
+        let idx2 = buckets_index2(t[p2 as usize] as usize, 0);
+        induction_bucket[idx2] -= 1;
+        sa[induction_bucket[idx2] as usize] = p2;
 
         let p3 = sa[(i - 3) as usize];
-        induction_bucket[buckets_index2(t[p3 as usize] as usize, 0)] -= 1;
-        sa[induction_bucket[buckets_index2(t[p3 as usize] as usize, 0)] as usize] = p3;
+        let idx3 = buckets_index2(t[p3 as usize] as usize, 0);
+        induction_bucket[idx3] -= 1;
+        sa[induction_bucket[idx3] as usize] = p3;
 
         i -= 4;
     }
 
-    j -= 67;
+    j -= prefetch_distance + 3;
     while i >= j {
         let p = sa[i as usize];
-        induction_bucket[buckets_index2(t[p as usize] as usize, 0)] -= 1;
-        sa[induction_bucket[buckets_index2(t[p as usize] as usize, 0)] as usize] = p;
+        let idx = buckets_index2(t[p as usize] as usize, 0);
+        induction_bucket[idx] -= 1;
+        sa[induction_bucket[idx] as usize] = p;
         i -= 1;
     }
 }
@@ -1676,34 +1682,40 @@ pub fn radix_sort_lms_suffixes_32s_6k(
     omp_block_start: FastSint,
     omp_block_size: FastSint,
 ) {
+    let prefetch_distance = 64 as FastSint;
     let mut i = omp_block_start + omp_block_size - 1;
-    let mut j = omp_block_start + 131;
+    let mut j = omp_block_start + prefetch_distance + 3;
 
     while i >= j {
         let p0 = sa[i as usize];
-        induction_bucket[t[p0 as usize] as usize] -= 1;
-        sa[induction_bucket[t[p0 as usize] as usize] as usize] = p0;
+        let idx0 = t[p0 as usize] as usize;
+        induction_bucket[idx0] -= 1;
+        sa[induction_bucket[idx0] as usize] = p0;
 
         let p1 = sa[(i - 1) as usize];
-        induction_bucket[t[p1 as usize] as usize] -= 1;
-        sa[induction_bucket[t[p1 as usize] as usize] as usize] = p1;
+        let idx1 = t[p1 as usize] as usize;
+        induction_bucket[idx1] -= 1;
+        sa[induction_bucket[idx1] as usize] = p1;
 
         let p2 = sa[(i - 2) as usize];
-        induction_bucket[t[p2 as usize] as usize] -= 1;
-        sa[induction_bucket[t[p2 as usize] as usize] as usize] = p2;
+        let idx2 = t[p2 as usize] as usize;
+        induction_bucket[idx2] -= 1;
+        sa[induction_bucket[idx2] as usize] = p2;
 
         let p3 = sa[(i - 3) as usize];
-        induction_bucket[t[p3 as usize] as usize] -= 1;
-        sa[induction_bucket[t[p3 as usize] as usize] as usize] = p3;
+        let idx3 = t[p3 as usize] as usize;
+        induction_bucket[idx3] -= 1;
+        sa[induction_bucket[idx3] as usize] = p3;
 
         i -= 4;
     }
 
-    j -= 131;
+    j -= prefetch_distance + 3;
     while i >= j {
         let p = sa[i as usize];
-        induction_bucket[t[p as usize] as usize] -= 1;
-        sa[induction_bucket[t[p as usize] as usize] as usize] = p;
+        let idx = t[p as usize] as usize;
+        induction_bucket[idx] -= 1;
+        sa[induction_bucket[idx] as usize] = p;
         i -= 1;
     }
 }
@@ -1715,8 +1727,9 @@ pub fn radix_sort_lms_suffixes_32s_2k(
     omp_block_start: FastSint,
     omp_block_size: FastSint,
 ) {
+    let prefetch_distance = 64 as FastSint;
     let mut i = omp_block_start + omp_block_size - 1;
-    let mut j = omp_block_start + 131;
+    let mut j = omp_block_start + prefetch_distance + 3;
 
     while i >= j {
         let p0 = sa[i as usize];
@@ -1742,7 +1755,7 @@ pub fn radix_sort_lms_suffixes_32s_2k(
         i -= 4;
     }
 
-    j -= 131;
+    j -= prefetch_distance + 3;
     while i >= j {
         let p = sa[i as usize];
         let idx = buckets_index2(t[p as usize] as usize, 0);
@@ -2005,8 +2018,13 @@ pub fn partial_sorting_scan_left_to_right_8u(
 ) -> SaSint {
     let induction_offset = 4 * ALPHABET_SIZE;
     let distinct_offset = 2 * ALPHABET_SIZE;
+    let prefetch_distance = 64 as FastSint;
     let mut i = omp_block_start;
-    let mut j = omp_block_start + omp_block_size - 65;
+    let mut j = if omp_block_size > prefetch_distance + 1 {
+        omp_block_start + omp_block_size - prefetch_distance - 1
+    } else {
+        omp_block_start
+    };
 
     while i < j {
         let mut p0 = sa[i as usize];
@@ -2032,7 +2050,7 @@ pub fn partial_sorting_scan_left_to_right_8u(
         i += 2;
     }
 
-    j += 65;
+    j = omp_block_start + omp_block_size;
     while i < j {
         let mut p = sa[i as usize];
         d += SaSint::from(p < 0);
@@ -2141,47 +2159,64 @@ pub fn partial_sorting_scan_left_to_right_32s_6k(
     omp_block_start: FastSint,
     omp_block_size: FastSint,
 ) -> SaSint {
-    let prefetch_distance = 64 as FastSint;
+    let prefetch_distance: FastSint = 64;
+    let t_ptr = t.as_ptr();
+    let sa_ptr = sa.as_mut_ptr();
+    let buckets_ptr = buckets.as_mut_ptr();
+
     let mut i = omp_block_start;
     let mut j = omp_block_start + omp_block_size - 2 * prefetch_distance - 1;
     while i < j {
-        let p0 = sa[i as usize];
-        d += SaSint::from(p0 < 0);
-        let p0 = p0 & SAINT_MAX;
-        let c0 = t[(p0 - 1) as usize] as usize;
-        let f0 = usize::from(t[(p0 - 2) as usize] >= t[(p0 - 1) as usize]);
-        let v0 = buckets_index4(c0, f0);
-        let pos0 = buckets[v0] as usize;
-        sa[pos0] = (p0 - 1) | (((buckets[2 + v0] != d) as SaSint) << (SAINT_BIT - 1));
-        buckets[v0] += 1;
-        buckets[2 + v0] = d;
+        unsafe {
+            let mut p0 = *sa_ptr.add(i as usize);
+            d += SaSint::from(p0 < 0);
+            p0 &= SAINT_MAX;
+            let p0u = p0 as usize;
+            let v0 = buckets_index4(
+                *t_ptr.add(p0u - 1) as usize,
+                usize::from(*t_ptr.add(p0u - 2) >= *t_ptr.add(p0u - 1)),
+            );
+            let pos0 = *buckets_ptr.add(v0) as usize;
+            *sa_ptr.add(pos0) =
+                (p0 - 1) | (((*buckets_ptr.add(2 + v0) != d) as SaSint) << (SAINT_BIT - 1));
+            *buckets_ptr.add(v0) += 1;
+            *buckets_ptr.add(2 + v0) = d;
 
-        let p1 = sa[(i + 1) as usize];
-        d += SaSint::from(p1 < 0);
-        let p1 = p1 & SAINT_MAX;
-        let c1 = t[(p1 - 1) as usize] as usize;
-        let f1 = usize::from(t[(p1 - 2) as usize] >= t[(p1 - 1) as usize]);
-        let v1 = buckets_index4(c1, f1);
-        let pos1 = buckets[v1] as usize;
-        sa[pos1] = (p1 - 1) | (((buckets[2 + v1] != d) as SaSint) << (SAINT_BIT - 1));
-        buckets[v1] += 1;
-        buckets[2 + v1] = d;
+            let mut p1 = *sa_ptr.add((i + 1) as usize);
+            d += SaSint::from(p1 < 0);
+            p1 &= SAINT_MAX;
+            let p1u = p1 as usize;
+            let v1 = buckets_index4(
+                *t_ptr.add(p1u - 1) as usize,
+                usize::from(*t_ptr.add(p1u - 2) >= *t_ptr.add(p1u - 1)),
+            );
+            let pos1 = *buckets_ptr.add(v1) as usize;
+            *sa_ptr.add(pos1) =
+                (p1 - 1) | (((*buckets_ptr.add(2 + v1) != d) as SaSint) << (SAINT_BIT - 1));
+            *buckets_ptr.add(v1) += 1;
+            *buckets_ptr.add(2 + v1) = d;
+        }
 
         i += 2;
     }
 
     j += 2 * prefetch_distance + 1;
     while i < j {
-        let p = sa[i as usize];
-        d += SaSint::from(p < 0);
-        let p = p & SAINT_MAX;
-        let c = t[(p - 1) as usize] as usize;
-        let f = usize::from(t[(p - 2) as usize] >= t[(p - 1) as usize]);
-        let v = buckets_index4(c, f);
-        let pos = buckets[v] as usize;
-        sa[pos] = (p - 1) | (((buckets[2 + v] != d) as SaSint) << (SAINT_BIT - 1));
-        buckets[v] += 1;
-        buckets[2 + v] = d;
+        unsafe {
+            let mut p = *sa_ptr.add(i as usize);
+            d += SaSint::from(p < 0);
+            p &= SAINT_MAX;
+            let pu = p as usize;
+            let v = buckets_index4(
+                *t_ptr.add(pu - 1) as usize,
+                usize::from(*t_ptr.add(pu - 2) >= *t_ptr.add(pu - 1)),
+            );
+            let pos = *buckets_ptr.add(v) as usize;
+            *sa_ptr.add(pos) =
+                (p - 1) | (((*buckets_ptr.add(2 + v) != d) as SaSint) << (SAINT_BIT - 1));
+            *buckets_ptr.add(v) += 1;
+            *buckets_ptr.add(2 + v) = d;
+        }
         i += 1;
     }
 
@@ -2197,46 +2232,55 @@ pub fn partial_sorting_scan_left_to_right_32s_4k(
     omp_block_start: FastSint,
     omp_block_size: FastSint,
 ) -> SaSint {
-    let prefetch_distance = 64 as FastSint;
     let k_usize = usize::try_from(k).expect("k must be non-negative");
-    let (distinct_names, tail) = buckets.split_at_mut(2 * k_usize);
-    let induction_bucket = &mut tail[..k_usize];
+    let prefetch_distance: FastSint = 64;
+    let t_ptr = t.as_ptr();
+    let sa_ptr = sa.as_mut_ptr();
+    let buckets_ptr = buckets.as_mut_ptr();
+    let distinct_names_ptr = buckets_ptr;
+    let induction_bucket_ptr = unsafe { buckets_ptr.add(2 * k_usize) };
     let mut i = omp_block_start;
     let mut j = omp_block_start + omp_block_size - 2 * prefetch_distance - 1;
 
     while i < j {
-        let mut p0 = sa[i as usize];
-        sa[i as usize] = p0 & SAINT_MAX;
-        if p0 > 0 {
-            sa[i as usize] = 0;
-            d += p0 >> (SUFFIX_GROUP_BIT - 1);
-            p0 &= !SUFFIX_GROUP_MARKER;
-            let c0 = t[(p0 - 1) as usize];
-            let f0 = usize::from(t[(p0 - 2) as usize] < c0);
-            let v0 = buckets_index2(c0 as usize, f0);
-            let pos0 = induction_bucket[c0 as usize] as usize;
-            sa[pos0] = (p0 - 1)
-                | ((f0 as SaSint) << (SAINT_BIT - 1))
-                | (((distinct_names[v0] != d) as SaSint) << (SUFFIX_GROUP_BIT - 1));
-            induction_bucket[c0 as usize] += 1;
-            distinct_names[v0] = d;
-        }
+        unsafe {
+            let i0 = i as usize;
+            let mut p0 = *sa_ptr.add(i0);
+            *sa_ptr.add(i0) = p0 & SAINT_MAX;
+            if p0 > 0 {
+                *sa_ptr.add(i0) = 0;
+                d += p0 >> (SUFFIX_GROUP_BIT - 1);
+                p0 &= !SUFFIX_GROUP_MARKER;
+                let p0u = p0 as usize;
+                let c0 = *t_ptr.add(p0u - 1);
+                let f0 = usize::from(*t_ptr.add(p0u - 2) < c0);
+                let v0 = buckets_index2(c0 as usize, f0);
+                let pos0 = *induction_bucket_ptr.add(c0 as usize) as usize;
+                *sa_ptr.add(pos0) = (p0 - 1)
+                    | ((f0 as SaSint) << (SAINT_BIT - 1))
+                    | (((*distinct_names_ptr.add(v0) != d) as SaSint) << (SUFFIX_GROUP_BIT - 1));
+                *induction_bucket_ptr.add(c0 as usize) += 1;
+                *distinct_names_ptr.add(v0) = d;
+            }
 
-        let mut p1 = sa[(i + 1) as usize];
-        sa[(i + 1) as usize] = p1 & SAINT_MAX;
-        if p1 > 0 {
-            sa[(i + 1) as usize] = 0;
-            d += p1 >> (SUFFIX_GROUP_BIT - 1);
-            p1 &= !SUFFIX_GROUP_MARKER;
-            let c1 = t[(p1 - 1) as usize];
-            let f1 = usize::from(t[(p1 - 2) as usize] < c1);
-            let v1 = buckets_index2(c1 as usize, f1);
-            let pos1 = induction_bucket[c1 as usize] as usize;
-            sa[pos1] = (p1 - 1)
-                | ((f1 as SaSint) << (SAINT_BIT - 1))
-                | (((distinct_names[v1] != d) as SaSint) << (SUFFIX_GROUP_BIT - 1));
-            induction_bucket[c1 as usize] += 1;
-            distinct_names[v1] = d;
+            let i1 = (i + 1) as usize;
+            let mut p1 = *sa_ptr.add(i1);
+            *sa_ptr.add(i1) = p1 & SAINT_MAX;
+            if p1 > 0 {
+                *sa_ptr.add(i1) = 0;
+                d += p1 >> (SUFFIX_GROUP_BIT - 1);
+                p1 &= !SUFFIX_GROUP_MARKER;
+                let p1u = p1 as usize;
+                let c1 = *t_ptr.add(p1u - 1);
+                let f1 = usize::from(*t_ptr.add(p1u - 2) < c1);
+                let v1 = buckets_index2(c1 as usize, f1);
+                let pos1 = *induction_bucket_ptr.add(c1 as usize) as usize;
+                *sa_ptr.add(pos1) = (p1 - 1)
+                    | ((f1 as SaSint) << (SAINT_BIT - 1))
+                    | (((*distinct_names_ptr.add(v1) != d) as SaSint) << (SUFFIX_GROUP_BIT - 1));
+                *induction_bucket_ptr.add(c1 as usize) += 1;
+                *distinct_names_ptr.add(v1) = d;
+            }
         }
 
         i += 2;
@@ -2244,21 +2288,25 @@ pub fn partial_sorting_scan_left_to_right_32s_4k(
 
     j += 2 * prefetch_distance + 1;
     while i < j {
-        let mut p = sa[i as usize];
-        sa[i as usize] = p & SAINT_MAX;
-        if p > 0 {
-            sa[i as usize] = 0;
-            d += p >> (SUFFIX_GROUP_BIT - 1);
-            p &= !SUFFIX_GROUP_MARKER;
-            let c = t[(p - 1) as usize];
-            let f = usize::from(t[(p - 2) as usize] < c);
-            let v = buckets_index2(c as usize, f);
-            let pos = induction_bucket[c as usize] as usize;
-            sa[pos] = (p - 1)
-                | ((f as SaSint) << (SAINT_BIT - 1))
-                | (((distinct_names[v] != d) as SaSint) << (SUFFIX_GROUP_BIT - 1));
-            induction_bucket[c as usize] += 1;
-            distinct_names[v] = d;
+        unsafe {
+            let iu = i as usize;
+            let mut p = *sa_ptr.add(iu);
+            *sa_ptr.add(iu) = p & SAINT_MAX;
+            if p > 0 {
+                *sa_ptr.add(iu) = 0;
+                d += p >> (SUFFIX_GROUP_BIT - 1);
+                p &= !SUFFIX_GROUP_MARKER;
+                let pu = p as usize;
+                let c = *t_ptr.add(pu - 1);
+                let f = usize::from(*t_ptr.add(pu - 2) < c);
+                let v = buckets_index2(c as usize, f);
+                let pos = *induction_bucket_ptr.add(c as usize) as usize;
+                *sa_ptr.add(pos) = (p - 1)
+                    | ((f as SaSint) << (SAINT_BIT - 1))
+                    | (((*distinct_names_ptr.add(v) != d) as SaSint) << (SUFFIX_GROUP_BIT - 1));
+                *induction_bucket_ptr.add(c as usize) += 1;
+                *distinct_names_ptr.add(v) = d;
+            }
         }
         i += 1;
     }
@@ -2338,12 +2386,14 @@ pub fn partial_sorting_scan_left_to_right_32s_6k_omp(
     if threads == 1 || left_suffixes_count < 65_536 {
         return partial_sorting_scan_left_to_right_32s_6k(t, sa, buckets, d, 0, left_suffixes_count as FastSint);
     }
+    if thread_state.is_empty() {
+        return partial_sorting_scan_left_to_right_32s_6k(t, sa, buckets, d, 0, left_suffixes_count as FastSint);
+    }
 
     let left_suffixes_count =
         usize::try_from(left_suffixes_count).expect("left_suffixes_count must be non-negative");
     let threads_usize = usize::try_from(threads).expect("threads must be non-negative").max(1);
-    let mut cache = vec![ThreadCache::default(); threads_usize * LIBSAIS_PER_THREAD_CACHE_SIZE];
-    let _ = thread_state;
+    let cache = &mut thread_state[0].cache;
     let mut block_start = 0usize;
     let block_span = threads_usize * LIBSAIS_PER_THREAD_CACHE_SIZE;
     while block_start < left_suffixes_count {
@@ -2357,7 +2407,7 @@ pub fn partial_sorting_scan_left_to_right_32s_6k_omp(
             sa,
             buckets,
             d,
-            &mut cache,
+            cache,
             block_start as FastSint,
             (block_end - block_start) as FastSint,
             threads,
@@ -2393,15 +2443,17 @@ pub fn partial_sorting_scan_left_to_right_32s_4k_omp(
     if threads == 1 || n < 65_536 {
         d = partial_sorting_scan_left_to_right_32s_4k(t, sa, k, buckets, d, 0, n as FastSint);
     } else {
+        if thread_state.is_empty() {
+            return partial_sorting_scan_left_to_right_32s_4k(t, sa, k, buckets, d, 0, n as FastSint);
+        }
         let mut block_start = 0usize;
         let n_usize = usize::try_from(n).expect("n must be non-negative");
-        let threads_usize = usize::try_from(threads).expect("threads must be non-negative");
+        let threads_usize = usize::try_from(threads).expect("threads must be non-negative").max(1);
         let chunk_capacity = threads_usize * LIBSAIS_PER_THREAD_CACHE_SIZE;
-        let mut cache = vec![ThreadCache::default(); chunk_capacity];
-        let _ = thread_state;
+        let cache = &mut thread_state[0].cache;
 
         while block_start < n_usize {
-            let mut block_end = block_start + threads_usize * LIBSAIS_PER_THREAD_CACHE_SIZE;
+            let mut block_end = block_start + chunk_capacity;
             if block_end > n_usize {
                 block_end = n_usize;
             }
@@ -2412,7 +2464,7 @@ pub fn partial_sorting_scan_left_to_right_32s_4k_omp(
                 k,
                 buckets,
                 d,
-                &mut cache,
+                cache,
                 block_start as FastSint,
                 (block_end - block_start) as FastSint,
                 threads,
@@ -2441,10 +2493,13 @@ pub fn partial_sorting_scan_left_to_right_32s_1k_omp(
     if threads == 1 || n < 65_536 {
         partial_sorting_scan_left_to_right_32s_1k(t, sa, buckets, 0, n as FastSint);
     } else {
+        if thread_state.is_empty() {
+            partial_sorting_scan_left_to_right_32s_1k(t, sa, buckets, 0, n as FastSint);
+            return;
+        }
         let n_usize = usize::try_from(n).expect("n must be non-negative");
         let threads_usize = usize::try_from(threads).expect("threads must be non-negative").max(1);
-        let mut cache = vec![ThreadCache::default(); threads_usize * LIBSAIS_PER_THREAD_CACHE_SIZE];
-        let _ = thread_state;
+        let cache = &mut thread_state[0].cache;
         let mut block_start = 0usize;
         let block_span = threads_usize * LIBSAIS_PER_THREAD_CACHE_SIZE;
 
@@ -2458,7 +2513,7 @@ pub fn partial_sorting_scan_left_to_right_32s_1k_omp(
                 t,
                 sa,
                 buckets,
-                &mut cache,
+                cache,
                 block_start as FastSint,
                 (block_end - block_start) as FastSint,
                 threads,
@@ -2814,30 +2869,74 @@ pub fn partial_sorting_scan_right_to_left_8u(
         return d;
     }
 
+    let prefetch_distance = 64usize;
     let (induction_bucket, distinct_names_all) = buckets.split_at_mut(2 * ALPHABET_SIZE);
     let distinct_names = &mut distinct_names_all[..2 * ALPHABET_SIZE];
 
     let start = usize::try_from(omp_block_start).expect("omp_block_start must be non-negative");
     let size = usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
-    let mut i = start + size;
-    while i > start {
-        i -= 1;
+    let mut i = start + size - 1;
+    let mut j = start + prefetch_distance + 1;
 
+    while i >= j {
+        let mut p0 = sa[i];
+        d += SaSint::from(p0 < 0);
+        p0 &= SAINT_MAX;
+
+        let p0_usize = p0 as usize;
+        let v0 = buckets_index2(
+            t[p0_usize - 1] as usize,
+            usize::from(t[p0_usize - 2] > t[p0_usize - 1]),
+        );
+
+        induction_bucket[v0] -= 1;
+        let slot0 = induction_bucket[v0] as usize;
+        sa[slot0] = (p0 - 1) | (((distinct_names[v0] != d) as SaSint) << (SAINT_BIT - 1));
+        distinct_names[v0] = d;
+
+        let mut p1 = sa[i - 1];
+        d += SaSint::from(p1 < 0);
+        p1 &= SAINT_MAX;
+
+        let p1_usize = p1 as usize;
+        let v1 = buckets_index2(
+            t[p1_usize - 1] as usize,
+            usize::from(t[p1_usize - 2] > t[p1_usize - 1]),
+        );
+
+        induction_bucket[v1] -= 1;
+        let slot1 = induction_bucket[v1] as usize;
+        sa[slot1] = (p1 - 1) | (((distinct_names[v1] != d) as SaSint) << (SAINT_BIT - 1));
+        distinct_names[v1] = d;
+
+        i -= 2;
+    }
+
+    j = if start + prefetch_distance < start + size {
+        start
+    } else {
+        start
+    };
+    while i >= j {
         let mut p = sa[i];
         d += SaSint::from(p < 0);
         p &= SAINT_MAX;
 
-        let p_usize = usize::try_from(p).expect("suffix index must be non-negative");
+        let p_usize = p as usize;
         let v = buckets_index2(
             t[p_usize - 1] as usize,
             usize::from(t[p_usize - 2] > t[p_usize - 1]),
         );
 
         induction_bucket[v] -= 1;
-        let slot = usize::try_from(induction_bucket[v]).expect("bucket slot must be non-negative");
-        sa[slot] =
-            (p - 1) | (((distinct_names[v] != d) as SaSint) << (SAINT_BIT - 1));
+        let slot = induction_bucket[v] as usize;
+        sa[slot] = (p - 1) | (((distinct_names[v] != d) as SaSint) << (SAINT_BIT - 1));
         distinct_names[v] = d;
+
+        if i == 0 {
+            break;
+        }
+        i -= 1;
     }
 
     d
@@ -2855,20 +2954,60 @@ pub fn partial_gsa_scan_right_to_left_8u(
         return d;
     }
 
+    let prefetch_distance = 64usize;
     let (induction_bucket, distinct_names_all) = buckets.split_at_mut(2 * ALPHABET_SIZE);
     let distinct_names = &mut distinct_names_all[..2 * ALPHABET_SIZE];
 
     let start = usize::try_from(omp_block_start).expect("omp_block_start must be non-negative");
     let size = usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
-    let mut i = start + size;
-    while i > start {
-        i -= 1;
+    let mut i = start + size - 1;
+    let mut j = start + prefetch_distance + 1;
 
+    while i >= j {
+        let mut p0 = sa[i];
+        d += SaSint::from(p0 < 0);
+        p0 &= SAINT_MAX;
+
+        let p0_usize = p0 as usize;
+        let v0 = buckets_index2(
+            t[p0_usize - 1] as usize,
+            usize::from(t[p0_usize - 2] > t[p0_usize - 1]),
+        );
+
+        if v0 != 1 {
+            induction_bucket[v0] -= 1;
+            let slot0 = induction_bucket[v0] as usize;
+            sa[slot0] = (p0 - 1) | (((distinct_names[v0] != d) as SaSint) << (SAINT_BIT - 1));
+            distinct_names[v0] = d;
+        }
+
+        let mut p1 = sa[i - 1];
+        d += SaSint::from(p1 < 0);
+        p1 &= SAINT_MAX;
+
+        let p1_usize = p1 as usize;
+        let v1 = buckets_index2(
+            t[p1_usize - 1] as usize,
+            usize::from(t[p1_usize - 2] > t[p1_usize - 1]),
+        );
+
+        if v1 != 1 {
+            induction_bucket[v1] -= 1;
+            let slot1 = induction_bucket[v1] as usize;
+            sa[slot1] = (p1 - 1) | (((distinct_names[v1] != d) as SaSint) << (SAINT_BIT - 1));
+            distinct_names[v1] = d;
+        }
+
+        i -= 2;
+    }
+
+    j = start;
+    while i >= j {
         let mut p = sa[i];
         d += SaSint::from(p < 0);
         p &= SAINT_MAX;
 
-        let p_usize = usize::try_from(p).expect("suffix index must be non-negative");
+        let p_usize = p as usize;
         let v = buckets_index2(
             t[p_usize - 1] as usize,
             usize::from(t[p_usize - 2] > t[p_usize - 1]),
@@ -2876,11 +3015,15 @@ pub fn partial_gsa_scan_right_to_left_8u(
 
         if v != 1 {
             induction_bucket[v] -= 1;
-            let slot = usize::try_from(induction_bucket[v]).expect("bucket slot must be non-negative");
-            sa[slot] =
-                (p - 1) | (((distinct_names[v] != d) as SaSint) << (SAINT_BIT - 1));
+            let slot = induction_bucket[v] as usize;
+            sa[slot] = (p - 1) | (((distinct_names[v] != d) as SaSint) << (SAINT_BIT - 1));
             distinct_names[v] = d;
         }
+
+        if i == 0 {
+            break;
+        }
+        i -= 1;
     }
 
     d
@@ -3346,60 +3489,65 @@ pub fn partial_sorting_scan_right_to_left_32s_6k(
         return d;
     }
 
-    let prefetch_distance = 64usize;
-    let mut i = (usize::try_from(omp_block_start).expect("omp_block_start must be non-negative")
-        + usize::try_from(omp_block_size).expect("omp_block_size must be non-negative")
-        - 1) as isize;
-    let mut j = (usize::try_from(omp_block_start).expect("omp_block_start must be non-negative")
-        + 2 * prefetch_distance
-        + 1) as isize;
+    let prefetch_distance: FastSint = 64;
+    let t_ptr = t.as_ptr();
+    let sa_ptr = sa.as_mut_ptr();
+    let buckets_ptr = buckets.as_mut_ptr();
+    let mut i = omp_block_start + omp_block_size - 1;
+    let mut j = omp_block_start + 2 * prefetch_distance + 1;
 
     while i >= j {
-        let mut p0 = sa[i as usize];
-        d += SaSint::from(p0 < 0);
-        p0 &= SAINT_MAX;
-        let p0_usize = usize::try_from(p0).expect("suffix index must be non-negative");
-        let v0 = buckets_index4(
-            usize::try_from(t[p0_usize - 1]).expect("bucket symbol must be non-negative"),
-            usize::from(t[p0_usize - 2] > t[p0_usize - 1]),
-        );
-        buckets[v0] -= 1;
-        let slot0 = usize::try_from(buckets[v0]).expect("bucket slot must be non-negative");
-        sa[slot0] = (p0 - 1) | (((buckets[2 + v0] != d) as SaSint) << (SAINT_BIT - 1));
-        buckets[2 + v0] = d;
+        unsafe {
+            let mut p0 = *sa_ptr.add(i as usize);
+            d += SaSint::from(p0 < 0);
+            p0 &= SAINT_MAX;
+            let p0u = p0 as usize;
+            let v0 = buckets_index4(
+                *t_ptr.add(p0u - 1) as usize,
+                usize::from(*t_ptr.add(p0u - 2) > *t_ptr.add(p0u - 1)),
+            );
+            *buckets_ptr.add(v0) -= 1;
+            let slot0 = *buckets_ptr.add(v0) as usize;
+            *sa_ptr.add(slot0) =
+                (p0 - 1) | (((*buckets_ptr.add(2 + v0) != d) as SaSint) << (SAINT_BIT - 1));
+            *buckets_ptr.add(2 + v0) = d;
 
-        let mut p1 = sa[(i - 1) as usize];
-        d += SaSint::from(p1 < 0);
-        p1 &= SAINT_MAX;
-        let p1_usize = usize::try_from(p1).expect("suffix index must be non-negative");
-        let v1 = buckets_index4(
-            usize::try_from(t[p1_usize - 1]).expect("bucket symbol must be non-negative"),
-            usize::from(t[p1_usize - 2] > t[p1_usize - 1]),
-        );
-        buckets[v1] -= 1;
-        let slot1 = usize::try_from(buckets[v1]).expect("bucket slot must be non-negative");
-        sa[slot1] = (p1 - 1) | (((buckets[2 + v1] != d) as SaSint) << (SAINT_BIT - 1));
-        buckets[2 + v1] = d;
+            let mut p1 = *sa_ptr.add((i - 1) as usize);
+            d += SaSint::from(p1 < 0);
+            p1 &= SAINT_MAX;
+            let p1u = p1 as usize;
+            let v1 = buckets_index4(
+                *t_ptr.add(p1u - 1) as usize,
+                usize::from(*t_ptr.add(p1u - 2) > *t_ptr.add(p1u - 1)),
+            );
+            *buckets_ptr.add(v1) -= 1;
+            let slot1 = *buckets_ptr.add(v1) as usize;
+            *sa_ptr.add(slot1) =
+                (p1 - 1) | (((*buckets_ptr.add(2 + v1) != d) as SaSint) << (SAINT_BIT - 1));
+            *buckets_ptr.add(2 + v1) = d;
+        }
 
         i -= 2;
     }
 
-    j -= (2 * prefetch_distance + 1) as isize;
+    j -= 2 * prefetch_distance + 1;
     while i >= j {
-        let mut p = sa[i as usize];
-        d += SaSint::from(p < 0);
-        p &= SAINT_MAX;
+        unsafe {
+            let mut p = *sa_ptr.add(i as usize);
+            d += SaSint::from(p < 0);
+            p &= SAINT_MAX;
+            let pu = p as usize;
+            let v = buckets_index4(
+                *t_ptr.add(pu - 1) as usize,
+                usize::from(*t_ptr.add(pu - 2) > *t_ptr.add(pu - 1)),
+            );
 
-        let p_usize = usize::try_from(p).expect("suffix index must be non-negative");
-        let v = buckets_index4(
-            usize::try_from(t[p_usize - 1]).expect("bucket symbol must be non-negative"),
-            usize::from(t[p_usize - 2] > t[p_usize - 1]),
-        );
-
-        buckets[v] -= 1;
-        let slot = usize::try_from(buckets[v]).expect("bucket slot must be non-negative");
-        sa[slot] = (p - 1) | (((buckets[2 + v] != d) as SaSint) << (SAINT_BIT - 1));
-        buckets[2 + v] = d;
+            *buckets_ptr.add(v) -= 1;
+            let slot = *buckets_ptr.add(v) as usize;
+            *sa_ptr.add(slot) =
+                (p - 1) | (((*buckets_ptr.add(2 + v) != d) as SaSint) << (SAINT_BIT - 1));
+            *buckets_ptr.add(2 + v) = d;
+        }
         i -= 1;
     }
 
@@ -3420,86 +3568,81 @@ pub fn partial_sorting_scan_right_to_left_32s_4k(
     }
 
     let k_usize = usize::try_from(k).expect("k must be non-negative");
-    let (distinct_names, tail) = buckets.split_at_mut(2 * k_usize);
-    let induction_bucket = &mut tail[k_usize..2 * k_usize];
+    let prefetch_distance: FastSint = 64;
+    let t_ptr = t.as_ptr();
+    let sa_ptr = sa.as_mut_ptr();
+    let buckets_ptr = buckets.as_mut_ptr();
+    let distinct_names_ptr = buckets_ptr;
+    let induction_bucket_ptr = unsafe { buckets_ptr.add(3 * k_usize) };
 
-    let prefetch_distance = 64usize;
-    let mut i = (usize::try_from(omp_block_start).expect("omp_block_start must be non-negative")
-        + usize::try_from(omp_block_size).expect("omp_block_size must be non-negative")
-        - 1) as isize;
-    let mut j = (usize::try_from(omp_block_start).expect("omp_block_start must be non-negative")
-        + 2 * prefetch_distance
-        + 1) as isize;
+    let mut i = omp_block_start + omp_block_size - 1;
+    let mut j = omp_block_start + 2 * prefetch_distance + 1;
 
     while i >= j {
-        let mut p0 = sa[i as usize];
-        if p0 > 0 {
-            sa[i as usize] = 0;
-            d += p0 >> (SUFFIX_GROUP_BIT - 1);
-            p0 &= !SUFFIX_GROUP_MARKER;
+        unsafe {
+            let i0 = i as usize;
+            let mut p0 = *sa_ptr.add(i0);
+            if p0 > 0 {
+                *sa_ptr.add(i0) = 0;
+                d += p0 >> (SUFFIX_GROUP_BIT - 1);
+                p0 &= !SUFFIX_GROUP_MARKER;
 
-            let p0_usize = usize::try_from(p0).expect("suffix index must be non-negative");
-            let v0 = buckets_index2(
-                usize::try_from(t[p0_usize - 1]).expect("bucket symbol must be non-negative"),
-                usize::from(t[p0_usize - 2] > t[p0_usize - 1]),
-            );
+                let p0u = p0 as usize;
+                let c0 = *t_ptr.add(p0u - 1);
+                let f0 = usize::from(*t_ptr.add(p0u - 2) > c0);
+                let v0 = buckets_index2(c0 as usize, f0);
+                *induction_bucket_ptr.add(c0 as usize) -= 1;
+                let slot0 = *induction_bucket_ptr.add(c0 as usize) as usize;
+                *sa_ptr.add(slot0) = (p0 - 1)
+                    | ((f0 as SaSint) << (SAINT_BIT - 1))
+                    | (((*distinct_names_ptr.add(v0) != d) as SaSint) << (SUFFIX_GROUP_BIT - 1));
+                *distinct_names_ptr.add(v0) = d;
+            }
 
-            let bucket_index0 = usize::try_from(t[p0_usize - 1]).expect("bucket symbol must be non-negative");
-            induction_bucket[bucket_index0] -= 1;
-            let slot0 =
-                usize::try_from(induction_bucket[bucket_index0]).expect("bucket slot must be non-negative");
-            sa[slot0] = (p0 - 1)
-                | ((usize::from(t[p0_usize - 2] > t[p0_usize - 1]) as SaSint) << (SAINT_BIT - 1))
-                | (((distinct_names[v0] != d) as SaSint) << (SUFFIX_GROUP_BIT - 1));
-            distinct_names[v0] = d;
-        }
+            let i1 = (i - 1) as usize;
+            let mut p1 = *sa_ptr.add(i1);
+            if p1 > 0 {
+                *sa_ptr.add(i1) = 0;
+                d += p1 >> (SUFFIX_GROUP_BIT - 1);
+                p1 &= !SUFFIX_GROUP_MARKER;
 
-        let mut p1 = sa[(i - 1) as usize];
-        if p1 > 0 {
-            sa[(i - 1) as usize] = 0;
-            d += p1 >> (SUFFIX_GROUP_BIT - 1);
-            p1 &= !SUFFIX_GROUP_MARKER;
-
-            let p1_usize = usize::try_from(p1).expect("suffix index must be non-negative");
-            let v1 = buckets_index2(
-                usize::try_from(t[p1_usize - 1]).expect("bucket symbol must be non-negative"),
-                usize::from(t[p1_usize - 2] > t[p1_usize - 1]),
-            );
-
-            let bucket_index1 = usize::try_from(t[p1_usize - 1]).expect("bucket symbol must be non-negative");
-            induction_bucket[bucket_index1] -= 1;
-            let slot1 =
-                usize::try_from(induction_bucket[bucket_index1]).expect("bucket slot must be non-negative");
-            sa[slot1] = (p1 - 1)
-                | ((usize::from(t[p1_usize - 2] > t[p1_usize - 1]) as SaSint) << (SAINT_BIT - 1))
-                | (((distinct_names[v1] != d) as SaSint) << (SUFFIX_GROUP_BIT - 1));
-            distinct_names[v1] = d;
+                let p1u = p1 as usize;
+                let c1 = *t_ptr.add(p1u - 1);
+                let f1 = usize::from(*t_ptr.add(p1u - 2) > c1);
+                let v1 = buckets_index2(c1 as usize, f1);
+                *induction_bucket_ptr.add(c1 as usize) -= 1;
+                let slot1 = *induction_bucket_ptr.add(c1 as usize) as usize;
+                *sa_ptr.add(slot1) = (p1 - 1)
+                    | ((f1 as SaSint) << (SAINT_BIT - 1))
+                    | (((*distinct_names_ptr.add(v1) != d) as SaSint) << (SUFFIX_GROUP_BIT - 1));
+                *distinct_names_ptr.add(v1) = d;
+            }
         }
 
         i -= 2;
     }
 
-    j -= (2 * prefetch_distance + 1) as isize;
+    j -= 2 * prefetch_distance + 1;
     while i >= j {
-        let mut p = sa[i as usize];
-        if p > 0 {
-            sa[i as usize] = 0;
-            d += p >> (SUFFIX_GROUP_BIT - 1);
-            p &= !SUFFIX_GROUP_MARKER;
+        unsafe {
+            let iu = i as usize;
+            let mut p = *sa_ptr.add(iu);
+            if p > 0 {
+                *sa_ptr.add(iu) = 0;
+                d += p >> (SUFFIX_GROUP_BIT - 1);
+                p &= !SUFFIX_GROUP_MARKER;
 
-            let p_usize = usize::try_from(p).expect("suffix index must be non-negative");
-            let v = buckets_index2(
-                usize::try_from(t[p_usize - 1]).expect("bucket symbol must be non-negative"),
-                usize::from(t[p_usize - 2] > t[p_usize - 1]),
-            );
-
-            let bucket_index = usize::try_from(t[p_usize - 1]).expect("bucket symbol must be non-negative");
-            induction_bucket[bucket_index] -= 1;
-            let slot = usize::try_from(induction_bucket[bucket_index]).expect("bucket slot must be non-negative");
-            sa[slot] = (p - 1)
-                | ((usize::from(t[p_usize - 2] > t[p_usize - 1]) as SaSint) << (SAINT_BIT - 1))
-                | (((distinct_names[v] != d) as SaSint) << (SUFFIX_GROUP_BIT - 1));
-            distinct_names[v] = d;
+                let pu = p as usize;
+                let c = *t_ptr.add(pu - 1);
+                let f = usize::from(*t_ptr.add(pu - 2) > c);
+                let v = buckets_index2(c as usize, f);
+                *induction_bucket_ptr.add(c as usize) -= 1;
+                let slot = *induction_bucket_ptr.add(c as usize) as usize;
+                *sa_ptr.add(slot) = (p - 1)
+                    | ((f as SaSint) << (SAINT_BIT - 1))
+                    | (((*distinct_names_ptr.add(v) != d) as SaSint) << (SUFFIX_GROUP_BIT - 1));
+                *distinct_names_ptr.add(v) = d;
+            }
         }
         i -= 1;
     }
@@ -3561,7 +3704,6 @@ pub fn partial_sorting_scan_right_to_left_32s_1k(
             sa[slot] =
                 (p - 1) | ((usize::from(t[p_usize - 2] > t[p_usize - 1]) as SaSint) << (SAINT_BIT - 1));
         }
-
         if i == 0 {
             break;
         }
@@ -3640,21 +3782,45 @@ pub fn partial_sorting_scan_right_to_left_32s_1k_block_gather(
     if omp_block_size <= 0 {
         return;
     }
+    let prefetch_distance = 64usize;
+    let start = omp_block_start as usize;
+    let mut i = start;
+    let mut j = start + omp_block_size as usize - prefetch_distance - 1;
 
-    let start = usize::try_from(omp_block_start).expect("omp_block_start must be non-negative");
-    let size = usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
-    for offset in 0..size {
-        let i = start + offset;
+    while i < j {
+        let mut symbol0 = SAINT_MIN;
+        let p0 = sa[i];
+        if p0 > 0 {
+            sa[i] = 0;
+            cache[i].index = (p0 - 1) | ((usize::from(t[p0 as usize - 2] > t[p0 as usize - 1]) as SaSint) << (SAINT_BIT - 1));
+            symbol0 = t[p0 as usize - 1];
+        }
+        cache[i].symbol = symbol0;
+
+        let i1 = i + 1;
+        let mut symbol1 = SAINT_MIN;
+        let p1 = sa[i1];
+        if p1 > 0 {
+            sa[i1] = 0;
+            cache[i1].index = (p1 - 1) | ((usize::from(t[p1 as usize - 2] > t[p1 as usize - 1]) as SaSint) << (SAINT_BIT - 1));
+            symbol1 = t[p1 as usize - 1];
+        }
+        cache[i1].symbol = symbol1;
+
+        i += 2;
+    }
+
+    j += prefetch_distance + 1;
+    while i < j {
         let mut symbol = SAINT_MIN;
         let p = sa[i];
         if p > 0 {
             sa[i] = 0;
-            let p_usize = usize::try_from(p).expect("suffix index must be non-negative");
-            cache[offset].index =
-                (p - 1) | ((usize::from(t[p_usize - 2] > t[p_usize - 1]) as SaSint) << (SAINT_BIT - 1));
-            symbol = t[p_usize - 1];
+            cache[i].index = (p - 1) | ((usize::from(t[p as usize - 2] > t[p as usize - 1]) as SaSint) << (SAINT_BIT - 1));
+            symbol = t[p as usize - 1];
         }
-        cache[offset].symbol = symbol;
+        cache[i].symbol = symbol;
+        i += 1;
     }
 }
 
@@ -3766,31 +3932,72 @@ pub fn partial_sorting_scan_right_to_left_32s_1k_block_sort(
     if omp_block_size <= 0 {
         return;
     }
+    let prefetch_distance = 64usize;
+    let start = omp_block_start as usize;
+    let mut i = start + omp_block_size as usize - 1;
+    let mut j = start + prefetch_distance + 1;
 
-    let size = usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
-    let mut i = size;
-    while i > 0 {
-        i -= 1;
-
-        let v = cache[i].symbol;
-        if v >= 0 {
-            let bucket_index = usize::try_from(v).expect("bucket symbol must be non-negative");
-            induction_bucket[bucket_index] -= 1;
-            let target = induction_bucket[bucket_index];
-            cache[i].symbol = target;
-            if target >= omp_block_start as SaSint {
-                let ni =
-                    usize::try_from(target - omp_block_start as SaSint).expect("cache slot must be non-negative");
+    while i >= j {
+        let v0 = cache[i].symbol;
+        if v0 >= 0 {
+            let bucket_index0 = v0 as usize;
+            induction_bucket[bucket_index0] -= 1;
+            cache[i].symbol = induction_bucket[bucket_index0];
+            if cache[i].symbol >= omp_block_start as SaSint {
+                let ni = cache[i].symbol as usize;
                 let np = cache[i].index;
                 if np > 0 {
                     cache[i].index = 0;
-                    let np_usize = usize::try_from(np).expect("suffix index must be non-negative");
                     cache[ni].index = (np - 1)
-                        | ((usize::from(t[np_usize - 2] > t[np_usize - 1]) as SaSint) << (SAINT_BIT - 1));
-                    cache[ni].symbol = t[np_usize - 1];
+                        | ((usize::from(t[np as usize - 2] > t[np as usize - 1]) as SaSint) << (SAINT_BIT - 1));
+                    cache[ni].symbol = t[np as usize - 1];
                 }
             }
         }
+
+        let i1 = i - 1;
+        let v1 = cache[i1].symbol;
+        if v1 >= 0 {
+            let bucket_index1 = v1 as usize;
+            induction_bucket[bucket_index1] -= 1;
+            cache[i1].symbol = induction_bucket[bucket_index1];
+            if cache[i1].symbol >= omp_block_start as SaSint {
+                let ni = cache[i1].symbol as usize;
+                let np = cache[i1].index;
+                if np > 0 {
+                    cache[i1].index = 0;
+                    cache[ni].index = (np - 1)
+                        | ((usize::from(t[np as usize - 2] > t[np as usize - 1]) as SaSint) << (SAINT_BIT - 1));
+                    cache[ni].symbol = t[np as usize - 1];
+                }
+            }
+        }
+
+        i -= 2;
+    }
+
+    j -= prefetch_distance + 1;
+    while i >= j {
+        let v = cache[i].symbol;
+        if v >= 0 {
+            let bucket_index = v as usize;
+            induction_bucket[bucket_index] -= 1;
+            cache[i].symbol = induction_bucket[bucket_index];
+            if cache[i].symbol >= omp_block_start as SaSint {
+                let ni = cache[i].symbol as usize;
+                let np = cache[i].index;
+                if np > 0 {
+                    cache[i].index = 0;
+                    cache[ni].index = (np - 1)
+                        | ((usize::from(t[np as usize - 2] > t[np as usize - 1]) as SaSint) << (SAINT_BIT - 1));
+                    cache[ni].symbol = t[np as usize - 1];
+                }
+            }
+        }
+        if i == 0 {
+            break;
+        }
+        i -= 1;
     }
 }
 
@@ -3937,6 +4144,7 @@ pub fn partial_sorting_scan_right_to_left_32s_1k_block_omp(
 
     let threads_usize = usize::try_from(threads).expect("threads must be non-negative").max(1);
     let block_size_usize = usize::try_from(block_size).expect("block_size must be non-negative");
+    let block_start_usize = usize::try_from(block_start).expect("block_start must be non-negative");
     let omp_num_threads = threads_usize.min(block_size_usize.max(1));
     let omp_block_stride = (block_size_usize / omp_num_threads) & !15usize;
 
@@ -3946,34 +4154,21 @@ pub fn partial_sorting_scan_right_to_left_32s_1k_block_omp(
         } else {
             block_size_usize - omp_thread_num * omp_block_stride
         };
-        let omp_block_start = usize::try_from(block_start).expect("block_start must be non-negative")
-            + omp_thread_num * omp_block_stride;
+        let omp_block_start = block_start_usize + omp_thread_num * omp_block_stride;
         if omp_block_size == 0 {
-            omp_block_size = block_size_usize - (omp_block_start - usize::try_from(block_start).expect("block_start"));
+            omp_block_size = block_size_usize - (omp_block_start - block_start_usize);
         }
         partial_sorting_scan_right_to_left_32s_1k_block_gather(
             t,
             sa,
-            &mut cache[omp_thread_num * omp_block_stride..omp_thread_num * omp_block_stride + omp_block_size],
+            cache,
             omp_block_start as FastSint,
             omp_block_size as FastSint,
         );
     }
 
-    partial_sorting_scan_right_to_left_32s_1k_block_sort(t, buckets, &mut cache[..block_size_usize], block_start, block_size);
-
-    let mut write = 0usize;
-    for read in 0..block_size_usize {
-        let entry = cache[read];
-        if entry.symbol >= 0 {
-            cache[write] = entry;
-            write += 1;
-        }
-    }
-    for entry in &cache[..write] {
-        let slot = usize::try_from(entry.symbol).expect("cache symbol must be non-negative");
-        sa[slot] = entry.index;
-    }
+    partial_sorting_scan_right_to_left_32s_1k_block_sort(t, buckets, cache, block_start, block_size);
+    compact_and_place_cached_suffixes(sa, cache, block_start, block_size);
 }
 
 pub fn partial_sorting_scan_left_to_right_32s_6k_block_gather(
@@ -4047,22 +4242,51 @@ pub fn partial_sorting_scan_left_to_right_32s_1k_block_gather(
     if omp_block_size <= 0 {
         return;
     }
+    let prefetch_distance = 64usize;
+    let start = omp_block_start as usize;
+    let mut i = start;
+    let mut j = start + omp_block_size as usize - prefetch_distance - 1;
 
-    let start = usize::try_from(omp_block_start).expect("omp_block_start must be non-negative");
-    let size = usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
-    for offset in 0..size {
-        let i = start + offset;
+    while i < j {
+        let mut symbol0 = SAINT_MIN;
+        let mut p0 = sa[i];
+        if p0 > 0 {
+            cache[i].index = (p0 - 1)
+                | ((usize::from(t[p0 as usize - 2] < t[p0 as usize - 1]) as SaSint) << (SAINT_BIT - 1));
+            symbol0 = t[p0 as usize - 1];
+            p0 = 0;
+        }
+        cache[i].symbol = symbol0;
+        sa[i] = p0 & SAINT_MAX;
+
+        let i1 = i + 1;
+        let mut symbol1 = SAINT_MIN;
+        let mut p1 = sa[i1];
+        if p1 > 0 {
+            cache[i1].index = (p1 - 1)
+                | ((usize::from(t[p1 as usize - 2] < t[p1 as usize - 1]) as SaSint) << (SAINT_BIT - 1));
+            symbol1 = t[p1 as usize - 1];
+            p1 = 0;
+        }
+        cache[i1].symbol = symbol1;
+        sa[i1] = p1 & SAINT_MAX;
+
+        i += 2;
+    }
+
+    j += prefetch_distance + 1;
+    while i < j {
         let mut symbol = SAINT_MIN;
         let mut p = sa[i];
         if p > 0 {
-            let p_usize = usize::try_from(p).expect("suffix index must be non-negative");
-            cache[offset].index = (p - 1)
-                | ((usize::from(t[p_usize - 2] < t[p_usize - 1]) as SaSint) << (SAINT_BIT - 1));
-            symbol = t[p_usize - 1];
+            cache[i].index = (p - 1)
+                | ((usize::from(t[p as usize - 2] < t[p as usize - 1]) as SaSint) << (SAINT_BIT - 1));
+            symbol = t[p as usize - 1];
             p = 0;
         }
-        cache[offset].symbol = symbol;
+        cache[i].symbol = symbol;
         sa[i] = p & SAINT_MAX;
+        i += 1;
     }
 }
 
@@ -4225,31 +4449,73 @@ pub fn partial_sorting_scan_left_to_right_32s_1k_block_sort(
     if omp_block_size <= 0 {
         return;
     }
+    let prefetch_distance = 64usize;
+    let start = omp_block_start as usize;
+    let block_end = start + omp_block_size as usize;
+    let mut i = start;
+    let mut j = block_end - prefetch_distance - 1;
 
-    let start = usize::try_from(omp_block_start).expect("omp_block_start must be non-negative");
-    let size = usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
-    let block_end = start + size;
-
-    for offset in 0..size {
-        let v = cache[offset].symbol;
-        if v >= 0 {
-            let v_usize = usize::try_from(v).expect("cache symbol must be non-negative");
-            let target = induction_bucket[v_usize];
-            induction_bucket[v_usize] += 1;
-            cache[offset].symbol = target;
-            if target < block_end as SaSint {
-                let ni = usize::try_from(target - omp_block_start as SaSint).expect("cache slot must be non-negative");
-                let mut np = cache[offset].index;
+    while i < j {
+        let v0 = cache[i].symbol;
+        if v0 >= 0 {
+            let v0_usize = v0 as usize;
+            cache[i].symbol = induction_bucket[v0_usize];
+            induction_bucket[v0_usize] += 1;
+            if cache[i].symbol < block_end as SaSint {
+                let ni = cache[i].symbol as usize;
+                let mut np = cache[i].index;
                 if np > 0 {
-                    let np_usize = usize::try_from(np).expect("suffix index must be non-negative");
                     cache[ni].index = (np - 1)
-                        | ((usize::from(t[np_usize - 2] < t[np_usize - 1]) as SaSint) << (SAINT_BIT - 1));
-                    cache[ni].symbol = t[np_usize - 1];
+                        | ((usize::from(t[np as usize - 2] < t[np as usize - 1]) as SaSint) << (SAINT_BIT - 1));
+                    cache[ni].symbol = t[np as usize - 1];
                     np = 0;
                 }
-                cache[offset].index = np & SAINT_MAX;
+                cache[i].index = np & SAINT_MAX;
             }
         }
+
+        let i1 = i + 1;
+        let v1 = cache[i1].symbol;
+        if v1 >= 0 {
+            let v1_usize = v1 as usize;
+            cache[i1].symbol = induction_bucket[v1_usize];
+            induction_bucket[v1_usize] += 1;
+            if cache[i1].symbol < block_end as SaSint {
+                let ni = cache[i1].symbol as usize;
+                let mut np = cache[i1].index;
+                if np > 0 {
+                    cache[ni].index = (np - 1)
+                        | ((usize::from(t[np as usize - 2] < t[np as usize - 1]) as SaSint) << (SAINT_BIT - 1));
+                    cache[ni].symbol = t[np as usize - 1];
+                    np = 0;
+                }
+                cache[i1].index = np & SAINT_MAX;
+            }
+        }
+
+        i += 2;
+    }
+
+    j += prefetch_distance + 1;
+    while i < j {
+        let v = cache[i].symbol;
+        if v >= 0 {
+            let v_usize = v as usize;
+            cache[i].symbol = induction_bucket[v_usize];
+            induction_bucket[v_usize] += 1;
+            if cache[i].symbol < block_end as SaSint {
+                let ni = cache[i].symbol as usize;
+                let mut np = cache[i].index;
+                if np > 0 {
+                    cache[ni].index = (np - 1)
+                        | ((usize::from(t[np as usize - 2] < t[np as usize - 1]) as SaSint) << (SAINT_BIT - 1));
+                    cache[ni].symbol = t[np as usize - 1];
+                    np = 0;
+                }
+                cache[i].index = np & SAINT_MAX;
+            }
+        }
+        i += 1;
     }
 }
 
@@ -4392,14 +4658,14 @@ pub fn partial_sorting_scan_left_to_right_32s_1k_block_omp(
         partial_sorting_scan_left_to_right_32s_1k_block_gather(
             t,
             sa,
-            &mut cache[omp_thread_num * omp_block_stride..omp_thread_num * omp_block_stride + omp_block_size],
+            cache,
             omp_block_start as FastSint,
             omp_block_size as FastSint,
         );
     }
 
-    partial_sorting_scan_left_to_right_32s_1k_block_sort(t, buckets, &mut cache[..block_size_usize], block_start, block_size);
-    compact_and_place_cached_suffixes(sa, &mut cache[..block_size_usize], 0, block_size);
+    partial_sorting_scan_left_to_right_32s_1k_block_sort(t, buckets, cache, block_start, block_size);
+    compact_and_place_cached_suffixes(sa, cache, block_start, block_size);
 }
 
 pub fn partial_sorting_scan_right_to_left_32s_6k_omp(
@@ -4413,15 +4679,17 @@ pub fn partial_sorting_scan_right_to_left_32s_6k_omp(
     threads: SaSint,
     thread_state: &mut [ThreadState],
 ) -> SaSint {
-    let _ = thread_state;
     let scan_start = left_suffixes_count as FastSint + 1;
     let scan_end = n as FastSint - first_lms_suffix as FastSint;
     if threads == 1 || (scan_end - scan_start) < 65_536 {
         return partial_sorting_scan_right_to_left_32s_6k(t, sa, buckets, d, scan_start, scan_end - scan_start);
     }
+    if thread_state.is_empty() {
+        return partial_sorting_scan_right_to_left_32s_6k(t, sa, buckets, d, scan_start, scan_end - scan_start);
+    }
 
     let threads_usize = usize::try_from(threads).expect("threads must be non-negative").max(1);
-    let mut cache = vec![ThreadCache::default(); threads_usize * LIBSAIS_PER_THREAD_CACHE_SIZE];
+    let cache = &mut thread_state[0].cache;
     let mut block_start = scan_end - 1;
     let block_span = FastSint::try_from(threads_usize * LIBSAIS_PER_THREAD_CACHE_SIZE).expect("block span must fit FastSint");
     while block_start >= scan_start {
@@ -4435,7 +4703,7 @@ pub fn partial_sorting_scan_right_to_left_32s_6k_omp(
             sa,
             buckets,
             d,
-            &mut cache,
+            cache,
             block_end + 1,
             block_start - block_end,
             threads,
@@ -4463,10 +4731,11 @@ pub fn partial_sorting_scan_right_to_left_32s_4k_omp(
     if threads == 1 || n < 65_536 {
         return partial_sorting_scan_right_to_left_32s_4k(t, sa, k, buckets, d, 0, n as FastSint);
     }
-
-    let _ = thread_state;
+    if thread_state.is_empty() {
+        return partial_sorting_scan_right_to_left_32s_4k(t, sa, k, buckets, d, 0, n as FastSint);
+    }
     let threads_usize = usize::try_from(threads).expect("threads must be non-negative").max(1);
-    let mut cache = vec![ThreadCache::default(); threads_usize * LIBSAIS_PER_THREAD_CACHE_SIZE];
+    let cache = &mut thread_state[0].cache;
     let mut block_start = FastSint::try_from(n).expect("n must fit FastSint") - 1;
     let block_span = FastSint::try_from(threads_usize * LIBSAIS_PER_THREAD_CACHE_SIZE).expect("block span must fit FastSint");
     while block_start >= 0 {
@@ -4481,7 +4750,7 @@ pub fn partial_sorting_scan_right_to_left_32s_4k_omp(
             k,
             buckets,
             d,
-            &mut cache,
+            cache,
             block_end + 1,
             block_start - block_end,
             threads,
@@ -4504,14 +4773,17 @@ pub fn partial_sorting_scan_right_to_left_32s_1k_omp(
     threads: SaSint,
     thread_state: &mut [ThreadState],
 ) {
-    let _ = thread_state;
     if threads == 1 || n < 65_536 {
+        partial_sorting_scan_right_to_left_32s_1k(t, sa, buckets, 0, n as FastSint);
+        return;
+    }
+    if thread_state.is_empty() {
         partial_sorting_scan_right_to_left_32s_1k(t, sa, buckets, 0, n as FastSint);
         return;
     }
 
     let threads_usize = usize::try_from(threads).expect("threads must be non-negative").max(1);
-    let mut cache = vec![ThreadCache::default(); threads_usize * LIBSAIS_PER_THREAD_CACHE_SIZE];
+    let cache = &mut thread_state[0].cache;
     let mut block_start = FastSint::try_from(n).expect("n must fit FastSint") - 1;
     let block_span = FastSint::try_from(threads_usize * LIBSAIS_PER_THREAD_CACHE_SIZE).expect("block span must fit FastSint");
     while block_start >= 0 {
@@ -4524,7 +4796,7 @@ pub fn partial_sorting_scan_right_to_left_32s_1k_omp(
             t,
             sa,
             buckets,
-            &mut cache,
+            cache,
             block_end + 1,
             block_start - block_end,
             threads,
@@ -4769,23 +5041,24 @@ pub fn renumber_lms_suffixes_8u(
     let mut j = omp_block_start + omp_block_size - prefetch_distance - 3;
 
     while i < j {
-        let p0 = sa_head[usize::try_from(i).expect("index must be non-negative")];
-        let d0 = usize::try_from((p0 & SAINT_MAX) >> 1).expect("destination must be non-negative");
+        let i0 = i as usize;
+        let p0 = sa_head[i0];
+        let d0 = ((p0 & SAINT_MAX) >> 1) as usize;
         sam[d0] = name | SAINT_MIN;
         name += SaSint::from(p0 < 0);
 
-        let p1 = sa_head[usize::try_from(i + 1).expect("index must be non-negative")];
-        let d1 = usize::try_from((p1 & SAINT_MAX) >> 1).expect("destination must be non-negative");
+        let p1 = sa_head[i0 + 1];
+        let d1 = ((p1 & SAINT_MAX) >> 1) as usize;
         sam[d1] = name | SAINT_MIN;
         name += SaSint::from(p1 < 0);
 
-        let p2 = sa_head[usize::try_from(i + 2).expect("index must be non-negative")];
-        let d2 = usize::try_from((p2 & SAINT_MAX) >> 1).expect("destination must be non-negative");
+        let p2 = sa_head[i0 + 2];
+        let d2 = ((p2 & SAINT_MAX) >> 1) as usize;
         sam[d2] = name | SAINT_MIN;
         name += SaSint::from(p2 < 0);
 
-        let p3 = sa_head[usize::try_from(i + 3).expect("index must be non-negative")];
-        let d3 = usize::try_from((p3 & SAINT_MAX) >> 1).expect("destination must be non-negative");
+        let p3 = sa_head[i0 + 3];
+        let d3 = ((p3 & SAINT_MAX) >> 1) as usize;
         sam[d3] = name | SAINT_MIN;
         name += SaSint::from(p3 < 0);
 
@@ -4794,8 +5067,8 @@ pub fn renumber_lms_suffixes_8u(
 
     j += prefetch_distance + 3;
     while i < j {
-        let p = sa_head[usize::try_from(i).expect("index must be non-negative")];
-        let d = usize::try_from((p & SAINT_MAX) >> 1).expect("destination must be non-negative");
+        let p = sa_head[i as usize];
+        let d = ((p & SAINT_MAX) >> 1) as usize;
         sam[d] = name | SAINT_MIN;
         name += SaSint::from(p < 0);
         i += 1;
@@ -4820,20 +5093,21 @@ pub fn gather_marked_lms_suffixes(
     let mut j = m as FastSint + omp_block_start + 3;
 
     while i >= j {
-        let s0 = sa[usize::try_from(i).expect("index must be non-negative")];
-        sa[usize::try_from(l).expect("output position must be non-negative")] = s0 & SAINT_MAX;
+        let i0 = i as usize;
+        let s0 = sa[i0];
+        sa[l as usize] = s0 & SAINT_MAX;
         l -= FastSint::from(s0 < 0);
 
-        let s1 = sa[usize::try_from(i - 1).expect("index must be non-negative")];
-        sa[usize::try_from(l).expect("output position must be non-negative")] = s1 & SAINT_MAX;
+        let s1 = sa[i0 - 1];
+        sa[l as usize] = s1 & SAINT_MAX;
         l -= FastSint::from(s1 < 0);
 
-        let s2 = sa[usize::try_from(i - 2).expect("index must be non-negative")];
-        sa[usize::try_from(l).expect("output position must be non-negative")] = s2 & SAINT_MAX;
+        let s2 = sa[i0 - 2];
+        sa[l as usize] = s2 & SAINT_MAX;
         l -= FastSint::from(s2 < 0);
 
-        let s3 = sa[usize::try_from(i - 3).expect("index must be non-negative")];
-        sa[usize::try_from(l).expect("output position must be non-negative")] = s3 & SAINT_MAX;
+        let s3 = sa[i0 - 3];
+        sa[l as usize] = s3 & SAINT_MAX;
         l -= FastSint::from(s3 < 0);
 
         i -= 4;
@@ -4841,8 +5115,8 @@ pub fn gather_marked_lms_suffixes(
 
     j -= 3;
     while i >= j {
-        let s = sa[usize::try_from(i).expect("index must be non-negative")];
-        sa[usize::try_from(l).expect("output position must be non-negative")] = s & SAINT_MAX;
+        let s = sa[i as usize];
+        sa[l as usize] = s & SAINT_MAX;
         l -= FastSint::from(s < 0);
         i -= 1;
     }
@@ -5299,21 +5573,55 @@ pub fn renumber_and_mark_distinct_lms_suffixes_32s_1k_omp(
         .expect("n must be at least 2*m");
     sa[m_usize..m_usize + zero_len].fill(0);
 
-    let scan_start = n_usize - m_usize;
-    for i in scan_start..n_usize - 1 {
-        let dst = m_usize + usize::try_from((sa[i] as SaUint) >> 1).expect("destination must be non-negative");
-        sa[dst] = sa[i + 1] - sa[i] + 1 + SAINT_MIN;
+    {
+        let prefetch_distance: FastSint = 64;
+        let sa_ptr = sa.as_mut_ptr();
+        let sam_ptr = unsafe { sa_ptr.add(m_usize) };
+        let mut i = n as FastSint - m as FastSint;
+        let mut j = n as FastSint - 1 - prefetch_distance - 3;
+
+        while i < j {
+            unsafe {
+                let s0 = (*sa_ptr.add(i as usize) as SaUint >> 1) as usize;
+                let s1 = (*sa_ptr.add((i + 1) as usize) as SaUint >> 1) as usize;
+                let s2 = (*sa_ptr.add((i + 2) as usize) as SaUint >> 1) as usize;
+                let s3 = (*sa_ptr.add((i + 3) as usize) as SaUint >> 1) as usize;
+
+                *sam_ptr.add(s0) =
+                    *sa_ptr.add((i + 1) as usize) - *sa_ptr.add(i as usize) + 1 + SAINT_MIN;
+                *sam_ptr.add(s1) =
+                    *sa_ptr.add((i + 2) as usize) - *sa_ptr.add((i + 1) as usize) + 1 + SAINT_MIN;
+                *sam_ptr.add(s2) =
+                    *sa_ptr.add((i + 3) as usize) - *sa_ptr.add((i + 2) as usize) + 1 + SAINT_MIN;
+                *sam_ptr.add(s3) =
+                    *sa_ptr.add((i + 4) as usize) - *sa_ptr.add((i + 3) as usize) + 1 + SAINT_MIN;
+            }
+            i += 4;
+        }
+
+        j += prefetch_distance + 3;
+        while i < j {
+            unsafe {
+                let s = (*sa_ptr.add(i as usize) as SaUint >> 1) as usize;
+                *sam_ptr.add(s) =
+                    *sa_ptr.add((i + 1) as usize) - *sa_ptr.add(i as usize) + 1 + SAINT_MIN;
+            }
+            i += 1;
+        }
+
+        unsafe {
+            let tail = (*sa_ptr.add(n_usize - 1) as SaUint >> 1) as usize;
+            *sam_ptr.add(tail) = 1 + SAINT_MIN;
+        }
     }
-    let tail_dst = m_usize + usize::try_from((sa[n_usize - 1] as SaUint) >> 1).expect("destination must be non-negative");
-    sa[tail_dst] = 1 + SAINT_MIN;
 
     clamp_lms_suffixes_length_32s_omp(sa, n, m, threads);
 
-    let prefetch_distance = 64usize;
     let mut name = 1;
     if m_usize > 0 {
         let (sa_head, sam) = sa.split_at_mut(m_usize);
         let mut i = 1usize;
+        let prefetch_distance = 64usize;
         let mut j = m_usize.saturating_sub(prefetch_distance + 1);
         let mut p = usize::try_from(sa_head[0]).expect("suffix index must be non-negative");
         let mut plen = sam[p >> 1];
@@ -5324,9 +5632,8 @@ pub fn renumber_and_mark_distinct_lms_suffixes_32s_1k_omp(
             let qlen = sam[q >> 1];
             let mut qdiff = SAINT_MIN;
             if plen == qlen {
-                let qlen_usize = usize::try_from(qlen).expect("length must be non-negative");
                 let mut l = 0usize;
-                while l < qlen_usize {
+                while l < qlen as usize {
                     if t[p + l] != t[q + l] {
                         break;
                     }
@@ -5341,9 +5648,8 @@ pub fn renumber_and_mark_distinct_lms_suffixes_32s_1k_omp(
             plen = sam[p >> 1];
             pdiff = SAINT_MIN;
             if qlen == plen {
-                let plen_usize = usize::try_from(plen).expect("length must be non-negative");
                 let mut l = 0usize;
-                while l < plen_usize {
+                while l < plen as usize {
                     if t[q + l] != t[p + l] {
                         break;
                     }
@@ -5362,9 +5668,8 @@ pub fn renumber_and_mark_distinct_lms_suffixes_32s_1k_omp(
             let qlen = sam[q >> 1];
             let mut qdiff = SAINT_MIN;
             if plen == qlen {
-                let plen_usize = usize::try_from(plen).expect("length must be non-negative");
                 let mut l = 0usize;
-                while l < plen_usize {
+                while l < plen as usize {
                     if t[p + l] != t[q + l] {
                         break;
                     }
@@ -5403,20 +5708,56 @@ pub fn reconstruct_lms_suffixes(
         return;
     }
 
-    let n_usize = usize::try_from(n).expect("n must be non-negative");
-    let m_usize = usize::try_from(m).expect("m must be non-negative");
-    let start = usize::try_from(omp_block_start).expect("omp_block_start must be non-negative");
-    let size = usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
-    let base = n_usize - m_usize;
+    let prefetch_distance: FastSint = 64;
+    let base = (n - m) as usize;
+    let sa_ptr = sa.as_mut_ptr();
+    let mut i = omp_block_start;
+    let mut j = omp_block_start + omp_block_size - prefetch_distance - 3;
 
-    for i in start..start + size {
-        let idx = usize::try_from(sa[i]).expect("suffix index must be non-negative");
-        sa[i] = sa[base + idx];
+    while i < j {
+        unsafe {
+            let iu = i as usize;
+            let s0 = *sa_ptr.add(iu) as usize;
+            let s1 = *sa_ptr.add(iu + 1) as usize;
+            let s2 = *sa_ptr.add(iu + 2) as usize;
+            let s3 = *sa_ptr.add(iu + 3) as usize;
+            *sa_ptr.add(iu) = *sa_ptr.add(base + s0);
+            *sa_ptr.add(iu + 1) = *sa_ptr.add(base + s1);
+            *sa_ptr.add(iu + 2) = *sa_ptr.add(base + s2);
+            *sa_ptr.add(iu + 3) = *sa_ptr.add(base + s3);
+        }
+        i += 4;
+    }
+
+    j += prefetch_distance + 3;
+    while i < j {
+        unsafe {
+            let iu = i as usize;
+            let s = *sa_ptr.add(iu) as usize;
+            *sa_ptr.add(iu) = *sa_ptr.add(base + s);
+        }
+        i += 1;
     }
 }
 
-pub fn reconstruct_lms_suffixes_omp(sa: &mut [SaSint], n: SaSint, m: SaSint, _threads: SaSint) {
-    reconstruct_lms_suffixes(sa, n, m, 0, m as FastSint);
+pub fn reconstruct_lms_suffixes_omp(sa: &mut [SaSint], n: SaSint, m: SaSint, threads: SaSint) {
+    let m_usize = usize::try_from(m).expect("m must be non-negative");
+    let omp_num_threads = if threads > 1 && m >= 65_536 {
+        usize::try_from(threads).expect("threads must be non-negative").max(1)
+    } else {
+        1
+    };
+    let omp_block_stride = (m_usize / omp_num_threads) & !15usize;
+
+    for omp_thread_num in 0..omp_num_threads {
+        let omp_block_start = omp_thread_num * omp_block_stride;
+        let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
+            omp_block_stride
+        } else {
+            m_usize - omp_block_start
+        };
+        reconstruct_lms_suffixes(sa, n, m, omp_block_start as FastSint, omp_block_size as FastSint);
+    }
 }
 
 pub fn place_lms_suffixes_interval_8u(
@@ -5801,56 +6142,63 @@ pub fn final_sorting_scan_left_to_right_32s(
         return;
     }
 
-    let prefetch_distance = 64usize;
-    let start = usize::try_from(omp_block_start).expect("omp_block_start must be non-negative");
-    let size = usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
+    let prefetch_distance: FastSint = 64;
+    let sa_ptr = sa.as_mut_ptr();
+    let t_ptr = t.as_ptr();
+    let buckets_ptr = induction_bucket.as_mut_ptr();
 
-    let mut i = start;
-    let mut j = if size > 2 * prefetch_distance + 1 {
-        start + size - (2 * prefetch_distance + 1)
-    } else {
-        start
-    };
+    let mut i = omp_block_start;
+    let mut j = omp_block_start + omp_block_size - 2 * prefetch_distance - 1;
+
     while i < j {
-        let mut p0 = sa[i];
-        sa[i] = p0 ^ SAINT_MIN;
-        if p0 > 0 {
-            p0 -= 1;
-            let p0_usize = p0 as usize;
-            let bucket0 = t[p0_usize] as usize;
-            let slot0 = induction_bucket[bucket0] as usize;
-            sa[slot0] =
-                p0 | ((usize::from(t[p0_usize - usize::from(p0 > 0)] < t[p0_usize]) as SaSint) << (SAINT_BIT - 1));
-            induction_bucket[bucket0] += 1;
-        }
+        unsafe {
+            let i0 = i as usize;
+            let mut p0 = *sa_ptr.add(i0);
+            *sa_ptr.add(i0) = p0 ^ SAINT_MIN;
+            if p0 > 0 {
+                p0 -= 1;
+                let p0u = p0 as usize;
+                let bucket0 = *t_ptr.add(p0u) as usize;
+                let slot0 = *buckets_ptr.add(bucket0) as usize;
+                *sa_ptr.add(slot0) = p0
+                    | ((usize::from(*t_ptr.add(p0u - usize::from(p0 > 0)) < *t_ptr.add(p0u)) as SaSint)
+                        << (SAINT_BIT - 1));
+                *buckets_ptr.add(bucket0) += 1;
+            }
 
-        let mut p1 = sa[i + 1];
-        sa[i + 1] = p1 ^ SAINT_MIN;
-        if p1 > 0 {
-            p1 -= 1;
-            let p1_usize = p1 as usize;
-            let bucket1 = t[p1_usize] as usize;
-            let slot1 = induction_bucket[bucket1] as usize;
-            sa[slot1] =
-                p1 | ((usize::from(t[p1_usize - usize::from(p1 > 0)] < t[p1_usize]) as SaSint) << (SAINT_BIT - 1));
-            induction_bucket[bucket1] += 1;
+            let i1 = (i + 1) as usize;
+            let mut p1 = *sa_ptr.add(i1);
+            *sa_ptr.add(i1) = p1 ^ SAINT_MIN;
+            if p1 > 0 {
+                p1 -= 1;
+                let p1u = p1 as usize;
+                let bucket1 = *t_ptr.add(p1u) as usize;
+                let slot1 = *buckets_ptr.add(bucket1) as usize;
+                *sa_ptr.add(slot1) = p1
+                    | ((usize::from(*t_ptr.add(p1u - usize::from(p1 > 0)) < *t_ptr.add(p1u)) as SaSint)
+                        << (SAINT_BIT - 1));
+                *buckets_ptr.add(bucket1) += 1;
+            }
         }
-
         i += 2;
     }
 
-    j = start + size;
+    j += 2 * prefetch_distance + 1;
     while i < j {
-        let mut p = sa[i];
-        sa[i] = p ^ SAINT_MIN;
-        if p > 0 {
-            p -= 1;
-            let p_usize = p as usize;
-            let bucket = t[p_usize] as usize;
-            let slot = induction_bucket[bucket] as usize;
-            sa[slot] = p
-                | ((usize::from(t[p_usize - usize::from(p > 0)] < t[p_usize]) as SaSint) << (SAINT_BIT - 1));
-            induction_bucket[bucket] += 1;
+        unsafe {
+            let iu = i as usize;
+            let mut p = *sa_ptr.add(iu);
+            *sa_ptr.add(iu) = p ^ SAINT_MIN;
+            if p > 0 {
+                p -= 1;
+                let pu = p as usize;
+                let bucket = *t_ptr.add(pu) as usize;
+                let slot = *buckets_ptr.add(bucket) as usize;
+                *sa_ptr.add(slot) = p
+                    | ((usize::from(*t_ptr.add(pu - usize::from(p > 0)) < *t_ptr.add(pu)) as SaSint)
+                        << (SAINT_BIT - 1));
+                *buckets_ptr.add(bucket) += 1;
+            }
         }
         i += 1;
     }
@@ -5986,21 +6334,54 @@ pub fn final_sorting_scan_left_to_right_32s_block_gather(
     if omp_block_size <= 0 {
         return;
     }
+    let prefetch_distance = 64usize;
+    let start = omp_block_start as usize;
+    let mut i = start;
+    let mut j = start + omp_block_size as usize - prefetch_distance - 1;
 
-    let start = usize::try_from(omp_block_start).expect("omp_block_start must be non-negative");
-    let size = usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
-    for i in start..start + size {
+    while i < j {
+        let mut symbol0 = SAINT_MIN;
+        let mut p0 = sa[i];
+        sa[i] = p0 ^ SAINT_MIN;
+        if p0 > 0 {
+            p0 -= 1;
+            let p0_usize = p0 as usize;
+            cache[i].index =
+                p0 | ((usize::from(t[p0_usize - usize::from(p0 > 0)] < t[p0_usize]) as SaSint) << (SAINT_BIT - 1));
+            symbol0 = t[p0_usize];
+        }
+        cache[i].symbol = symbol0;
+
+        let i1 = i + 1;
+        let mut symbol1 = SAINT_MIN;
+        let mut p1 = sa[i1];
+        sa[i1] = p1 ^ SAINT_MIN;
+        if p1 > 0 {
+            p1 -= 1;
+            let p1_usize = p1 as usize;
+            cache[i1].index =
+                p1 | ((usize::from(t[p1_usize - usize::from(p1 > 0)] < t[p1_usize]) as SaSint) << (SAINT_BIT - 1));
+            symbol1 = t[p1_usize];
+        }
+        cache[i1].symbol = symbol1;
+
+        i += 2;
+    }
+
+    j += prefetch_distance + 1;
+    while i < j {
         let mut symbol = SAINT_MIN;
         let mut p = sa[i];
         sa[i] = p ^ SAINT_MIN;
         if p > 0 {
             p -= 1;
-            let p_usize = usize::try_from(p).expect("suffix index must be non-negative");
+            let p_usize = p as usize;
             cache[i].index =
                 p | ((usize::from(t[p_usize - usize::from(p > 0)] < t[p_usize]) as SaSint) << (SAINT_BIT - 1));
             symbol = t[p_usize];
         }
         cache[i].symbol = symbol;
+        i += 1;
     }
 }
 
@@ -6014,23 +6395,25 @@ pub fn final_sorting_scan_left_to_right_32s_block_sort(
     if omp_block_size <= 0 {
         return;
     }
+    let prefetch_distance = 64usize;
+    let start = omp_block_start as usize;
+    let block_end = start + omp_block_size as usize;
+    let mut i = start;
+    let mut j = block_end - prefetch_distance - 1;
 
-    let start = usize::try_from(omp_block_start).expect("omp_block_start must be non-negative");
-    let size = usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
-    let block_end = start + size;
-    for i in start..block_end {
-        let v = cache[i].symbol;
-        if v >= 0 {
-            let bucket_index = usize::try_from(v).expect("cache symbol must be non-negative");
-            cache[i].symbol = induction_bucket[bucket_index];
-            induction_bucket[bucket_index] += 1;
+    while i < j {
+        let v0 = cache[i].symbol;
+        if v0 >= 0 {
+            let bucket_index0 = v0 as usize;
+            cache[i].symbol = induction_bucket[bucket_index0];
+            induction_bucket[bucket_index0] += 1;
             if cache[i].symbol < block_end as SaSint {
-                let ni = usize::try_from(cache[i].symbol).expect("cache slot must be non-negative");
+                let ni = cache[i].symbol as usize;
                 let mut np = cache[i].index;
                 cache[i].index = np ^ SAINT_MIN;
                 if np > 0 {
                     np -= 1;
-                    let np_usize = usize::try_from(np).expect("suffix index must be non-negative");
+                    let np_usize = np as usize;
                     cache[ni].index = np
                         | ((usize::from(t[np_usize - usize::from(np > 0)] < t[np_usize]) as SaSint)
                             << (SAINT_BIT - 1));
@@ -6038,6 +6421,53 @@ pub fn final_sorting_scan_left_to_right_32s_block_sort(
                 }
             }
         }
+
+        let i1 = i + 1;
+        let v1 = cache[i1].symbol;
+        if v1 >= 0 {
+            let bucket_index1 = v1 as usize;
+            cache[i1].symbol = induction_bucket[bucket_index1];
+            induction_bucket[bucket_index1] += 1;
+            if cache[i1].symbol < block_end as SaSint {
+                let ni = cache[i1].symbol as usize;
+                let mut np = cache[i1].index;
+                cache[i1].index = np ^ SAINT_MIN;
+                if np > 0 {
+                    np -= 1;
+                    let np_usize = np as usize;
+                    cache[ni].index = np
+                        | ((usize::from(t[np_usize - usize::from(np > 0)] < t[np_usize]) as SaSint)
+                            << (SAINT_BIT - 1));
+                    cache[ni].symbol = t[np_usize];
+                }
+            }
+        }
+
+        i += 2;
+    }
+
+    j += prefetch_distance + 1;
+    while i < j {
+        let v = cache[i].symbol;
+        if v >= 0 {
+            let bucket_index = v as usize;
+            cache[i].symbol = induction_bucket[bucket_index];
+            induction_bucket[bucket_index] += 1;
+            if cache[i].symbol < block_end as SaSint {
+                let ni = cache[i].symbol as usize;
+                let mut np = cache[i].index;
+                cache[i].index = np ^ SAINT_MIN;
+                if np > 0 {
+                    np -= 1;
+                    let np_usize = np as usize;
+                    cache[ni].index = np
+                        | ((usize::from(t[np_usize - usize::from(np > 0)] < t[np_usize]) as SaSint)
+                            << (SAINT_BIT - 1));
+                    cache[ni].symbol = t[np_usize];
+                }
+            }
+        }
+        i += 1;
     }
 }
 
@@ -6691,56 +7121,63 @@ pub fn final_sorting_scan_right_to_left_32s(
         return;
     }
 
-    let prefetch_distance = 64usize;
-    let start = usize::try_from(omp_block_start).expect("omp_block_start must be non-negative");
-    let size = usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
-    let mut i = start + size - 1;
-    let mut j = start + 2 * prefetch_distance + 1;
+    let prefetch_distance: FastSint = 64;
+    let sa_ptr = sa.as_mut_ptr();
+    let t_ptr = t.as_ptr();
+    let buckets_ptr = induction_bucket.as_mut_ptr();
+
+    let mut i = omp_block_start + omp_block_size - 1;
+    let mut j = omp_block_start + 2 * prefetch_distance + 1;
 
     while i >= j {
-        let mut p0 = sa[i];
-        sa[i] = p0 & SAINT_MAX;
-        if p0 > 0 {
-            p0 -= 1;
-            let p0_usize = p0 as usize;
-            let bucket0 = t[p0_usize] as usize;
-            induction_bucket[bucket0] -= 1;
-            let slot0 = induction_bucket[bucket0] as usize;
-            sa[slot0] =
-                p0 | ((usize::from(t[p0_usize - usize::from(p0 > 0)] > t[p0_usize]) as SaSint) << (SAINT_BIT - 1));
-        }
+        unsafe {
+            let i0 = i as usize;
+            let mut p0 = *sa_ptr.add(i0);
+            *sa_ptr.add(i0) = p0 & SAINT_MAX;
+            if p0 > 0 {
+                p0 -= 1;
+                let p0u = p0 as usize;
+                let bucket0 = *t_ptr.add(p0u) as usize;
+                *buckets_ptr.add(bucket0) -= 1;
+                let slot0 = *buckets_ptr.add(bucket0) as usize;
+                *sa_ptr.add(slot0) = p0
+                    | ((usize::from(*t_ptr.add(p0u - usize::from(p0 > 0)) > *t_ptr.add(p0u)) as SaSint)
+                        << (SAINT_BIT - 1));
+            }
 
-        let mut p1 = sa[i - 1];
-        sa[i - 1] = p1 & SAINT_MAX;
-        if p1 > 0 {
-            p1 -= 1;
-            let p1_usize = p1 as usize;
-            let bucket1 = t[p1_usize] as usize;
-            induction_bucket[bucket1] -= 1;
-            let slot1 = induction_bucket[bucket1] as usize;
-            sa[slot1] =
-                p1 | ((usize::from(t[p1_usize - usize::from(p1 > 0)] > t[p1_usize]) as SaSint) << (SAINT_BIT - 1));
+            let i1 = (i - 1) as usize;
+            let mut p1 = *sa_ptr.add(i1);
+            *sa_ptr.add(i1) = p1 & SAINT_MAX;
+            if p1 > 0 {
+                p1 -= 1;
+                let p1u = p1 as usize;
+                let bucket1 = *t_ptr.add(p1u) as usize;
+                *buckets_ptr.add(bucket1) -= 1;
+                let slot1 = *buckets_ptr.add(bucket1) as usize;
+                *sa_ptr.add(slot1) = p1
+                    | ((usize::from(*t_ptr.add(p1u - usize::from(p1 > 0)) > *t_ptr.add(p1u)) as SaSint)
+                        << (SAINT_BIT - 1));
+            }
         }
-
         i -= 2;
     }
 
     j -= 2 * prefetch_distance + 1;
     while i >= j {
-        let mut p = sa[i];
-        sa[i] = p & SAINT_MAX;
-        if p > 0 {
-            p -= 1;
-            let p_usize = p as usize;
-            let bucket = t[p_usize] as usize;
-            induction_bucket[bucket] -= 1;
-            let slot = induction_bucket[bucket] as usize;
-            sa[slot] =
-                p | ((usize::from(t[p_usize - usize::from(p > 0)] > t[p_usize]) as SaSint) << (SAINT_BIT - 1));
-        }
-
-        if i == 0 {
-            break;
+        unsafe {
+            let iu = i as usize;
+            let mut p = *sa_ptr.add(iu);
+            *sa_ptr.add(iu) = p & SAINT_MAX;
+            if p > 0 {
+                p -= 1;
+                let pu = p as usize;
+                let bucket = *t_ptr.add(pu) as usize;
+                *buckets_ptr.add(bucket) -= 1;
+                let slot = *buckets_ptr.add(bucket) as usize;
+                *sa_ptr.add(slot) = p
+                    | ((usize::from(*t_ptr.add(pu - usize::from(p > 0)) > *t_ptr.add(pu)) as SaSint)
+                        << (SAINT_BIT - 1));
+            }
         }
         i -= 1;
     }
@@ -6972,20 +7409,54 @@ pub fn final_sorting_scan_right_to_left_32s_block_gather(
     if omp_block_size <= 0 {
         return;
     }
-    let start = usize::try_from(omp_block_start).expect("omp_block_start must be non-negative");
-    let size = usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
-    for i in start..start + size {
+    let prefetch_distance = 64usize;
+    let start = omp_block_start as usize;
+    let mut i = start;
+    let mut j = start + omp_block_size as usize - prefetch_distance - 1;
+
+    while i < j {
+        let mut symbol0 = SAINT_MIN;
+        let mut p0 = sa[i];
+        sa[i] = p0 & SAINT_MAX;
+        if p0 > 0 {
+            p0 -= 1;
+            let p0_usize = p0 as usize;
+            cache[i].index =
+                p0 | ((usize::from(t[p0_usize - usize::from(p0 > 0)] > t[p0_usize]) as SaSint) << (SAINT_BIT - 1));
+            symbol0 = t[p0_usize];
+        }
+        cache[i].symbol = symbol0;
+
+        let i1 = i + 1;
+        let mut symbol1 = SAINT_MIN;
+        let mut p1 = sa[i1];
+        sa[i1] = p1 & SAINT_MAX;
+        if p1 > 0 {
+            p1 -= 1;
+            let p1_usize = p1 as usize;
+            cache[i1].index =
+                p1 | ((usize::from(t[p1_usize - usize::from(p1 > 0)] > t[p1_usize]) as SaSint) << (SAINT_BIT - 1));
+            symbol1 = t[p1_usize];
+        }
+        cache[i1].symbol = symbol1;
+
+        i += 2;
+    }
+
+    j += prefetch_distance + 1;
+    while i < j {
         let mut symbol = SAINT_MIN;
         let mut p = sa[i];
         sa[i] = p & SAINT_MAX;
         if p > 0 {
             p -= 1;
-            let p_usize = usize::try_from(p).expect("suffix index must be non-negative");
+            let p_usize = p as usize;
             cache[i].index =
                 p | ((usize::from(t[p_usize - usize::from(p > 0)] > t[p_usize]) as SaSint) << (SAINT_BIT - 1));
             symbol = t[p_usize];
         }
         cache[i].symbol = symbol;
+        i += 1;
     }
 }
 
@@ -6999,29 +7470,79 @@ pub fn final_sorting_scan_right_to_left_32s_block_sort(
     if omp_block_size <= 0 {
         return;
     }
-    let start = usize::try_from(omp_block_start).expect("omp_block_start must be non-negative");
-    let size = usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
-    let mut i = start + size;
-    while i > start {
-        i -= 1;
-        let v = cache[i].symbol;
-        if v >= 0 {
-            let bucket_index = usize::try_from(v).expect("cache symbol must be non-negative");
-            induction_bucket[bucket_index] -= 1;
-            cache[i].symbol = induction_bucket[bucket_index];
+    let prefetch_distance = 64usize;
+    let start = omp_block_start as usize;
+    let mut i = start + omp_block_size as usize - 1;
+    let mut j = start + prefetch_distance + 1;
+
+    while i >= j {
+        let v0 = cache[i].symbol;
+        if v0 >= 0 {
+            let bucket_index0 = v0 as usize;
+            induction_bucket[bucket_index0] -= 1;
+            cache[i].symbol = induction_bucket[bucket_index0];
             if cache[i].symbol >= omp_block_start as SaSint {
-                let ni = usize::try_from(cache[i].symbol).expect("cache slot must be non-negative");
+                let ni = cache[i].symbol as usize;
                 let mut np = cache[i].index;
                 cache[i].index = np & SAINT_MAX;
                 if np > 0 {
                     np -= 1;
-                    let np_usize = usize::try_from(np).expect("suffix index must be non-negative");
+                    let np_usize = np as usize;
                     cache[ni].index =
                         np | ((usize::from(t[np_usize - usize::from(np > 0)] > t[np_usize]) as SaSint) << (SAINT_BIT - 1));
                     cache[ni].symbol = t[np_usize];
                 }
             }
         }
+
+        let i1 = i - 1;
+        let v1 = cache[i1].symbol;
+        if v1 >= 0 {
+            let bucket_index1 = v1 as usize;
+            induction_bucket[bucket_index1] -= 1;
+            cache[i1].symbol = induction_bucket[bucket_index1];
+            if cache[i1].symbol >= omp_block_start as SaSint {
+                let ni = cache[i1].symbol as usize;
+                let mut np = cache[i1].index;
+                cache[i1].index = np & SAINT_MAX;
+                if np > 0 {
+                    np -= 1;
+                    let np_usize = np as usize;
+                    cache[ni].index =
+                        np | ((usize::from(t[np_usize - usize::from(np > 0)] > t[np_usize]) as SaSint) << (SAINT_BIT - 1));
+                    cache[ni].symbol = t[np_usize];
+                }
+            }
+        }
+
+        i -= 2;
+    }
+
+    j -= prefetch_distance + 1;
+    while i >= j {
+        let v = cache[i].symbol;
+        if v >= 0 {
+            let bucket_index = v as usize;
+            induction_bucket[bucket_index] -= 1;
+            cache[i].symbol = induction_bucket[bucket_index];
+            if cache[i].symbol >= omp_block_start as SaSint {
+                let ni = cache[i].symbol as usize;
+                let mut np = cache[i].index;
+                cache[i].index = np & SAINT_MAX;
+                if np > 0 {
+                    np -= 1;
+                    let np_usize = np as usize;
+                    cache[ni].index =
+                        np | ((usize::from(t[np_usize - usize::from(np > 0)] > t[np_usize]) as SaSint) << (SAINT_BIT - 1));
+                    cache[ni].symbol = t[np_usize];
+                }
+            }
+        }
+
+        if i == 0 {
+            break;
+        }
+        i -= 1;
     }
 }
 
@@ -7788,8 +8309,9 @@ pub fn compact_unique_and_nonunique_lms_suffixes_32s_omp(
                 let dst = usize::try_from(position).expect("destination must be non-negative");
                 let src = usize::try_from(thread_state[t].position).expect("source must be non-negative");
                 let len = usize::try_from(count).expect("length must be non-negative");
-                let temp: Vec<SaSint> = sa[src..src + len].to_vec();
-                sa[dst..dst + len].copy_from_slice(&temp);
+                unsafe {
+                    std::ptr::copy_nonoverlapping(sa.as_ptr().add(src), sa.as_mut_ptr().add(dst), len);
+                }
             }
         }
 
@@ -7806,8 +8328,9 @@ pub fn compact_unique_and_nonunique_lms_suffixes_32s_omp(
                 let dst = usize::try_from(position).expect("destination must be non-negative");
                 let src = usize::try_from(thread_state[t].count).expect("source must be non-negative");
                 let len = usize::try_from(count).expect("length must be non-negative");
-                let temp: Vec<SaSint> = sa[src..src + len].to_vec();
-                sa[dst..dst + len].copy_from_slice(&temp);
+                unsafe {
+                    std::ptr::copy_nonoverlapping(sa.as_ptr().add(src), sa.as_mut_ptr().add(dst), len);
+                }
             }
         }
     }
@@ -8112,8 +8635,7 @@ pub fn reconstruct_compacted_lms_suffixes_32s_2k_omp(
         let src_copy = 0usize;
         let dst_copy = usize::try_from(n - m - 1 + f).expect("destination must be non-negative");
         let copy_len = usize::try_from(m - f).expect("copy length must be non-negative");
-        let temp: Vec<SaSint> = sa[src_copy..src_copy + copy_len].to_vec();
-        sa[dst_copy..dst_copy + copy_len].copy_from_slice(&temp);
+        sa.copy_within(src_copy..src_copy + copy_len, dst_copy);
         sa[..usize::try_from(m).expect("m must be non-negative")].fill(0);
 
         merge_compacted_lms_suffixes_32s_omp(t, sa, n, m, f, threads, thread_state);
@@ -8144,8 +8666,7 @@ pub fn reconstruct_compacted_lms_suffixes_32s_1k_omp(
 
         let dst_copy = usize::try_from(n - m - 1 + f).expect("destination must be non-negative");
         let copy_len = usize::try_from(m - f).expect("copy length must be non-negative");
-        let temp: Vec<SaSint> = sa[..copy_len].to_vec();
-        sa[dst_copy..dst_copy + copy_len].copy_from_slice(&temp);
+        sa.copy_within(0..copy_len, dst_copy);
         sa[..usize::try_from(m).expect("m must be non-negative")].fill(0);
 
         merge_compacted_lms_suffixes_32s_omp(t, sa, n, m, f, threads, thread_state);
