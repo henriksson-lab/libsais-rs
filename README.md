@@ -90,9 +90,9 @@ The repository includes [`examples/bench_vs_c.rs`](examples/bench_vs_c.rs), whic
 Latest locally confirmed run:
 
 ```text
-README.md                            len=    6824 iter=200  rust=   0.225 ms  c=   0.234 ms  ratio= 0.96x
-libsais/src/libsais.c                len=  388397 iter= 40  rust=  10.614 ms  c=  10.062 ms  ratio= 1.05x
-generated/mixed-1MiB                 len= 1048576 iter= 10  rust=  35.951 ms  c=  35.528 ms  ratio= 1.01x
+README.md                            len=    6797 iter=200  rust=   0.284 ms  c=   0.295 ms  ratio= 0.96x
+libsais/src/libsais.c                len=  388397 iter= 40  rust=  11.770 ms  c=  11.213 ms  ratio= 1.05x
+generated/mixed-1MiB                 len= 1048576 iter= 10  rust=  40.196 ms  c=  38.582 ms  ratio= 1.04x
 ```
 
 Command used:

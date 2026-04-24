@@ -80,16 +80,6 @@ pub fn align_up(value: usize, alignment: usize) -> usize {
     (value + alignment - 1) & !(alignment - 1)
 }
 
-fn aligned_suffix_index(
-    sa_ptr: *mut SaSint,
-    base_index: usize,
-    alignment: usize,
-) -> usize {
-    let byte_ptr = unsafe { sa_ptr.add(base_index) } as usize;
-    let aligned = align_up(byte_ptr, alignment * mem::size_of::<SaSint>());
-    (aligned - sa_ptr as usize) / mem::size_of::<SaSint>()
-}
-
 pub fn alloc_thread_state(threads: SaSint) -> Option<Vec<ThreadState>> {
     if threads <= 0 {
         return None;
@@ -1282,7 +1272,12 @@ pub fn count_and_gather_lms_suffixes_32s_4k_omp(
         );
     }
 
-    count_and_gather_lms_suffixes_32s_4k_nofs_omp(t, sa, n, k, buckets, threads)
+    if threads > 1 && n >= 65_536 {
+        count_lms_suffixes_32s_4k(t, n, k, buckets);
+        gather_lms_suffixes_32s(t, sa, n)
+    } else {
+        count_and_gather_lms_suffixes_32s_4k(t, sa, n, k, buckets, 0, n as FastSint)
+    }
 }
 
 pub fn count_and_gather_lms_suffixes_32s_2k_omp(
@@ -1321,7 +1316,12 @@ pub fn count_and_gather_lms_suffixes_32s_2k_omp(
         );
     }
 
-    count_and_gather_lms_suffixes_32s_2k_nofs_omp(t, sa, n, k, buckets, threads)
+    if threads > 1 && n >= 65_536 {
+        count_lms_suffixes_32s_2k(t, n, k, buckets);
+        gather_lms_suffixes_32s(t, sa, n)
+    } else {
+        count_and_gather_lms_suffixes_32s_2k(t, sa, n, k, buckets, 0, n as FastSint)
+    }
 }
 
 pub fn count_and_gather_compacted_lms_suffixes_32s_2k_omp(
@@ -1512,16 +1512,16 @@ pub fn initialize_buckets_for_lms_suffixes_radix_sort_8u(
         c0 = t[first_lms_suffix as usize] as FastSint;
         f1 = f0;
         f0 = usize::from(c0 > (c1 - f1 as FastSint));
-        let idx = buckets_index4(c1 as usize, f1 + f1 + f0);
+        let idx = 4 * c1 as usize + (f1 + f1 + f0);
         buckets[idx] -= 1;
     }
-    buckets[buckets_index4(c0 as usize, f0 + f0)] -= 1;
+    buckets[4 * c0 as usize + (f0 + f0)] -= 1;
 
     let temp_offset = 4 * ALPHABET_SIZE;
     let mut sum = 0;
     for j in 0..ALPHABET_SIZE {
-        let i = buckets_index4(j, 0);
-        let tj = buckets_index2(j, 0);
+        let i = 4 * j;
+        let tj = 2 * j;
         buckets[temp_offset + tj + 1] = sum;
         sum += buckets[i + 1] + buckets[i + 3];
         buckets[temp_offset + tj] = sum;
@@ -1569,14 +1569,14 @@ pub fn initialize_buckets_for_lms_suffixes_radix_sort_32s_6k(
         c0 = t[first_lms_suffix as usize] as FastSint;
         f1 = f0;
         f0 = usize::from(c0 > (c1 - f1 as FastSint));
-        buckets[buckets_index4(c1 as usize, f1 + f1 + f0)] -= 1;
+        buckets[4 * c1 as usize + (f1 + f1 + f0)] -= 1;
     }
-    buckets[buckets_index4(c0 as usize, f0 + f0)] -= 1;
+    buckets[4 * c0 as usize + (f0 + f0)] -= 1;
 
     let temp_offset = 4 * usize::try_from(k).unwrap();
     let mut sum = 0;
     for j in 0..usize::try_from(k).unwrap() {
-        let i = buckets_index4(j, 0);
+        let i = 4 * j;
         sum += buckets[i + 1] + buckets[i + 3];
         buckets[temp_offset + j] = sum;
     }
@@ -5034,11 +5034,10 @@ pub fn renumber_lms_suffixes_8u(
         return name;
     }
 
-    let prefetch_distance = 64 as FastSint;
     let m_usize = usize::try_from(m).expect("m must be non-negative");
     let (sa_head, sam) = sa.split_at_mut(m_usize);
     let mut i = omp_block_start;
-    let mut j = omp_block_start + omp_block_size - prefetch_distance - 3;
+    let mut j = omp_block_start + omp_block_size - 64 - 3;
 
     while i < j {
         let i0 = i as usize;
@@ -5065,7 +5064,7 @@ pub fn renumber_lms_suffixes_8u(
         i += 4;
     }
 
-    j += prefetch_distance + 3;
+    j += 64 + 3;
     while i < j {
         let p = sa_head[i as usize];
         let d = ((p & SAINT_MAX) >> 1) as usize;
@@ -5131,7 +5130,6 @@ pub fn renumber_lms_suffixes_8u_omp(
     thread_state: &mut [ThreadState],
 ) -> SaSint {
     let mut name = 0;
-    let m_usize = usize::try_from(m).expect("m must be non-negative");
     let omp_num_threads = if threads > 1 && m >= 65_536 {
         usize::try_from(threads)
             .expect("threads must be non-negative")
@@ -5140,34 +5138,31 @@ pub fn renumber_lms_suffixes_8u_omp(
     } else {
         1
     };
-    let omp_block_stride = (m_usize / omp_num_threads) & !15usize;
+    let omp_block_stride = (m as FastSint / omp_num_threads as FastSint) & !15;
 
     if omp_num_threads == 1 {
-        let omp_block_start = 0usize;
-        let omp_block_size = m_usize;
-        name = renumber_lms_suffixes_8u(sa, m, 0, omp_block_start as FastSint, omp_block_size as FastSint);
+        name = renumber_lms_suffixes_8u(sa, m, 0, 0, m as FastSint);
     } else {
         for omp_thread_num in 0..omp_num_threads {
-            let omp_block_start = omp_thread_num * omp_block_stride;
+            let omp_block_start = omp_thread_num as FastSint * omp_block_stride;
             let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                 omp_block_stride
             } else {
-                m_usize - omp_block_start
+                m as FastSint - omp_block_start
             };
             thread_state[omp_thread_num].count =
-                count_negative_marked_suffixes(sa, omp_block_start as FastSint, omp_block_size as FastSint)
-                    as FastSint;
+                count_negative_marked_suffixes(sa, omp_block_start, omp_block_size) as FastSint;
         }
 
         for omp_thread_num in 0..omp_num_threads {
-            let omp_block_start = omp_thread_num * omp_block_stride;
+            let omp_block_start = omp_thread_num as FastSint * omp_block_stride;
             let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                 omp_block_stride
             } else {
-                m_usize - omp_block_start
+                m as FastSint - omp_block_start
             };
 
-            let mut count = 0 as FastSint;
+            let mut count: FastSint = 0;
             for t in 0..omp_thread_num {
                 count += thread_state[t].count;
             }
@@ -5176,7 +5171,7 @@ pub fn renumber_lms_suffixes_8u_omp(
                 name = (count + thread_state[omp_thread_num].count) as SaSint;
             }
 
-            let _ = renumber_lms_suffixes_8u(sa, m, count as SaSint, omp_block_start as FastSint, omp_block_size as FastSint);
+            let _ = renumber_lms_suffixes_8u(sa, m, count as SaSint, omp_block_start, omp_block_size);
         }
     }
 
@@ -5191,7 +5186,6 @@ pub fn gather_marked_lms_suffixes_omp(
     threads: SaSint,
     thread_state: &mut [ThreadState],
 ) {
-    let half_n = usize::try_from(n >> 1).expect("n must be non-negative");
     let n_fast = n as FastSint;
     let m_fast = m as FastSint;
     let omp_num_threads = if threads > 1 && n >= 131_072 {
@@ -5202,17 +5196,15 @@ pub fn gather_marked_lms_suffixes_omp(
     } else {
         1
     };
-    let omp_block_stride = (half_n / omp_num_threads) & !15usize;
+    let omp_block_stride = ((n_fast >> 1) / omp_num_threads as FastSint) & !15;
 
     if omp_num_threads == 1 {
-        let omp_block_start = 0;
-        let omp_block_size = n_fast >> 1;
-        let _ = gather_marked_lms_suffixes(sa, m, n_fast + fs as FastSint, omp_block_start, omp_block_size);
+        let _ = gather_marked_lms_suffixes(sa, m, n_fast + fs as FastSint, 0, n_fast >> 1);
     } else {
         for omp_thread_num in 0..omp_num_threads {
-            let omp_block_start = (omp_thread_num * omp_block_stride) as FastSint;
+            let omp_block_start = omp_thread_num as FastSint * omp_block_stride;
             let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
-                omp_block_stride as FastSint
+                omp_block_stride
             } else {
                 n_fast >> 1
             } - omp_block_start;
@@ -8687,443 +8679,6 @@ fn normalize_omp_threads(threads: SaSint) -> SaSint {
     }
 }
 
-fn libsais_main_32s_recursion_4k(
-    t_ptr: *mut SaSint,
-    sa_ptr: *mut SaSint,
-    sa_capacity: usize,
-    total_len: usize,
-    n_usize: usize,
-    n: SaSint,
-    k: SaSint,
-    fs: SaSint,
-    threads: SaSint,
-    thread_state: &mut [ThreadState],
-    local_buffer: &mut [SaSint],
-) -> SaSint {
-    let fs_usize = usize::try_from(fs).expect("fs must be non-negative");
-    let k_usize = usize::try_from(k).expect("k must be non-negative");
-    let alignment = if fs >= 1024 && ((fs - 1024) / k) >= 4 {
-        1024usize
-    } else {
-        16usize
-    };
-    let need = 4 * k_usize;
-    let use_local_buffer = SaSint::try_from(LIBSAIS_LOCAL_BUFFER_SIZE).expect("fits") > fs;
-    let buckets_ptr = if use_local_buffer {
-        local_buffer.as_mut_ptr()
-    } else {
-        unsafe {
-            let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
-            let start = if fs_usize >= need + alignment && ((fs_usize - alignment) / k_usize) >= 4 {
-                aligned_suffix_index(sa_ptr, total_len - need - alignment, alignment)
-            } else {
-                total_len - need
-            };
-            sa.as_mut_ptr().add(start)
-        }
-    };
-
-    let m = unsafe {
-        let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
-        let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
-        let buckets = std::slice::from_raw_parts_mut(buckets_ptr, need);
-        count_and_gather_lms_suffixes_32s_2k_omp(
-            t,
-            sa,
-            n,
-            k,
-            buckets,
-            SaSint::from(use_local_buffer),
-            threads,
-            thread_state,
-        )
-    };
-    if m > 1 {
-        unsafe {
-            let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
-            let buckets = std::slice::from_raw_parts_mut(buckets_ptr, need);
-            initialize_buckets_for_radix_and_partial_sorting_32s_4k(
-                t,
-                k,
-                buckets,
-                *sa_ptr.add(n_usize - usize::try_from(m).expect("m must be non-negative")),
-            );
-            let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
-            let (_, induction_bucket) = buckets.split_at_mut(1);
-            radix_sort_lms_suffixes_32s_2k_omp(t, sa, n, m, induction_bucket, threads, thread_state);
-            radix_sort_set_markers_32s_4k_omp(sa, k, induction_bucket, threads);
-            place_lms_suffixes_interval_32s_4k(sa, n, k, m - 1, buckets);
-            induce_partial_order_32s_4k_omp(t, sa, n, k, buckets, threads, thread_state);
-        }
-
-        let names = unsafe {
-            let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
-            renumber_and_mark_distinct_lms_suffixes_32s_4k_omp(sa, n, m, threads, thread_state)
-        };
-        if names < m {
-            let f = unsafe {
-                let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
-                let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
-                compact_lms_suffixes_32s_omp(t, sa, n, m, fs, threads, thread_state)
-            };
-
-            let new_t_start = total_len - usize::try_from(m - f).expect("m - f must be non-negative");
-            if libsais_main_32s_recursion(
-                unsafe { sa_ptr.add(new_t_start) },
-                sa_ptr,
-                sa_capacity,
-                m - f,
-                names - f,
-                fs + n - 2 * m + f,
-                threads,
-                thread_state,
-                local_buffer,
-            ) != 0
-            {
-                return -2;
-            }
-
-            unsafe {
-                let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
-                let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
-                let buckets = std::slice::from_raw_parts_mut(buckets_ptr, need);
-                reconstruct_compacted_lms_suffixes_32s_2k_omp(
-                    t,
-                    sa,
-                    n,
-                    k,
-                    m,
-                    fs,
-                    f,
-                    buckets,
-                    SaSint::from(use_local_buffer),
-                    threads,
-                    thread_state,
-                );
-            }
-        } else {
-            unsafe {
-                let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
-                let buckets = std::slice::from_raw_parts_mut(buckets_ptr, need);
-                count_lms_suffixes_32s_2k(t, n, k, buckets);
-            }
-        }
-    } else {
-        unsafe {
-            (*sa_ptr) = *sa_ptr.add(n_usize - 1);
-        }
-    }
-
-    unsafe {
-        let buckets = std::slice::from_raw_parts_mut(buckets_ptr, need);
-        initialize_buckets_start_and_end_32s_4k(k, buckets);
-        let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
-        place_lms_suffixes_histogram_32s_4k(sa, n, k, m, buckets);
-        let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
-        induce_final_order_32s_4k(t, sa, n, k, buckets, threads, thread_state);
-    }
-
-    0
-}
-
-fn libsais_main_32s_recursion_2k(
-    t_ptr: *mut SaSint,
-    sa_ptr: *mut SaSint,
-    sa_capacity: usize,
-    total_len: usize,
-    n_usize: usize,
-    n: SaSint,
-    k: SaSint,
-    fs: SaSint,
-    threads: SaSint,
-    thread_state: &mut [ThreadState],
-    local_buffer: &mut [SaSint],
-) -> SaSint {
-    let fs_usize = usize::try_from(fs).expect("fs must be non-negative");
-    let k_usize = usize::try_from(k).expect("k must be non-negative");
-    let alignment = if fs >= 1024 && ((fs - 1024) / k) >= 2 {
-        1024usize
-    } else {
-        16usize
-    };
-    let need = 2 * k_usize;
-    let use_local_buffer = SaSint::try_from(LIBSAIS_LOCAL_BUFFER_SIZE).expect("fits") > fs;
-    let buckets_ptr = if use_local_buffer {
-        local_buffer.as_mut_ptr()
-    } else {
-        unsafe {
-            let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
-            let start = if fs_usize >= need + alignment && ((fs_usize - alignment) / k_usize) >= 2 {
-                aligned_suffix_index(sa_ptr, total_len - need - alignment, alignment)
-            } else {
-                total_len - need
-            };
-            sa.as_mut_ptr().add(start)
-        }
-    };
-
-    let m = unsafe {
-        let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
-        let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
-        let buckets = std::slice::from_raw_parts_mut(buckets_ptr, need);
-        count_and_gather_lms_suffixes_32s_2k_omp(
-            t,
-            sa,
-            n,
-            k,
-            buckets,
-            SaSint::from(use_local_buffer),
-            threads,
-            thread_state,
-        )
-    };
-    if m > 1 {
-        unsafe {
-            let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
-            let buckets = std::slice::from_raw_parts_mut(buckets_ptr, need);
-            initialize_buckets_for_lms_suffixes_radix_sort_32s_2k(
-                t,
-                k,
-                buckets,
-                *sa_ptr.add(n_usize - usize::try_from(m).expect("m must be non-negative")),
-            );
-            let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
-            let (_, induction_bucket) = buckets.split_at_mut(1);
-            radix_sort_lms_suffixes_32s_2k_omp(t, sa, n, m, induction_bucket, threads, thread_state);
-            place_lms_suffixes_interval_32s_2k(sa, n, k, m - 1, buckets);
-        }
-
-        unsafe {
-            let buckets = std::slice::from_raw_parts_mut(buckets_ptr, need);
-            initialize_buckets_start_and_end_32s_2k(k, buckets);
-            let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
-            let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
-            induce_partial_order_32s_2k_omp(t, sa, n, k, buckets, threads, thread_state);
-        }
-
-        let names = unsafe {
-            let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
-            let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
-            renumber_and_mark_distinct_lms_suffixes_32s_1k_omp(t, sa, n, m, threads)
-        };
-        if names < m {
-            let f = unsafe {
-                let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
-                let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
-                compact_lms_suffixes_32s_omp(t, sa, n, m, fs, threads, thread_state)
-            };
-
-            let new_t_start = total_len - usize::try_from(m - f).expect("m - f must be non-negative");
-            if libsais_main_32s_recursion(
-                unsafe { sa_ptr.add(new_t_start) },
-                sa_ptr,
-                sa_capacity,
-                m - f,
-                names - f,
-                fs + n - 2 * m + f,
-                threads,
-                thread_state,
-                local_buffer,
-            ) != 0
-            {
-                return -2;
-            }
-
-            unsafe {
-                let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
-                let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
-                let buckets = std::slice::from_raw_parts_mut(buckets_ptr, need);
-                reconstruct_compacted_lms_suffixes_32s_2k_omp(
-                    t,
-                    sa,
-                    n,
-                    k,
-                    m,
-                    fs,
-                    f,
-                    buckets,
-                    SaSint::from(use_local_buffer),
-                    threads,
-                    thread_state,
-                );
-            }
-        } else {
-            unsafe {
-                let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
-                let buckets = std::slice::from_raw_parts_mut(buckets_ptr, need);
-                count_lms_suffixes_32s_2k(t, n, k, buckets);
-            }
-        }
-    } else {
-        unsafe {
-            (*sa_ptr) = *sa_ptr.add(n_usize - 1);
-        }
-    }
-
-    unsafe {
-        let buckets = std::slice::from_raw_parts_mut(buckets_ptr, need);
-        initialize_buckets_end_32s_2k(k, buckets);
-        let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
-        place_lms_suffixes_histogram_32s_2k(sa, n, k, m, buckets);
-    }
-
-    unsafe {
-        let buckets = std::slice::from_raw_parts_mut(buckets_ptr, need);
-        initialize_buckets_start_and_end_32s_2k(k, buckets);
-        let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
-        let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
-        induce_final_order_32s_2k(t, sa, n, k, buckets, threads, thread_state);
-    }
-
-    0
-}
-
-fn libsais_main_32s_recursion_1k(
-    t_ptr: *mut SaSint,
-    sa_ptr: *mut SaSint,
-    sa_capacity: usize,
-    total_len: usize,
-    n_usize: usize,
-    n: SaSint,
-    k: SaSint,
-    fs: SaSint,
-    threads: SaSint,
-    thread_state: &mut [ThreadState],
-    local_buffer: &mut [SaSint],
-) -> SaSint {
-    let k_usize = usize::try_from(k).expect("k must be non-negative");
-    let fs_usize = usize::try_from(fs).expect("fs must be non-negative");
-    let mut heap_buckets = if fs < k { Some(vec![0; k_usize]) } else { None };
-    let alignment = if fs >= 1024 && (fs - 1024) >= k {
-        1024usize
-    } else {
-        16usize
-    };
-    let mut buckets_ptr = if let Some(ref mut heap) = heap_buckets {
-        heap.as_mut_ptr()
-    } else {
-        unsafe {
-            let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
-            let start = if fs_usize >= k_usize + alignment {
-                aligned_suffix_index(sa_ptr, total_len - k_usize - alignment, alignment)
-            } else {
-                total_len - k_usize
-            };
-            sa.as_mut_ptr().add(start)
-        }
-    };
-
-    if buckets_ptr.is_null() {
-        return -2;
-    }
-
-    unsafe {
-        let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
-        sa[..n_usize].fill(0);
-    }
-
-    unsafe {
-        let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
-        let buckets = std::slice::from_raw_parts_mut(buckets_ptr, k_usize);
-        count_suffixes_32s(t, n, k, buckets);
-    }
-    unsafe {
-        let buckets = std::slice::from_raw_parts_mut(buckets_ptr, k_usize);
-        initialize_buckets_end_32s_1k(k, buckets);
-    }
-
-    let m = unsafe {
-        let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
-        let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
-        let buckets = std::slice::from_raw_parts_mut(buckets_ptr, k_usize);
-        radix_sort_lms_suffixes_32s_1k(t, sa, n, buckets)
-    };
-    if m > 1 {
-        unsafe {
-            let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
-            let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
-            let buckets = std::slice::from_raw_parts_mut(buckets_ptr, k_usize);
-            induce_partial_order_32s_1k_omp(t, sa, n, k, buckets, threads, thread_state);
-        }
-
-        let names = unsafe {
-            let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
-            let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
-            renumber_and_mark_distinct_lms_suffixes_32s_1k_omp(t, sa, n, m, threads)
-        };
-        if names < m {
-            if heap_buckets.is_some() {
-                let _ = heap_buckets.take();
-                buckets_ptr = std::ptr::null_mut();
-            }
-
-            let f = unsafe {
-                let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
-                let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
-                compact_lms_suffixes_32s_omp(t, sa, n, m, fs, threads, thread_state)
-            };
-
-            let new_t_start = total_len - usize::try_from(m - f).expect("m - f must be non-negative");
-            if libsais_main_32s_recursion(
-                unsafe { sa_ptr.add(new_t_start) },
-                sa_ptr,
-                sa_capacity,
-                m - f,
-                names - f,
-                fs + n - 2 * m + f,
-                threads,
-                thread_state,
-                local_buffer,
-            ) != 0
-            {
-                return -2;
-            }
-
-            unsafe {
-                let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
-                let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
-                reconstruct_compacted_lms_suffixes_32s_1k_omp(t, sa, n, m, fs, f, threads, thread_state);
-            }
-
-            if buckets_ptr.is_null() {
-                heap_buckets = Some(vec![0; k_usize]);
-                buckets_ptr = heap_buckets
-                    .as_mut()
-                    .expect("heap buckets must exist")
-                    .as_mut_ptr();
-                if buckets_ptr.is_null() {
-                    return -2;
-                }
-            }
-        }
-
-        unsafe {
-            let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
-            let buckets = std::slice::from_raw_parts_mut(buckets_ptr, k_usize);
-            count_suffixes_32s(t, n, k, buckets);
-        }
-        unsafe {
-            let buckets = std::slice::from_raw_parts_mut(buckets_ptr, k_usize);
-            initialize_buckets_end_32s_1k(k, buckets);
-        }
-        unsafe {
-            let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
-            let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
-            let buckets = std::slice::from_raw_parts_mut(buckets_ptr, k_usize);
-            place_lms_suffixes_interval_32s_1k(t, sa, k, m, buckets);
-        }
-    }
-
-    unsafe {
-        let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
-        let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
-        let buckets = std::slice::from_raw_parts_mut(buckets_ptr, k_usize);
-        induce_final_order_32s_1k(t, sa, n, k, buckets, threads, thread_state);
-    }
-
-    0
-}
-
 fn libsais_main_32s_recursion(
     t_ptr: *mut SaSint,
     sa_ptr: *mut SaSint,
@@ -9158,7 +8713,10 @@ fn libsais_main_32s_recursion(
                 let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
                 let start =
                     if fs_usize >= need + alignment && ((fs_usize - alignment) / k_usize) >= 6 {
-                        aligned_suffix_index(sa_ptr, total_len - need - alignment, alignment)
+                        let byte_ptr = sa.as_mut_ptr().add(total_len - need - alignment) as usize;
+                        let aligned =
+                            align_up(byte_ptr, alignment * mem::size_of::<SaSint>());
+                        (aligned - sa_ptr as usize) / mem::size_of::<SaSint>()
                     } else {
                         total_len - need
                     };
@@ -9183,7 +8741,6 @@ fn libsais_main_32s_recursion(
         };
         if m > 1 {
             let m_usize = usize::try_from(m).expect("m must be non-negative");
-            let use_distinct_names = (n / 8192) < k;
             unsafe {
                 let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
                 sa[..n_usize - m_usize].fill(0);
@@ -9206,7 +8763,7 @@ fn libsais_main_32s_recursion(
                 let buckets = std::slice::from_raw_parts_mut(buckets_ptr, need);
                 let (_, induction_bucket) = buckets.split_at_mut(4 * k_usize);
                 radix_sort_lms_suffixes_32s_6k_omp(t, sa, n, m, induction_bucket, threads, thread_state);
-                if use_distinct_names {
+                if (n / 8192) < k {
                     radix_sort_set_markers_32s_6k_omp(sa, k, induction_bucket, threads);
                 }
                 if threads > 1 && n >= 65_536 {
@@ -9218,7 +8775,7 @@ fn libsais_main_32s_recursion(
 
             let names = unsafe {
                 let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
-                if use_distinct_names {
+                if (n / 8192) < k {
                     renumber_and_mark_distinct_lms_suffixes_32s_4k_omp(sa, n, m, threads, thread_state)
                 } else {
                     renumber_and_gather_lms_suffixes_omp(sa, n, m, fs, threads, thread_state)
@@ -9226,7 +8783,7 @@ fn libsais_main_32s_recursion(
             };
 
             if names < m {
-                let f = if use_distinct_names {
+                let f = if (n / 8192) < k {
                     unsafe {
                         let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
                         let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
@@ -9303,53 +8860,405 @@ fn libsais_main_32s_recursion(
         }
 
         return 0;
-    }
+    } else if k > 0 && n <= SAINT_MAX / 2 && ((fs / k) >= 4 || (local_buffer_size / k) >= 4) {
+        let k_usize = usize::try_from(k).expect("k must be non-negative");
+        let alignment = if fs >= 1024 && ((fs - 1024) / k) >= 4 {
+            1024usize
+        } else {
+            16usize
+        };
+        let need = 4 * k_usize;
+        let use_local_buffer = local_buffer_size > fs;
+        let buckets_ptr = if use_local_buffer {
+            _local_buffer.as_mut_ptr()
+        } else {
+            unsafe {
+                let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
+                let start = if fs_usize >= need + alignment && ((fs_usize - alignment) / k_usize) >= 4 {
+                    let byte_ptr = sa.as_mut_ptr().add(total_len - need - alignment) as usize;
+                    let aligned = align_up(byte_ptr, alignment * mem::size_of::<SaSint>());
+                    (aligned - sa_ptr as usize) / mem::size_of::<SaSint>()
+                } else {
+                    total_len - need
+                };
+                sa.as_mut_ptr().add(start)
+            }
+        };
 
-    if k > 0 && n <= SAINT_MAX / 2 && ((fs / k) >= 4 || (local_buffer_size / k) >= 4) {
-        return libsais_main_32s_recursion_4k(
-            t_ptr,
-            sa_ptr,
-            sa_capacity,
-            total_len,
-            n_usize,
-            n,
-            k,
-            fs,
-            threads,
-            thread_state,
-            _local_buffer,
-        );
-    }
+        let m = unsafe {
+            let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
+            let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
+            let buckets = std::slice::from_raw_parts_mut(buckets_ptr, need);
+            count_and_gather_lms_suffixes_32s_2k_omp(
+                t,
+                sa,
+                n,
+                k,
+                buckets,
+                SaSint::from(use_local_buffer),
+                threads,
+                thread_state,
+            )
+        };
+        if m > 1 {
+            unsafe {
+                let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
+                let buckets = std::slice::from_raw_parts_mut(buckets_ptr, need);
+                initialize_buckets_for_radix_and_partial_sorting_32s_4k(
+                    t,
+                    k,
+                    buckets,
+                    *sa_ptr.add(n_usize - usize::try_from(m).expect("m must be non-negative")),
+                );
+                let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
+                let (_, induction_bucket) = buckets.split_at_mut(1);
+                radix_sort_lms_suffixes_32s_2k_omp(t, sa, n, m, induction_bucket, threads, thread_state);
+                radix_sort_set_markers_32s_4k_omp(sa, k, induction_bucket, threads);
+                place_lms_suffixes_interval_32s_4k(sa, n, k, m - 1, buckets);
+                induce_partial_order_32s_4k_omp(t, sa, n, k, buckets, threads, thread_state);
+            }
 
-    if k > 0 && ((fs / k) >= 2 || (local_buffer_size / k) >= 2) {
-        return libsais_main_32s_recursion_2k(
-            t_ptr,
-            sa_ptr,
-            sa_capacity,
-            total_len,
-            n_usize,
-            n,
-            k,
-            fs,
-            threads,
-            thread_state,
-            _local_buffer,
-        );
-    }
+            let names = unsafe {
+                let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
+                renumber_and_mark_distinct_lms_suffixes_32s_4k_omp(sa, n, m, threads, thread_state)
+            };
+            if names < m {
+                let f = unsafe {
+                    let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
+                    let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
+                    compact_lms_suffixes_32s_omp(t, sa, n, m, fs, threads, thread_state)
+                };
 
-    libsais_main_32s_recursion_1k(
-        t_ptr,
-        sa_ptr,
-        sa_capacity,
-        total_len,
-        n_usize,
-        n,
-        k,
-        fs,
-        threads,
-        thread_state,
-        _local_buffer,
-    )
+                let new_t_start = total_len - usize::try_from(m - f).expect("m - f must be non-negative");
+                if libsais_main_32s_recursion(
+                    unsafe { sa_ptr.add(new_t_start) },
+                    sa_ptr,
+                    sa_capacity,
+                    m - f,
+                    names - f,
+                    fs + n - 2 * m + f,
+                    threads,
+                    thread_state,
+                    _local_buffer,
+                ) != 0
+                {
+                    return -2;
+                }
+
+                unsafe {
+                    let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
+                    let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
+                    let buckets = std::slice::from_raw_parts_mut(buckets_ptr, need);
+                    reconstruct_compacted_lms_suffixes_32s_2k_omp(
+                        t,
+                        sa,
+                        n,
+                        k,
+                        m,
+                        fs,
+                        f,
+                        buckets,
+                        SaSint::from(use_local_buffer),
+                        threads,
+                        thread_state,
+                    );
+                }
+            } else {
+                unsafe {
+                    let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
+                    let buckets = std::slice::from_raw_parts_mut(buckets_ptr, need);
+                    count_lms_suffixes_32s_2k(t, n, k, buckets);
+                }
+            }
+        } else {
+            unsafe {
+                (*sa_ptr) = *sa_ptr.add(n_usize - 1);
+            }
+        }
+
+        unsafe {
+            let buckets = std::slice::from_raw_parts_mut(buckets_ptr, need);
+            initialize_buckets_start_and_end_32s_4k(k, buckets);
+            let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
+            place_lms_suffixes_histogram_32s_4k(sa, n, k, m, buckets);
+            let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
+            induce_final_order_32s_4k(t, sa, n, k, buckets, threads, thread_state);
+        }
+
+        return 0;
+    } else if k > 0 && ((fs / k) >= 2 || (local_buffer_size / k) >= 2) {
+        let k_usize = usize::try_from(k).expect("k must be non-negative");
+        let alignment = if fs >= 1024 && ((fs - 1024) / k) >= 2 {
+            1024usize
+        } else {
+            16usize
+        };
+        let need = 2 * k_usize;
+        let use_local_buffer = local_buffer_size > fs;
+        let buckets_ptr = if use_local_buffer {
+            _local_buffer.as_mut_ptr()
+        } else {
+            unsafe {
+                let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
+                let start = if fs_usize >= need + alignment && ((fs_usize - alignment) / k_usize) >= 2 {
+                    let byte_ptr = sa.as_mut_ptr().add(total_len - need - alignment) as usize;
+                    let aligned = align_up(byte_ptr, alignment * mem::size_of::<SaSint>());
+                    (aligned - sa_ptr as usize) / mem::size_of::<SaSint>()
+                } else {
+                    total_len - need
+                };
+                sa.as_mut_ptr().add(start)
+            }
+        };
+
+        let m = unsafe {
+            let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
+            let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
+            let buckets = std::slice::from_raw_parts_mut(buckets_ptr, need);
+            count_and_gather_lms_suffixes_32s_2k_omp(
+                t,
+                sa,
+                n,
+                k,
+                buckets,
+                SaSint::from(use_local_buffer),
+                threads,
+                thread_state,
+            )
+        };
+        if m > 1 {
+            unsafe {
+                let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
+                let buckets = std::slice::from_raw_parts_mut(buckets_ptr, need);
+                initialize_buckets_for_lms_suffixes_radix_sort_32s_2k(
+                    t,
+                    k,
+                    buckets,
+                    *sa_ptr.add(n_usize - usize::try_from(m).expect("m must be non-negative")),
+                );
+                let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
+                let (_, induction_bucket) = buckets.split_at_mut(1);
+                radix_sort_lms_suffixes_32s_2k_omp(t, sa, n, m, induction_bucket, threads, thread_state);
+                place_lms_suffixes_interval_32s_2k(sa, n, k, m - 1, buckets);
+            }
+
+            unsafe {
+                let buckets = std::slice::from_raw_parts_mut(buckets_ptr, need);
+                initialize_buckets_start_and_end_32s_2k(k, buckets);
+                let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
+                let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
+                induce_partial_order_32s_2k_omp(t, sa, n, k, buckets, threads, thread_state);
+            }
+
+            let names = unsafe {
+                let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
+                let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
+                renumber_and_mark_distinct_lms_suffixes_32s_1k_omp(t, sa, n, m, threads)
+            };
+            if names < m {
+                let f = unsafe {
+                    let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
+                    let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
+                    compact_lms_suffixes_32s_omp(t, sa, n, m, fs, threads, thread_state)
+                };
+
+                let new_t_start = total_len - usize::try_from(m - f).expect("m - f must be non-negative");
+                if libsais_main_32s_recursion(
+                    unsafe { sa_ptr.add(new_t_start) },
+                    sa_ptr,
+                    sa_capacity,
+                    m - f,
+                    names - f,
+                    fs + n - 2 * m + f,
+                    threads,
+                    thread_state,
+                    _local_buffer,
+                ) != 0
+                {
+                    return -2;
+                }
+
+                unsafe {
+                    let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
+                    let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
+                    let buckets = std::slice::from_raw_parts_mut(buckets_ptr, need);
+                    reconstruct_compacted_lms_suffixes_32s_2k_omp(
+                        t,
+                        sa,
+                        n,
+                        k,
+                        m,
+                        fs,
+                        f,
+                        buckets,
+                        SaSint::from(use_local_buffer),
+                        threads,
+                        thread_state,
+                    );
+                }
+            } else {
+                unsafe {
+                    let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
+                    let buckets = std::slice::from_raw_parts_mut(buckets_ptr, need);
+                    count_lms_suffixes_32s_2k(t, n, k, buckets);
+                }
+            }
+        } else {
+            unsafe {
+                (*sa_ptr) = *sa_ptr.add(n_usize - 1);
+            }
+        }
+
+        unsafe {
+            let buckets = std::slice::from_raw_parts_mut(buckets_ptr, need);
+            initialize_buckets_end_32s_2k(k, buckets);
+            let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
+            place_lms_suffixes_histogram_32s_2k(sa, n, k, m, buckets);
+        }
+
+        unsafe {
+            let buckets = std::slice::from_raw_parts_mut(buckets_ptr, need);
+            initialize_buckets_start_and_end_32s_2k(k, buckets);
+            let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
+            let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
+            induce_final_order_32s_2k(t, sa, n, k, buckets, threads, thread_state);
+        }
+
+        return 0;
+    } else {
+        let k_usize = usize::try_from(k).expect("k must be non-negative");
+        let mut heap_buckets = if fs < k { Some(vec![0; k_usize]) } else { None };
+        let alignment = if fs >= 1024 && (fs - 1024) >= k {
+            1024usize
+        } else {
+            16usize
+        };
+        let mut buckets_ptr = if let Some(ref mut heap) = heap_buckets {
+            heap.as_mut_ptr()
+        } else {
+            unsafe {
+                let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
+                let start = if fs_usize >= k_usize + alignment {
+                    let byte_ptr = sa.as_mut_ptr().add(total_len - k_usize - alignment) as usize;
+                    let aligned = align_up(byte_ptr, alignment * mem::size_of::<SaSint>());
+                    (aligned - sa_ptr as usize) / mem::size_of::<SaSint>()
+                } else {
+                    total_len - k_usize
+                };
+                sa.as_mut_ptr().add(start)
+            }
+        };
+
+        if buckets_ptr.is_null() {
+            return -2;
+        }
+
+        unsafe {
+            let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
+            sa[..n_usize].fill(0);
+        }
+
+        unsafe {
+            let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
+            let buckets = std::slice::from_raw_parts_mut(buckets_ptr, k_usize);
+            count_suffixes_32s(t, n, k, buckets);
+        }
+        unsafe {
+            let buckets = std::slice::from_raw_parts_mut(buckets_ptr, k_usize);
+            initialize_buckets_end_32s_1k(k, buckets);
+        }
+
+        let m = unsafe {
+            let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
+            let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
+            let buckets = std::slice::from_raw_parts_mut(buckets_ptr, k_usize);
+            radix_sort_lms_suffixes_32s_1k(t, sa, n, buckets)
+        };
+        if m > 1 {
+            unsafe {
+                let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
+                let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
+                let buckets = std::slice::from_raw_parts_mut(buckets_ptr, k_usize);
+                induce_partial_order_32s_1k_omp(t, sa, n, k, buckets, threads, thread_state);
+            }
+
+            let names = unsafe {
+                let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
+                let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
+                renumber_and_mark_distinct_lms_suffixes_32s_1k_omp(t, sa, n, m, threads)
+            };
+            if names < m {
+                if heap_buckets.is_some() {
+                    let _ = heap_buckets.take();
+                    buckets_ptr = std::ptr::null_mut();
+                }
+
+                let f = unsafe {
+                    let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
+                    let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
+                    compact_lms_suffixes_32s_omp(t, sa, n, m, fs, threads, thread_state)
+                };
+
+                let new_t_start = total_len - usize::try_from(m - f).expect("m - f must be non-negative");
+                if libsais_main_32s_recursion(
+                    unsafe { sa_ptr.add(new_t_start) },
+                    sa_ptr,
+                    sa_capacity,
+                    m - f,
+                    names - f,
+                    fs + n - 2 * m + f,
+                    threads,
+                    thread_state,
+                    _local_buffer,
+                ) != 0
+                {
+                    return -2;
+                }
+
+                unsafe {
+                    let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
+                    let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
+                    reconstruct_compacted_lms_suffixes_32s_1k_omp(t, sa, n, m, fs, f, threads, thread_state);
+                }
+
+                if buckets_ptr.is_null() {
+                    heap_buckets = Some(vec![0; k_usize]);
+                    buckets_ptr = heap_buckets
+                        .as_mut()
+                        .expect("heap buckets must exist")
+                        .as_mut_ptr();
+                    if buckets_ptr.is_null() {
+                        return -2;
+                    }
+                }
+            }
+
+            unsafe {
+                let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
+                let buckets = std::slice::from_raw_parts_mut(buckets_ptr, k_usize);
+                count_suffixes_32s(t, n, k, buckets);
+            }
+            unsafe {
+                let buckets = std::slice::from_raw_parts_mut(buckets_ptr, k_usize);
+                initialize_buckets_end_32s_1k(k, buckets);
+            }
+            unsafe {
+                let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
+                let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
+                let buckets = std::slice::from_raw_parts_mut(buckets_ptr, k_usize);
+                place_lms_suffixes_interval_32s_1k(t, sa, k, m, buckets);
+            }
+        }
+
+        unsafe {
+            let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
+            let sa = std::slice::from_raw_parts_mut(sa_ptr, total_len);
+            let buckets = std::slice::from_raw_parts_mut(buckets_ptr, k_usize);
+            induce_final_order_32s_1k(t, sa, n, k, buckets, threads, thread_state);
+        }
+
+        0
+    }
 }
 
 fn libsais_main_32s_entry(
