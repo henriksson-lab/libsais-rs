@@ -1,8 +1,30 @@
 [package]
 name = "libsais-rs"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "Apache-2.0"
+description = "Rust translation of libsais for suffix array construction and related transforms"
+readme = "README.md"
+repository = "https://github.com/henriksson-lab/libsais-rs"
+homepage = "https://github.com/henriksson-lab/libsais-rs"
+documentation = "https://docs.rs/libsais-rs"
+keywords = ["suffix-array", "bwt", "text", "bioinformatics"]
+categories = ["algorithms", "science"]
+include = [
+    "/Cargo.toml",
+    "/README.md",
+    "/LICENSE",
+    "/build.rs",
+    "/src/**",
+    "/examples/**",
+    "/cprobe/**",
+    "/libsais/LICENSE",
+    "/libsais/README.md",
+    "/libsais/VERSION",
+    "/libsais/CHANGES",
+    "/libsais/include/**",
+    "/libsais/src/**",
+]
 
 [lib]
 name = "libsais_rs"

@@ -223,7 +223,7 @@ pub fn gather_lms_suffixes_8u(
     }
 
     let mut f0 = usize::from(c0 >= c1);
-    let mut f1 = 0usize;
+    let mut f1: usize;
     let mut i = block_start + block_size - 2;
     let limit = block_start + 3;
 
@@ -286,9 +286,9 @@ pub fn gather_lms_suffixes_32s(t: &[SaSint], sa: &mut [SaSint], n: SaSint) -> Sa
     let mut i = n as FastSint - 2;
     let mut m = n_usize - 1;
     let mut f0 = 1usize;
-    let mut f1 = 0usize;
+    let mut f1: usize;
     let mut c0 = t[n_usize - 1] as FastSint;
-    let mut c1 = 0 as FastSint;
+    let mut c1: FastSint;
 
     while i >= 3 {
         c1 = t[i as usize] as FastSint;
@@ -332,9 +332,9 @@ pub fn gather_compacted_lms_suffixes_32s(t: &[SaSint], sa: &mut [SaSint], n: SaS
     let mut i = n as FastSint - 2;
     let mut m = n_usize - 1;
     let mut f0 = 1usize;
-    let mut f1 = 0usize;
+    let mut f1: usize;
     let mut c0 = t[n_usize - 1] as FastSint;
-    let mut c1 = 0 as FastSint;
+    let mut c1: FastSint;
 
     while i >= 3 {
         c1 = t[i as usize] as FastSint;
@@ -379,9 +379,9 @@ pub fn count_lms_suffixes_32s_4k(t: &[SaSint], n: SaSint, k: SaSint, buckets: &m
     let _k_usize = usize::try_from(k).expect("k must be non-negative");
     let mut i = n as FastSint - 2;
     let mut f0 = 1usize;
-    let mut f1 = 0usize;
+    let mut f1: usize;
     let mut c0 = t[n_usize - 1] as FastSint;
-    let mut c1 = 0 as FastSint;
+    let mut c1: FastSint;
 
     while i >= 3 {
         c1 = t[i as usize] as FastSint;
@@ -421,9 +421,9 @@ pub fn count_lms_suffixes_32s_2k(t: &[SaSint], n: SaSint, k: SaSint, buckets: &m
     let _k_usize = usize::try_from(k).expect("k must be non-negative");
     let mut i = n as FastSint - 2;
     let mut f0 = 1usize;
-    let mut f1 = 0usize;
+    let mut f1: usize;
     let mut c0 = t[n_usize - 1] as FastSint;
-    let mut c1 = 0 as FastSint;
+    let mut c1: FastSint;
 
     while i >= 3 {
         c1 = t[i as usize] as FastSint;
@@ -463,9 +463,9 @@ pub fn count_compacted_lms_suffixes_32s_2k(t: &[SaSint], n: SaSint, k: SaSint, b
     let _k_usize = usize::try_from(k).expect("k must be non-negative");
     let mut i = n as FastSint - 2;
     let mut f0 = 1usize;
-    let mut f1 = 0usize;
+    let mut f1: usize;
     let mut c0 = t[n_usize - 1] as FastSint;
-    let mut c1 = 0 as FastSint;
+    let mut c1: FastSint;
 
     while i >= 3 {
         c1 = t[i as usize] as FastSint;
@@ -525,7 +525,7 @@ pub fn count_and_gather_lms_suffixes_8u(
         }
 
         let mut f0 = usize::from(c0 >= c1);
-        let mut f1 = 0usize;
+        let mut f1: usize;
         let mut i = m - 1;
         let limit = omp_block_start + 3;
 
@@ -683,7 +683,7 @@ pub fn count_and_gather_lms_suffixes_32s_4k(
         }
 
         let mut f0 = usize::from(c0 >= c1);
-        let mut f1 = 0usize;
+        let mut f1: usize;
         let mut i = m - 1;
         let limit = omp_block_start + prefetch_distance + 3;
 
@@ -767,7 +767,7 @@ pub fn count_and_gather_lms_suffixes_32s_2k(
         }
 
         let mut f0 = usize::from(c0 >= c1);
-        let mut f1 = 0usize;
+        let mut f1: usize;
         let mut i = m - 1;
         let limit = omp_block_start + prefetch_distance + 3;
 
@@ -852,7 +852,7 @@ pub fn count_and_gather_compacted_lms_suffixes_32s_2k(
         }
 
         let mut f0 = usize::from(c0 >= c1);
-        let mut f1 = 0usize;
+        let mut f1: usize;
         let mut i = m as FastSint - 1;
         let limit = block_start as FastSint + 3;
 
@@ -926,7 +926,7 @@ pub fn count_and_gather_lms_suffixes_32s_4k_nofs_omp(
     buckets: &mut [SaSint],
     threads: SaSint,
 ) -> SaSint {
-    let mut m = 0;
+    let m;
     let omp_num_threads = if threads > 1 && n >= 65_536 { 2 } else { 1 };
 
     if omp_num_threads == 1 {
@@ -947,7 +947,7 @@ pub fn count_and_gather_lms_suffixes_32s_2k_nofs_omp(
     buckets: &mut [SaSint],
     threads: SaSint,
 ) -> SaSint {
-    let mut m = 0;
+    let m;
     let omp_num_threads = if threads > 1 && n >= 65_536 { 2 } else { 1 };
 
     if omp_num_threads == 1 {
@@ -968,7 +968,7 @@ pub fn count_and_gather_compacted_lms_suffixes_32s_2k_nofs_omp(
     buckets: &mut [SaSint],
     threads: SaSint,
 ) -> SaSint {
-    let mut m = 0;
+    let m;
     let omp_num_threads = if threads > 1 && n >= 65_536 { 2 } else { 1 };
 
     if omp_num_threads == 1 {
@@ -1500,9 +1500,9 @@ pub fn initialize_buckets_for_lms_suffixes_radix_sort_8u(
     mut first_lms_suffix: SaSint,
 ) -> SaSint {
     let mut f0 = 0usize;
-    let mut f1 = 0usize;
+    let mut f1: usize;
     let mut c0 = t[first_lms_suffix as usize] as FastSint;
-    let mut c1 = 0 as FastSint;
+    let mut c1: FastSint;
 
     while {
         first_lms_suffix -= 1;
@@ -1557,9 +1557,9 @@ pub fn initialize_buckets_for_lms_suffixes_radix_sort_32s_6k(
     mut first_lms_suffix: SaSint,
 ) -> SaSint {
     let mut f0 = 0usize;
-    let mut f1 = 0usize;
+    let mut f1: usize;
     let mut c0 = t[first_lms_suffix as usize] as FastSint;
-    let mut c1 = 0 as FastSint;
+    let mut c1: FastSint;
 
     while {
         first_lms_suffix -= 1;
@@ -1806,9 +1806,9 @@ pub fn radix_sort_lms_suffixes_32s_1k(t: &[SaSint], sa: &mut [SaSint], n: SaSint
     let mut i = n as FastSint - 2;
     let mut m = 0;
     let mut f0 = 1usize;
-    let mut f1 = 0usize;
+    let mut f1: usize;
     let mut c0 = t[n_usize - 1] as FastSint;
-    let mut c1 = 0 as FastSint;
+    let mut c1: FastSint;
     let mut c2 = 0 as FastSint;
 
     while i >= 67 {

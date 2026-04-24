@@ -1,10 +1,12 @@
 # libsais-rs
 
-Bitwise-faithful Rust translation work for the upstream [`IlyaGrebnov/libsais`](https://github.com/IlyaGrebnov/libsais), commit `b6e52ef33fe14f9d5c14c580d162b6fd2c27f2a8`
+`libsais-rs` is a Rust translation of [`IlyaGrebnov/libsais`](https://github.com/IlyaGrebnov/libsais) for suffix array construction and related transforms.
 
-* 2026-04-22: This code *might* now be functional, with speed on par with the original code. More testing will be needed, use with care
+This crate currently tracks upstream `libsais` version `2.10.4`. 
 
-**Most text here is LLM-generated. Do not trust below**
+
+* 2026-04-24: Appears to be a functional translation on par with speed. More testing needed, compare with original version before you consider swapping it out
+
 
 ## This is an LLM-mediated faithful (hopefully) translation, not the original code! 
 
@@ -29,38 +31,14 @@ But:
 
 This blurb might be out of date. Go to [this page](https://github.com/henriksson-lab/rustification) for the latest information and further information about how we approach translation
 
-## Repository Layout
-
-- [`src/lib.rs`](src/lib.rs): Rust translation
-- [`libsais/`](libsais/): upstream C source kept as reference
-- [`cprobe/libsais_probe.c`](cprobe/libsais_probe.c): direct C parity harness
-- [`build.rs`](build.rs): compiles the C probe
 
 
-## Running Tests
-
-Run the full suite:
-
-```bash
-cargo test
-```
-
-Run a focused parity test:
-
-```bash
-cargo test libsais_main_32s_entry_matches_upstream_c_on_large_generated_6k_case -- --nocapture
-```
-
-## Library Usage
-
-Add the crate to `Cargo.toml`:
+## Usage
 
 ```toml
 [dependencies]
-libsais-rs = { path = "/path/to/libsais" }
+libsais-rs = "0.1.1"
 ```
-
-Minimal suffix-array example:
 
 ```rust
 use libsais_rs::{libsais, SaSint};
@@ -78,21 +56,34 @@ fn main() {
 
 Notes:
 
-- `sa` must have length at least `text.len() + fs`
-- `fs` is the amount of extra scratch space made available at the tail of `sa`
-- for the basic case above, `fs = 0` is valid
-- if you want symbol frequencies, pass `Some(&mut freq)` where `freq.len() >= 256`
+- `sa.len()` must be at least `text.len() + fs`
+- `fs` is extra scratch space made available at the tail of `sa`
+- `freq`, when used, must have length at least `256`
 
-## Current Benchmark Snapshot
+## Development
+
+Run tests with:
+
+```bash
+cargo test
+```
+
+Run the local Rust-vs-C benchmark example with:
+
+```bash
+cargo run --release --example bench_vs_c
+```
+
+## Performance
 
 The repository includes [`examples/bench_vs_c.rs`](examples/bench_vs_c.rs), which compares the current Rust translation against the vendored upstream C implementation in a single-threaded suffix-array-construction configuration.
 
-Latest locally confirmed run:
+Latest local snapshot:
 
 ```text
-README.md                            len=    6797 iter=200  rust=   0.284 ms  c=   0.295 ms  ratio= 0.96x
-libsais/src/libsais.c                len=  388397 iter= 40  rust=  11.770 ms  c=  11.213 ms  ratio= 1.05x
-generated/mixed-1MiB                 len= 1048576 iter= 10  rust=  40.196 ms  c=  38.582 ms  ratio= 1.04x
+README.md                     len=    6797 iter=200  rust=   0.284 ms  c=   0.295 ms  ratio= 0.96x
+libsais/src/libsais.c         len=  388397 iter= 40  rust=  11.770 ms  c=  11.213 ms  ratio= 1.05x
+generated/mixed-1MiB          len= 1048576 iter= 10  rust=  40.196 ms  c=  38.582 ms  ratio= 1.04x
 ```
 
 Command used:
@@ -101,8 +92,16 @@ Command used:
 cargo run --release --example bench_vs_c
 ```
 
-These measurements are noisy enough that one run should be treated as a snapshot, not a hard claim. The medium and large recursive cases are currently close to parity with the upstream C code, but repeated runs can move by a few percent.
+These numbers are a local snapshot, not a stability guarantee. Repeated runs can move by a few percent depending on machine, compiler, and system load.
+
+## Upstream Sources
+
+The repository vendors the upstream C sources under [`libsais/`](libsais/) for reference and parity testing.
+
+Upstream project:
+
+- <https://github.com/IlyaGrebnov/libsais>
 
 ## License
 
-Apache License 2.0 (same as original code)
+Apache License 2.0.
