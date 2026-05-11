@@ -100,3 +100,70 @@ sa_sint_t probe_public_libsais(
 ) {
     return libsais(T, SA, n, fs, NULL);
 }
+
+sa_sint_t probe_public_libsais_freq(
+    const uint8_t * T,
+    sa_sint_t * SA,
+    sa_sint_t n,
+    sa_sint_t fs,
+    sa_sint_t * freq
+) {
+    return libsais(T, SA, n, fs, freq);
+}
+
+sa_sint_t probe_public_libsais_gsa_freq(
+    const uint8_t * T,
+    sa_sint_t * SA,
+    sa_sint_t n,
+    sa_sint_t fs,
+    sa_sint_t * freq
+) {
+    return libsais_gsa(T, SA, n, fs, freq);
+}
+
+sa_sint_t probe_public_libsais_bwt_freq(
+    const uint8_t * T,
+    uint8_t * U,
+    sa_sint_t * A,
+    sa_sint_t n,
+    sa_sint_t fs,
+    sa_sint_t * freq
+) {
+    return libsais_bwt(T, U, A, n, fs, freq);
+}
+
+sa_sint_t probe_public_libsais_bwt_aux_freq(
+    const uint8_t * T,
+    uint8_t * U,
+    sa_sint_t * A,
+    sa_sint_t n,
+    sa_sint_t fs,
+    sa_sint_t * freq,
+    sa_sint_t r,
+    sa_sint_t * I
+) {
+    return libsais_bwt_aux(T, U, A, n, fs, freq, r, I);
+}
+
+sa_sint_t probe_public_libsais_unbwt_freq(
+    const uint8_t * T,
+    uint8_t * U,
+    sa_sint_t * A,
+    sa_sint_t n,
+    const sa_sint_t * freq,
+    sa_sint_t i
+) {
+    return libsais_unbwt(T, U, A, n, freq, i);
+}
+
+sa_sint_t probe_public_libsais_unbwt_aux_freq(
+    const uint8_t * T,
+    uint8_t * U,
+    sa_sint_t * A,
+    sa_sint_t n,
+    const sa_sint_t * freq,
+    sa_sint_t r,
+    const sa_sint_t * I
+) {
+    return libsais_unbwt_aux(T, U, A, n, freq, r, I);
+}

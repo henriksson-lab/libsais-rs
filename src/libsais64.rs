@@ -1,29 +1,22 @@
 use std::marker::PhantomData;
 use std::mem;
 
-pub mod libsais16;
-pub mod libsais16x64;
-pub mod libsais64;
-pub use libsais16::{libsais16, SaSint as SaSint16, SaUint as SaUint16};
-pub use libsais16x64::{libsais16x64, SaSint as SaSint16x64, SaUint as SaUint16x64};
-pub use libsais64::{libsais64, SaSint as SaSint64, SaUint as SaUint64};
-
-pub type SaSint = i32;
-pub type SaUint = u32;
+pub type SaSint = i64;
+pub type SaUint = u64;
 pub type FastSint = isize;
 pub type FastUint = usize;
 
-pub const SAINT_BIT: u32 = 32;
-pub const SAINT_MAX: SaSint = i32::MAX;
-pub const SAINT_MIN: SaSint = i32::MIN;
+pub const SAINT_BIT: u32 = 64;
+pub const SAINT_MAX: SaSint = i64::MAX;
+pub const SAINT_MIN: SaSint = i64::MIN;
 
 pub const ALPHABET_SIZE: usize = 1usize << 8;
 pub const UNBWT_FASTBITS: usize = 17;
 
 pub const SUFFIX_GROUP_BIT: u32 = SAINT_BIT - 1;
-pub const SUFFIX_GROUP_MARKER: SaSint = 1_i32 << (SUFFIX_GROUP_BIT - 1);
+pub const SUFFIX_GROUP_MARKER: SaSint = 1_i64 << (SUFFIX_GROUP_BIT - 1);
 
-pub const LIBSAIS_LOCAL_BUFFER_SIZE: usize = 2000;
+pub const LIBSAIS_LOCAL_BUFFER_SIZE: usize = 1000;
 pub const LIBSAIS_PER_THREAD_CACHE_SIZE: usize = 24_576;
 
 pub const LIBSAIS_FLAGS_NONE: SaSint = 0;
@@ -471,19 +464,19 @@ pub fn count_lms_suffixes_32s_4k(t: &[SaSint], n: SaSint, k: SaSint, buckets: &m
     while i >= 3 {
         c1 = t[i as usize] as FastSint;
         f1 = usize::from(c1 > (c0 - f0 as FastSint));
-        buckets[buckets_index4((c0 as SaSint & SAINT_MAX) as usize, f0 + f0 + f1)] += 1;
+        buckets[buckets_index4(c0 as usize, f0 + f0 + f1)] += 1;
 
         c0 = t[(i - 1) as usize] as FastSint;
         f0 = usize::from(c0 > (c1 - f1 as FastSint));
-        buckets[buckets_index4((c1 as SaSint & SAINT_MAX) as usize, f1 + f1 + f0)] += 1;
+        buckets[buckets_index4(c1 as usize, f1 + f1 + f0)] += 1;
 
         c1 = t[(i - 2) as usize] as FastSint;
         f1 = usize::from(c1 > (c0 - f0 as FastSint));
-        buckets[buckets_index4((c0 as SaSint & SAINT_MAX) as usize, f0 + f0 + f1)] += 1;
+        buckets[buckets_index4(c0 as usize, f0 + f0 + f1)] += 1;
 
         c0 = t[(i - 3) as usize] as FastSint;
         f0 = usize::from(c0 > (c1 - f1 as FastSint));
-        buckets[buckets_index4((c1 as SaSint & SAINT_MAX) as usize, f1 + f1 + f0)] += 1;
+        buckets[buckets_index4(c1 as usize, f1 + f1 + f0)] += 1;
 
         i -= 4;
     }
@@ -493,11 +486,11 @@ pub fn count_lms_suffixes_32s_4k(t: &[SaSint], n: SaSint, k: SaSint, buckets: &m
         c0 = t[i as usize] as FastSint;
         f1 = f0;
         f0 = usize::from(c0 > (c1 - f1 as FastSint));
-        buckets[buckets_index4((c1 as SaSint & SAINT_MAX) as usize, f1 + f1 + f0)] += 1;
+        buckets[buckets_index4(c1 as usize, f1 + f1 + f0)] += 1;
         i -= 1;
     }
 
-    buckets[buckets_index4((c0 as SaSint & SAINT_MAX) as usize, f0 + f0)] += 1;
+    buckets[buckets_index4(c0 as usize, f0 + f0)] += 1;
 }
 
 pub fn count_lms_suffixes_32s_2k(t: &[SaSint], n: SaSint, k: SaSint, buckets: &mut [SaSint]) {
@@ -513,19 +506,19 @@ pub fn count_lms_suffixes_32s_2k(t: &[SaSint], n: SaSint, k: SaSint, buckets: &m
     while i >= 3 {
         c1 = t[i as usize] as FastSint;
         f1 = usize::from(c1 > (c0 - f0 as FastSint));
-        buckets[buckets_index2((c0 as SaSint & SAINT_MAX) as usize, f1 & !f0)] += 1;
+        buckets[buckets_index2(c0 as usize, f1 & !f0)] += 1;
 
         c0 = t[(i - 1) as usize] as FastSint;
         f0 = usize::from(c0 > (c1 - f1 as FastSint));
-        buckets[buckets_index2((c1 as SaSint & SAINT_MAX) as usize, f0 & !f1)] += 1;
+        buckets[buckets_index2(c1 as usize, f0 & !f1)] += 1;
 
         c1 = t[(i - 2) as usize] as FastSint;
         f1 = usize::from(c1 > (c0 - f0 as FastSint));
-        buckets[buckets_index2((c0 as SaSint & SAINT_MAX) as usize, f1 & !f0)] += 1;
+        buckets[buckets_index2(c0 as usize, f1 & !f0)] += 1;
 
         c0 = t[(i - 3) as usize] as FastSint;
         f0 = usize::from(c0 > (c1 - f1 as FastSint));
-        buckets[buckets_index2((c1 as SaSint & SAINT_MAX) as usize, f0 & !f1)] += 1;
+        buckets[buckets_index2(c1 as usize, f0 & !f1)] += 1;
 
         i -= 4;
     }
@@ -535,11 +528,11 @@ pub fn count_lms_suffixes_32s_2k(t: &[SaSint], n: SaSint, k: SaSint, buckets: &m
         c0 = t[i as usize] as FastSint;
         f1 = f0;
         f0 = usize::from(c0 > (c1 - f1 as FastSint));
-        buckets[buckets_index2((c1 as SaSint & SAINT_MAX) as usize, f0 & !f1)] += 1;
+        buckets[buckets_index2(c1 as usize, f0 & !f1)] += 1;
         i -= 1;
     }
 
-    buckets[buckets_index2((c0 as SaSint & SAINT_MAX) as usize, 0)] += 1;
+    buckets[buckets_index2(c0 as usize, 0)] += 1;
 }
 
 pub fn count_compacted_lms_suffixes_32s_2k(
@@ -625,25 +618,25 @@ pub fn count_and_gather_lms_suffixes_8u(
             f1 = usize::from(c1 > (c0 - f0 as FastSint));
             sa[m as usize] = (i + 1) as SaSint;
             m -= (f1 & !f0) as FastSint;
-            buckets[buckets_index4((c0 as SaSint & SAINT_MAX) as usize, f0 + f0 + f1)] += 1;
+            buckets[buckets_index4(c0 as usize, f0 + f0 + f1)] += 1;
 
             c0 = t[(i - 1) as usize] as FastSint;
             f0 = usize::from(c0 > (c1 - f1 as FastSint));
             sa[m as usize] = i as SaSint;
             m -= (f0 & !f1) as FastSint;
-            buckets[buckets_index4((c1 as SaSint & SAINT_MAX) as usize, f1 + f1 + f0)] += 1;
+            buckets[buckets_index4(c1 as usize, f1 + f1 + f0)] += 1;
 
             c1 = t[(i - 2) as usize] as FastSint;
             f1 = usize::from(c1 > (c0 - f0 as FastSint));
             sa[m as usize] = (i - 1) as SaSint;
             m -= (f1 & !f0) as FastSint;
-            buckets[buckets_index4((c0 as SaSint & SAINT_MAX) as usize, f0 + f0 + f1)] += 1;
+            buckets[buckets_index4(c0 as usize, f0 + f0 + f1)] += 1;
 
             c0 = t[(i - 3) as usize] as FastSint;
             f0 = usize::from(c0 > (c1 - f1 as FastSint));
             sa[m as usize] = (i - 2) as SaSint;
             m -= (f0 & !f1) as FastSint;
-            buckets[buckets_index4((c1 as SaSint & SAINT_MAX) as usize, f1 + f1 + f0)] += 1;
+            buckets[buckets_index4(c1 as usize, f1 + f1 + f0)] += 1;
 
             i -= 4;
         }
@@ -656,7 +649,7 @@ pub fn count_and_gather_lms_suffixes_8u(
             f0 = usize::from(c0 > (c1 - f1 as FastSint));
             sa[m as usize] = (i + 1) as SaSint;
             m -= (f0 & !f1) as FastSint;
-            buckets[buckets_index4((c1 as SaSint & SAINT_MAX) as usize, f1 + f1 + f0)] += 1;
+            buckets[buckets_index4(c1 as usize, f1 + f1 + f0)] += 1;
             i -= 1;
         }
 
@@ -668,7 +661,7 @@ pub fn count_and_gather_lms_suffixes_8u(
         f1 = usize::from(c1 > (c0 - f0 as FastSint));
         sa[m as usize] = (i + 1) as SaSint;
         m -= (f1 & !f0) as FastSint;
-        buckets[buckets_index4((c0 as SaSint & SAINT_MAX) as usize, f0 + f0 + f1)] += 1;
+        buckets[buckets_index4(c0 as usize, f0 + f0 + f1)] += 1;
     }
 
     (omp_block_start + omp_block_size - 1 - m) as SaSint
@@ -789,25 +782,25 @@ pub fn count_and_gather_lms_suffixes_32s_4k(
             f1 = usize::from(c1 > (c0 - f0 as FastSint));
             sa[m as usize] = (i + 1) as SaSint;
             m -= (f1 & !f0) as FastSint;
-            buckets[buckets_index4((c0 as SaSint & SAINT_MAX) as usize, f0 + f0 + f1)] += 1;
+            buckets[buckets_index4(c0 as usize, f0 + f0 + f1)] += 1;
 
             c0 = t[(i - 1) as usize] as FastSint;
             f0 = usize::from(c0 > (c1 - f1 as FastSint));
             sa[m as usize] = i as SaSint;
             m -= (f0 & !f1) as FastSint;
-            buckets[buckets_index4((c1 as SaSint & SAINT_MAX) as usize, f1 + f1 + f0)] += 1;
+            buckets[buckets_index4(c1 as usize, f1 + f1 + f0)] += 1;
 
             c1 = t[(i - 2) as usize] as FastSint;
             f1 = usize::from(c1 > (c0 - f0 as FastSint));
             sa[m as usize] = (i - 1) as SaSint;
             m -= (f1 & !f0) as FastSint;
-            buckets[buckets_index4((c0 as SaSint & SAINT_MAX) as usize, f0 + f0 + f1)] += 1;
+            buckets[buckets_index4(c0 as usize, f0 + f0 + f1)] += 1;
 
             c0 = t[(i - 3) as usize] as FastSint;
             f0 = usize::from(c0 > (c1 - f1 as FastSint));
             sa[m as usize] = (i - 2) as SaSint;
             m -= (f0 & !f1) as FastSint;
-            buckets[buckets_index4((c1 as SaSint & SAINT_MAX) as usize, f1 + f1 + f0)] += 1;
+            buckets[buckets_index4(c1 as usize, f1 + f1 + f0)] += 1;
 
             i -= 4;
         }
@@ -820,7 +813,7 @@ pub fn count_and_gather_lms_suffixes_32s_4k(
             f0 = usize::from(c0 > (c1 - f1 as FastSint));
             sa[m as usize] = (i + 1) as SaSint;
             m -= (f0 & !f1) as FastSint;
-            buckets[buckets_index4((c1 as SaSint & SAINT_MAX) as usize, f1 + f1 + f0)] += 1;
+            buckets[buckets_index4(c1 as usize, f1 + f1 + f0)] += 1;
             i -= 1;
         }
 
@@ -832,7 +825,7 @@ pub fn count_and_gather_lms_suffixes_32s_4k(
         f1 = usize::from(c1 > (c0 - f0 as FastSint));
         sa[m as usize] = (i + 1) as SaSint;
         m -= (f1 & !f0) as FastSint;
-        buckets[buckets_index4((c0 as SaSint & SAINT_MAX) as usize, f0 + f0 + f1)] += 1;
+        buckets[buckets_index4(c0 as usize, f0 + f0 + f1)] += 1;
     }
 
     (omp_block_start + omp_block_size - 1 - m) as SaSint
@@ -877,25 +870,25 @@ pub fn count_and_gather_lms_suffixes_32s_2k(
             f1 = usize::from(c1 > (c0 - f0 as FastSint));
             sa[m as usize] = (i + 1) as SaSint;
             m -= (f1 & !f0) as FastSint;
-            buckets[buckets_index2((c0 as SaSint & SAINT_MAX) as usize, f1 & !f0)] += 1;
+            buckets[buckets_index2(c0 as usize, f1 & !f0)] += 1;
 
             c0 = t[(i - 1) as usize] as FastSint;
             f0 = usize::from(c0 > (c1 - f1 as FastSint));
             sa[m as usize] = i as SaSint;
             m -= (f0 & !f1) as FastSint;
-            buckets[buckets_index2((c1 as SaSint & SAINT_MAX) as usize, f0 & !f1)] += 1;
+            buckets[buckets_index2(c1 as usize, f0 & !f1)] += 1;
 
             c1 = t[(i - 2) as usize] as FastSint;
             f1 = usize::from(c1 > (c0 - f0 as FastSint));
             sa[m as usize] = (i - 1) as SaSint;
             m -= (f1 & !f0) as FastSint;
-            buckets[buckets_index2((c0 as SaSint & SAINT_MAX) as usize, f1 & !f0)] += 1;
+            buckets[buckets_index2(c0 as usize, f1 & !f0)] += 1;
 
             c0 = t[(i - 3) as usize] as FastSint;
             f0 = usize::from(c0 > (c1 - f1 as FastSint));
             sa[m as usize] = (i - 2) as SaSint;
             m -= (f0 & !f1) as FastSint;
-            buckets[buckets_index2((c1 as SaSint & SAINT_MAX) as usize, f0 & !f1)] += 1;
+            buckets[buckets_index2(c1 as usize, f0 & !f1)] += 1;
 
             i -= 4;
         }
@@ -908,7 +901,7 @@ pub fn count_and_gather_lms_suffixes_32s_2k(
             f0 = usize::from(c0 > (c1 - f1 as FastSint));
             sa[m as usize] = (i + 1) as SaSint;
             m -= (f0 & !f1) as FastSint;
-            buckets[buckets_index2((c1 as SaSint & SAINT_MAX) as usize, f0 & !f1)] += 1;
+            buckets[buckets_index2(c1 as usize, f0 & !f1)] += 1;
             i -= 1;
         }
 
@@ -920,7 +913,7 @@ pub fn count_and_gather_lms_suffixes_32s_2k(
         f1 = usize::from(c1 > (c0 - f0 as FastSint));
         sa[m as usize] = (i + 1) as SaSint;
         m -= (f1 & !f0) as FastSint;
-        buckets[buckets_index2((c0 as SaSint & SAINT_MAX) as usize, f1 & !f0)] += 1;
+        buckets[buckets_index2(c0 as usize, f1 & !f0)] += 1;
     }
 
     (omp_block_start + omp_block_size - 1 - m) as SaSint
@@ -1407,9 +1400,7 @@ pub fn count_and_gather_lms_suffixes_32s_4k_omp(
     threads: SaSint,
     thread_state: &mut [ThreadState],
 ) -> SaSint {
-    let free_space = if local_buckets > 1 {
-        local_buckets as FastSint
-    } else if local_buckets != 0 {
+    let free_space = if local_buckets != 0 {
         LIBSAIS_LOCAL_BUFFER_SIZE as FastSint
     } else {
         FastSint::try_from(buckets.len()).expect("bucket length must fit FastSint")
@@ -1452,9 +1443,7 @@ pub fn count_and_gather_lms_suffixes_32s_2k_omp(
     threads: SaSint,
     thread_state: &mut [ThreadState],
 ) -> SaSint {
-    let free_space = if local_buckets > 1 {
-        local_buckets as FastSint
-    } else if local_buckets != 0 {
+    let free_space = if local_buckets != 0 {
         LIBSAIS_LOCAL_BUFFER_SIZE as FastSint
     } else {
         FastSint::try_from(buckets.len()).expect("bucket length must fit FastSint")
@@ -1987,24 +1976,29 @@ pub fn radix_sort_lms_suffixes_32s_block_gather(
     omp_block_start: FastSint,
     omp_block_size: FastSint,
 ) {
-    let start = usize::try_from(omp_block_start).expect("block start must be non-negative");
-    let mut i = omp_block_start;
-    let mut j = omp_block_start + omp_block_size - 64 - 3;
+    if omp_block_size <= 0 {
+        return;
+    }
+
+    let start = usize::try_from(omp_block_start).expect("omp_block_start must be non-negative");
+    let size = usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
+    let mut i = start;
+    let mut j = if size > 67 { start + size - 67 } else { start };
 
     while i < j {
         for current in [i, i + 1, i + 2, i + 3] {
-            let ci = current as usize - start;
-            let index = sa[current as usize];
+            let ci = current - start;
+            let index = sa[current];
             cache[ci].index = index;
             cache[ci].symbol = t[index as usize];
         }
         i += 4;
     }
 
-    j += 64 + 3;
+    j = if size > 67 { j + 67 } else { start + size };
     while i < j {
-        let ci = i as usize - start;
-        let index = sa[i as usize];
+        let ci = i - start;
+        let index = sa[i];
         cache[ci].index = index;
         cache[ci].symbol = t[index as usize];
         i += 1;
@@ -2017,13 +2011,18 @@ pub fn radix_sort_lms_suffixes_32s_6k_block_sort(
     omp_block_start: FastSint,
     omp_block_size: FastSint,
 ) {
-    let start = usize::try_from(omp_block_start).expect("block start must be non-negative");
-    let mut i = omp_block_start + omp_block_size - 1;
-    let mut j = omp_block_start + 64 + 3;
+    if omp_block_size <= 0 {
+        return;
+    }
+
+    let start = usize::try_from(omp_block_start).expect("omp_block_start must be non-negative");
+    let size = usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
+    let mut i = start + size - 1;
+    let mut j = start + 64 + 3;
 
     while i >= j {
         for current in [i, i - 1, i - 2, i - 3] {
-            let ci = current as usize - start;
+            let ci = current - start;
             let v = cache[ci].symbol as usize;
             induction_bucket[v] -= 1;
             cache[ci].symbol = induction_bucket[v];
@@ -2033,10 +2032,13 @@ pub fn radix_sort_lms_suffixes_32s_6k_block_sort(
 
     j -= 64 + 3;
     while i >= j {
-        let ci = i as usize - start;
+        let ci = i - start;
         let v = cache[ci].symbol as usize;
         induction_bucket[v] -= 1;
         cache[ci].symbol = induction_bucket[v];
+        if i == 0 {
+            break;
+        }
         i -= 1;
     }
 }
@@ -2047,13 +2049,18 @@ pub fn radix_sort_lms_suffixes_32s_2k_block_sort(
     omp_block_start: FastSint,
     omp_block_size: FastSint,
 ) {
-    let start = usize::try_from(omp_block_start).expect("block start must be non-negative");
-    let mut i = omp_block_start + omp_block_size - 1;
-    let mut j = omp_block_start + 64 + 3;
+    if omp_block_size <= 0 {
+        return;
+    }
+
+    let start = usize::try_from(omp_block_start).expect("omp_block_start must be non-negative");
+    let size = usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
+    let mut i = start + size - 1;
+    let mut j = start + 64 + 3;
 
     while i >= j {
         for current in [i, i - 1, i - 2, i - 3] {
-            let ci = current as usize - start;
+            let ci = current - start;
             let v = buckets_index2(cache[ci].symbol as usize, 0);
             induction_bucket[v] -= 1;
             cache[ci].symbol = induction_bucket[v];
@@ -2063,10 +2070,13 @@ pub fn radix_sort_lms_suffixes_32s_2k_block_sort(
 
     j -= 64 + 3;
     while i >= j {
-        let ci = i as usize - start;
+        let ci = i - start;
         let v = buckets_index2(cache[ci].symbol as usize, 0);
         induction_bucket[v] -= 1;
         cache[ci].symbol = induction_bucket[v];
+        if i == 0 {
+            break;
+        }
         i -= 1;
     }
 }
@@ -4430,8 +4440,9 @@ pub fn partial_sorting_scan_right_to_left_32s_6k_block_sort(
         cache[i].index = (p - 1) | (((buckets[2 + v] != d) as SaSint) << (SAINT_BIT - 1));
         buckets[2 + v] = d;
 
-        let block_end = omp_block_start as SaSint + omp_block_size as SaSint;
-        if target >= omp_block_start as SaSint && target < block_end {
+        if target >= omp_block_start as SaSint
+            && target < (omp_block_start + omp_block_size) as SaSint
+        {
             let s = usize::try_from(target - omp_block_start as SaSint)
                 .expect("cache slot must be non-negative");
             let q = cache[i].index & SAINT_MAX;
@@ -4485,8 +4496,9 @@ pub fn partial_sorting_scan_right_to_left_32s_4k_block_sort(
                     << (SUFFIX_GROUP_BIT - 1));
             distinct_names[usize::try_from(v).expect("bucket symbol must be non-negative")] = d;
 
-            let block_end = omp_block_start as SaSint + omp_block_size as SaSint;
-            if target >= omp_block_start as SaSint && target < block_end {
+            if target >= omp_block_start as SaSint
+                && target < (omp_block_start + omp_block_size) as SaSint
+            {
                 let ni = usize::try_from(target - omp_block_start as SaSint)
                     .expect("cache slot must be non-negative");
                 let mut np = cache[i].index;
@@ -8304,61 +8316,22 @@ pub fn final_sorting_scan_right_to_left_32s_block_gather(
     if omp_block_size <= 0 {
         return;
     }
-    let prefetch_distance = 64usize;
-    let start = omp_block_start as usize;
-    let block_end = start + omp_block_size as usize;
-    let mut i = start;
-    let mut j = block_end.saturating_sub(prefetch_distance + 1);
-
-    while i < j {
-        let ci = i - start;
-        let mut symbol0 = SAINT_MIN;
-        let mut p0 = sa[i];
-        sa[i] = p0 & SAINT_MAX;
-        if p0 > 0 {
-            p0 -= 1;
-            let p0_usize = p0 as usize;
-            cache[ci].index = p0
-                | ((usize::from(t[p0_usize - usize::from(p0 > 0)] > t[p0_usize]) as SaSint)
-                    << (SAINT_BIT - 1));
-            symbol0 = t[p0_usize];
-        }
-        cache[ci].symbol = symbol0;
-
-        let i1 = i + 1;
-        let ci1 = i1 - start;
-        let mut symbol1 = SAINT_MIN;
-        let mut p1 = sa[i1];
-        sa[i1] = p1 & SAINT_MAX;
-        if p1 > 0 {
-            p1 -= 1;
-            let p1_usize = p1 as usize;
-            cache[ci1].index = p1
-                | ((usize::from(t[p1_usize - usize::from(p1 > 0)] > t[p1_usize]) as SaSint)
-                    << (SAINT_BIT - 1));
-            symbol1 = t[p1_usize];
-        }
-        cache[ci1].symbol = symbol1;
-
-        i += 2;
-    }
-
-    j = block_end;
-    while i < j {
-        let ci = i - start;
+    let start = usize::try_from(omp_block_start).expect("omp_block_start must be non-negative");
+    let size = usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
+    for offset in 0..size {
+        let i = start + offset;
         let mut symbol = SAINT_MIN;
         let mut p = sa[i];
         sa[i] = p & SAINT_MAX;
         if p > 0 {
             p -= 1;
             let p_usize = p as usize;
-            cache[ci].index = p
+            cache[offset].index = p
                 | ((usize::from(t[p_usize - usize::from(p > 0)] > t[p_usize]) as SaSint)
                     << (SAINT_BIT - 1));
             symbol = t[p_usize];
         }
-        cache[ci].symbol = symbol;
-        i += 1;
+        cache[offset].symbol = symbol;
     }
 }
 
@@ -9097,7 +9070,7 @@ pub fn induce_final_order_8u_omp(
                 n as FastSint - bucket_end[0] as FastSint,
                 k,
                 bucket_end,
-                1,
+                threads,
                 thread_state,
             );
         } else {
@@ -9915,7 +9888,7 @@ fn normalize_omp_threads(threads: SaSint) -> SaSint {
     }
 }
 
-fn libsais_main_32s_recursion(
+fn libsais64_main_32s_recursion(
     t_ptr: *mut SaSint,
     sa_ptr: *mut SaSint,
     sa_capacity: usize,
@@ -9933,6 +9906,50 @@ fn libsais_main_32s_recursion(
     let total_len = n_usize + fs_usize;
     assert!(total_len <= sa_capacity);
 
+    if k > 0 && n <= i32::MAX as SaSint {
+        let int32_max = i32::MAX as SaSint;
+        let expanded_space = fs as i128 + fs as i128 + n as i128 + n as i128;
+        let new_fs = if expanded_space <= int32_max as i128 {
+            fs + fs + n
+        } else {
+            int32_max - n
+        };
+
+        if (new_fs / k >= 6)
+            || (new_fs / k >= 4 && n <= int32_max / 2)
+            || (new_fs / k < 4 && new_fs >= fs)
+        {
+            let mut t32 = unsafe { std::slice::from_raw_parts(t_ptr, n_usize) }
+                .iter()
+                .map(|&value| (value as u64 as u32) as i32)
+                .collect::<Vec<_>>();
+            let mut sa32 = vec![0i32; n_usize + new_fs as usize];
+
+            let index = crate::libsais_int_omp(
+                &mut t32,
+                &mut sa32,
+                k as i32,
+                new_fs as i32,
+                threads as i32,
+            );
+            if index >= 0 {
+                unsafe {
+                    let t = std::slice::from_raw_parts_mut(t_ptr, n_usize);
+                    for (dst, src) in t.iter_mut().zip(t32.iter()) {
+                        *dst = (*src as u32) as SaSint;
+                    }
+
+                    let sa = std::slice::from_raw_parts_mut(sa_ptr, n_usize);
+                    for (dst, src) in sa.iter_mut().zip(sa32.iter()) {
+                        *dst = (*src as u32) as SaSint;
+                    }
+                }
+            }
+
+            return index as SaSint;
+        }
+    }
+
     if k > 0 && ((fs / k) >= 6 || (local_buffer_size / k) >= 6) {
         let k_usize = usize::try_from(k).expect("k must be non-negative");
         let alignment = if fs >= 1024 && ((fs - 1024) / k) >= 6 {
@@ -9942,7 +9959,6 @@ fn libsais_main_32s_recursion(
         };
         let need = 6 * k_usize;
         let use_local_buffer = local_buffer_size > fs;
-        let mut bucket_free_space = SaSint::from(use_local_buffer);
         let buckets_ptr = if use_local_buffer {
             _local_buffer.as_mut_ptr()
         } else {
@@ -9956,8 +9972,6 @@ fn libsais_main_32s_recursion(
                     } else {
                         total_len - need
                     };
-                bucket_free_space =
-                    SaSint::try_from(start - n_usize).expect("bucket free space must fit SaSint");
                 sa[start..].as_mut_ptr()
             }
         };
@@ -9972,7 +9986,7 @@ fn libsais_main_32s_recursion(
                 n,
                 k,
                 buckets,
-                bucket_free_space,
+                SaSint::from(use_local_buffer),
                 threads,
                 thread_state,
             )
@@ -10066,18 +10080,16 @@ fn libsais_main_32s_recursion(
 
                 let new_t_start =
                     total_len - usize::try_from(m - f).expect("m - f must be non-negative");
-                let recursive_n = m - f;
-                let recursive_fs = fs + n - 2 * m + f;
-                if libsais_main_32s_recursion(
+                if libsais64_main_32s_recursion(
                     unsafe {
                         std::slice::from_raw_parts_mut(sa_ptr, total_len)[new_t_start..]
                             .as_mut_ptr()
                     },
                     sa_ptr,
                     sa_capacity,
-                    recursive_n,
+                    m - f,
                     names - f,
-                    recursive_fs,
+                    fs + n - 2 * m + f,
                     threads,
                     thread_state,
                     _local_buffer,
@@ -10146,7 +10158,6 @@ fn libsais_main_32s_recursion(
         };
         let need = 4 * k_usize;
         let use_local_buffer = local_buffer_size > fs;
-        let mut bucket_free_space = SaSint::from(use_local_buffer);
         let buckets_ptr = if use_local_buffer {
             _local_buffer.as_mut_ptr()
         } else {
@@ -10160,8 +10171,6 @@ fn libsais_main_32s_recursion(
                     } else {
                         total_len - need
                     };
-                bucket_free_space =
-                    SaSint::try_from(start - n_usize).expect("bucket free space must fit SaSint");
                 sa[start..].as_mut_ptr()
             }
         };
@@ -10176,7 +10185,7 @@ fn libsais_main_32s_recursion(
                 n,
                 k,
                 buckets,
-                bucket_free_space,
+                SaSint::from(use_local_buffer),
                 threads,
                 thread_state,
             )
@@ -10221,7 +10230,7 @@ fn libsais_main_32s_recursion(
 
                 let new_t_start =
                     total_len - usize::try_from(m - f).expect("m - f must be non-negative");
-                if libsais_main_32s_recursion(
+                if libsais64_main_32s_recursion(
                     unsafe {
                         std::slice::from_raw_parts_mut(sa_ptr, total_len)[new_t_start..]
                             .as_mut_ptr()
@@ -10290,7 +10299,6 @@ fn libsais_main_32s_recursion(
         };
         let need = 2 * k_usize;
         let use_local_buffer = local_buffer_size > fs;
-        let mut bucket_free_space = SaSint::from(use_local_buffer);
         let buckets_ptr = if use_local_buffer {
             _local_buffer.as_mut_ptr()
         } else {
@@ -10304,8 +10312,6 @@ fn libsais_main_32s_recursion(
                     } else {
                         total_len - need
                     };
-                bucket_free_space =
-                    SaSint::try_from(start - n_usize).expect("bucket free space must fit SaSint");
                 sa[start..].as_mut_ptr()
             }
         };
@@ -10320,7 +10326,7 @@ fn libsais_main_32s_recursion(
                 n,
                 k,
                 buckets,
-                bucket_free_space,
+                SaSint::from(use_local_buffer),
                 threads,
                 thread_state,
             )
@@ -10372,7 +10378,7 @@ fn libsais_main_32s_recursion(
 
                 let new_t_start =
                     total_len - usize::try_from(m - f).expect("m - f must be non-negative");
-                if libsais_main_32s_recursion(
+                if libsais64_main_32s_recursion(
                     unsafe {
                         std::slice::from_raw_parts_mut(sa_ptr, total_len)[new_t_start..]
                             .as_mut_ptr()
@@ -10514,7 +10520,7 @@ fn libsais_main_32s_recursion(
 
                 let new_t_start =
                     total_len - usize::try_from(m - f).expect("m - f must be non-negative");
-                if libsais_main_32s_recursion(
+                if libsais64_main_32s_recursion(
                     unsafe {
                         std::slice::from_raw_parts_mut(sa_ptr, total_len)[new_t_start..]
                             .as_mut_ptr()
@@ -10587,7 +10593,7 @@ fn libsais_main_32s_recursion(
     }
 }
 
-fn libsais_main_32s_entry(
+fn libsais64_main_32s_entry(
     t: &mut [SaSint],
     sa: &mut [SaSint],
     n: SaSint,
@@ -10597,7 +10603,7 @@ fn libsais_main_32s_entry(
     thread_state: &mut [ThreadState],
 ) -> SaSint {
     let mut local_buffer = [0; 2 * LIBSAIS_LOCAL_BUFFER_SIZE];
-    libsais_main_32s_recursion(
+    libsais64_main_32s_recursion(
         t.as_mut_ptr(),
         sa.as_mut_ptr(),
         sa.len(),
@@ -10610,7 +10616,7 @@ fn libsais_main_32s_entry(
     )
 }
 
-fn libsais_main_8u(
+fn libsais64_main_8u(
     t: &[u8],
     sa: &mut [SaSint],
     buckets: &mut [SaSint],
@@ -10668,23 +10674,23 @@ fn libsais_main_8u(
 
         let names = renumber_and_gather_lms_suffixes_omp(sa, n, m, fs, threads, thread_state);
         if names < m {
-            let recursive_text_start =
-                n_usize + usize::try_from(fs).expect("fs must be non-negative") - m_usize;
-            let recursive_fs = fs + n - 2 * m;
-
-            let index = libsais_main_32s_entry(
+            if libsais64_main_32s_entry(
                 unsafe {
-                    std::slice::from_raw_parts_mut(sa[recursive_text_start..].as_mut_ptr(), m_usize)
+                    std::slice::from_raw_parts_mut(
+                        sa[n_usize + usize::try_from(fs).expect("fs must be non-negative")
+                            - m_usize..]
+                            .as_mut_ptr(),
+                        m_usize,
+                    )
                 },
                 sa,
                 m,
                 names,
-                recursive_fs,
+                fs + n - 2 * m,
                 threads,
                 thread_state,
-            );
-
-            if index != 0 {
+            ) != 0
+            {
                 return -2;
             }
 
@@ -10700,7 +10706,7 @@ fn libsais_main_8u(
     induce_final_order_8u_omp(t, sa, n, k, flags, r, i, buckets, threads, thread_state)
 }
 
-fn libsais_main(
+fn libsais64_main(
     t: &[u8],
     sa: &mut [SaSint],
     flags: SaSint,
@@ -10718,7 +10724,7 @@ fn libsais_main(
         };
         let mut buckets = vec![0; 8 * ALPHABET_SIZE];
 
-        libsais_main_8u(
+        libsais64_main_8u(
             t,
             sa,
             &mut buckets,
@@ -10734,7 +10740,7 @@ fn libsais_main(
         let mut thread_state = [];
         let mut buckets = [0; 8 * ALPHABET_SIZE];
 
-        libsais_main_8u(
+        libsais64_main_8u(
             t,
             sa,
             &mut buckets,
@@ -10749,7 +10755,7 @@ fn libsais_main(
     }
 }
 
-fn libsais_main_int(
+fn libsais64_main_int(
     t: &mut [SaSint],
     sa: &mut [SaSint],
     k: SaSint,
@@ -10766,7 +10772,7 @@ fn libsais_main_int(
         Vec::new()
     };
 
-    libsais_main_32s_entry(
+    libsais64_main_32s_entry(
         t,
         sa,
         SaSint::try_from(t.len()).expect("input length must fit SaSint"),
@@ -10789,7 +10795,7 @@ fn main_32s_recursion(
     thread_state: &mut [ThreadState],
     local_buffer: &mut [SaSint],
 ) -> SaSint {
-    libsais_main_32s_recursion(
+    libsais64_main_32s_recursion(
         t_ptr,
         sa_ptr,
         sa_capacity,
@@ -10812,7 +10818,7 @@ fn main_32s_entry(
     threads: SaSint,
     thread_state: &mut [ThreadState],
 ) -> SaSint {
-    libsais_main_32s_entry(t, sa, n, k, fs, threads, thread_state)
+    libsais64_main_32s_entry(t, sa, n, k, fs, threads, thread_state)
 }
 
 #[allow(dead_code)]
@@ -10828,15 +10834,68 @@ fn main_8u(
     threads: SaSint,
     thread_state: &mut [ThreadState],
 ) -> SaSint {
-    libsais_main_8u(t, sa, buckets, flags, r, i, fs, freq, threads, thread_state)
+    libsais64_main_8u(t, sa, buckets, flags, r, i, fs, freq, threads, thread_state)
 }
 
 #[allow(dead_code)]
-fn main_int(t: &mut [SaSint], sa: &mut [SaSint], k: SaSint, fs: SaSint, threads: SaSint) -> SaSint {
-    libsais_main_int(t, sa, k, fs, threads)
+fn main_long(
+    t: &mut [SaSint],
+    sa: &mut [SaSint],
+    k: SaSint,
+    fs: SaSint,
+    threads: SaSint,
+) -> SaSint {
+    libsais64_main_int(t, sa, k, fs, threads)
 }
 
-fn libsais_main_ctx(
+#[allow(dead_code)]
+fn convert_32u_to_64u(s: &[u32], d: &mut [u64], block_start: usize, block_size: usize) {
+    for i in block_start..block_start + block_size {
+        d[i] = s[i] as u64;
+    }
+}
+
+#[allow(dead_code)]
+fn convert_inplace_32u_to_64u(v: &mut [u32], block_start: usize, block_size: usize) {
+    for i in (block_start..block_start + block_size).rev() {
+        let value = v[i];
+        v[2 * i] = value;
+        v[2 * i + 1] = 0;
+    }
+}
+
+#[allow(dead_code)]
+fn convert_inplace_64u_to_32u(v: &mut [u32], block_start: usize, block_size: usize) {
+    for i in block_start..block_start + block_size {
+        v[i] = v[2 * i];
+    }
+}
+
+#[allow(dead_code)]
+fn convert_inplace_32u_to_64u_omp(v: &mut [u32], n: SaSint, threads: SaSint) {
+    let mut n = usize::try_from(n).expect("n must be non-negative");
+    let threads = usize::try_from(threads.max(1)).expect("threads must be non-negative");
+
+    while n >= 65_536 {
+        let block_size = n >> 1;
+        n -= block_size;
+
+        let omp_block_stride = (block_size / threads) & !15usize;
+        for thread in 0..threads {
+            let block_start = thread * omp_block_stride;
+            let size = if thread + 1 < threads {
+                omp_block_stride
+            } else {
+                block_size - block_start
+            };
+            convert_inplace_32u_to_64u(v, n + block_start, size);
+        }
+    }
+
+    convert_inplace_32u_to_64u(v, 0, n);
+}
+
+fn libsais64_main_ctx(
     ctx: &mut Context,
     t: &[u8],
     sa: &mut [SaSint],
@@ -10861,7 +10920,7 @@ fn libsais_main_ctx(
         &mut empty_thread_state
     };
 
-    libsais_main_8u(
+    libsais64_main_8u(
         t,
         sa,
         &mut ctx.buckets,
@@ -10875,7 +10934,7 @@ fn libsais_main_ctx(
     )
 }
 
-pub fn libsais(t: &[u8], sa: &mut [SaSint], fs: SaSint, freq: Option<&mut [SaSint]>) -> SaSint {
+pub fn libsais64(t: &[u8], sa: &mut [SaSint], fs: SaSint, freq: Option<&mut [SaSint]>) -> SaSint {
     if fs < 0
         || sa.len()
             < t.len()
@@ -10903,10 +10962,20 @@ pub fn libsais(t: &[u8], sa: &mut [SaSint], fs: SaSint, freq: Option<&mut [SaSin
         return 0;
     }
 
-    libsais_main(t, sa, LIBSAIS_FLAGS_NONE, 0, None, fs, freq, 1)
+    if n <= i32::MAX as usize {
+        return libsais64_run_32bit_omp(t, sa, fs, freq, 1, false)
+            .expect("n <= INT32_MAX must have 32-bit workspace");
+    }
+
+    libsais64_main(t, sa, LIBSAIS_FLAGS_NONE, 0, None, fs, freq, 1)
 }
 
-pub fn libsais_gsa(t: &[u8], sa: &mut [SaSint], fs: SaSint, freq: Option<&mut [SaSint]>) -> SaSint {
+pub fn libsais64_gsa(
+    t: &[u8],
+    sa: &mut [SaSint],
+    fs: SaSint,
+    freq: Option<&mut [SaSint]>,
+) -> SaSint {
     if fs < 0
         || sa.len()
             < t.len()
@@ -10938,10 +11007,15 @@ pub fn libsais_gsa(t: &[u8], sa: &mut [SaSint], fs: SaSint, freq: Option<&mut [S
         return 0;
     }
 
-    libsais_main(t, sa, LIBSAIS_FLAGS_GSA, 0, None, fs, freq, 1)
+    if n <= i32::MAX as usize {
+        return libsais64_run_32bit_omp(t, sa, fs, freq, 1, true)
+            .expect("n <= INT32_MAX must have 32-bit workspace");
+    }
+
+    libsais64_main(t, sa, LIBSAIS_FLAGS_GSA, 0, None, fs, freq, 1)
 }
 
-pub fn libsais_int(t: &mut [SaSint], sa: &mut [SaSint], k: SaSint, fs: SaSint) -> SaSint {
+pub fn libsais64_int(t: &mut [SaSint], sa: &mut [SaSint], k: SaSint, fs: SaSint) -> SaSint {
     if fs < 0
         || sa.len()
             < t.len()
@@ -10957,10 +11031,14 @@ pub fn libsais_int(t: &mut [SaSint], sa: &mut [SaSint], k: SaSint, fs: SaSint) -
         return 0;
     }
 
-    libsais_main_int(t, sa, k, fs, 1)
+    libsais64_main_int(t, sa, k, fs, 1)
 }
 
-pub fn libsais_ctx(
+pub fn libsais64_long(t: &mut [SaSint], sa: &mut [SaSint], k: SaSint, fs: SaSint) -> SaSint {
+    libsais64_int(t, sa, k, fs)
+}
+
+pub fn libsais64_ctx(
     ctx: &mut Context,
     t: &[u8],
     sa: &mut [SaSint],
@@ -10994,10 +11072,10 @@ pub fn libsais_ctx(
         return 0;
     }
 
-    libsais_main_ctx(ctx, t, sa, LIBSAIS_FLAGS_NONE, 0, None, fs, freq)
+    libsais64_main_ctx(ctx, t, sa, LIBSAIS_FLAGS_NONE, 0, None, fs, freq)
 }
 
-pub fn libsais_gsa_ctx(
+pub fn libsais64_gsa_ctx(
     ctx: &mut Context,
     t: &[u8],
     sa: &mut [SaSint],
@@ -11035,10 +11113,10 @@ pub fn libsais_gsa_ctx(
         return 0;
     }
 
-    libsais_main_ctx(ctx, t, sa, LIBSAIS_FLAGS_GSA, 0, None, fs, freq)
+    libsais64_main_ctx(ctx, t, sa, LIBSAIS_FLAGS_GSA, 0, None, fs, freq)
 }
 
-pub fn libsais_bwt(
+pub fn libsais64_bwt(
     t: &[u8],
     u: &mut [u8],
     a: &mut [SaSint],
@@ -11073,7 +11151,12 @@ pub fn libsais_bwt(
         return n as SaSint;
     }
 
-    let mut index = libsais_main(t, a, LIBSAIS_FLAGS_BWT, 0, None, fs, freq, 1);
+    if n <= i32::MAX as usize {
+        return libsais64_bwt_run_32bit_omp(t, u, fs, freq, 1)
+            .expect("n <= INT32_MAX must have 32-bit workspace");
+    }
+
+    let mut index = libsais64_main(t, a, LIBSAIS_FLAGS_BWT, 0, None, fs, freq, 1);
     if index >= 0 {
         index += 1;
         let split = usize::try_from(index).expect("index must be non-negative");
@@ -11089,7 +11172,7 @@ pub fn libsais_bwt(
     index
 }
 
-pub fn libsais_bwt_aux(
+pub fn libsais64_bwt_aux(
     t: &[u8],
     u: &mut [u8],
     a: &mut [SaSint],
@@ -11133,7 +11216,12 @@ pub fn libsais_bwt_aux(
         return 0;
     }
 
-    let index = libsais_main(t, a, LIBSAIS_FLAGS_BWT, r, Some(i), fs, freq, 1);
+    if n <= i32::MAX as usize && r <= i32::MAX as SaSint {
+        return libsais64_bwt_aux_run_32bit_omp(t, u, fs, freq, r, i, 1)
+            .expect("n/r <= INT32_MAX must have 32-bit workspace");
+    }
+
+    let index = libsais64_main(t, a, LIBSAIS_FLAGS_BWT, r, Some(i), fs, freq, 1);
     if index == 0 {
         let split = usize::try_from(i[0]).expect("primary index must be non-negative");
         u[0] = t[n - 1];
@@ -11148,7 +11236,7 @@ pub fn libsais_bwt_aux(
     index
 }
 
-pub fn libsais_bwt_ctx(
+pub fn libsais64_bwt_ctx(
     ctx: &mut Context,
     t: &[u8],
     u: &mut [u8],
@@ -11184,7 +11272,7 @@ pub fn libsais_bwt_ctx(
         return n as SaSint;
     }
 
-    let mut index = libsais_main_ctx(ctx, t, a, LIBSAIS_FLAGS_BWT, 0, None, fs, freq);
+    let mut index = libsais64_main_ctx(ctx, t, a, LIBSAIS_FLAGS_BWT, 0, None, fs, freq);
     if index >= 0 {
         index += 1;
         let split = usize::try_from(index).expect("index must be non-negative");
@@ -11205,7 +11293,7 @@ pub fn libsais_bwt_ctx(
     index
 }
 
-pub fn libsais_bwt_aux_ctx(
+pub fn libsais64_bwt_aux_ctx(
     ctx: &mut Context,
     t: &[u8],
     u: &mut [u8],
@@ -11254,7 +11342,7 @@ pub fn libsais_bwt_aux_ctx(
         return 0;
     }
 
-    let index = libsais_main_ctx(ctx, t, a, LIBSAIS_FLAGS_BWT, r, Some(i), fs, freq);
+    let index = libsais64_main_ctx(ctx, t, a, LIBSAIS_FLAGS_BWT, r, Some(i), fs, freq);
     if index == 0 {
         let split = usize::try_from(i[0]).expect("primary index must be non-negative");
         u[0] = t[n - 1];
@@ -11282,7 +11370,154 @@ pub fn create_ctx_omp(threads: SaSint) -> Option<Context> {
     create_ctx_main(normalize_omp_threads(threads))
 }
 
-pub fn libsais_omp(
+fn libsais64_new_32bit_fs(n: usize, fs: SaSint) -> Option<i32> {
+    if n > i32::MAX as usize {
+        return None;
+    }
+
+    let n = n as SaSint;
+    let int32_max = i32::MAX as SaSint;
+    let expanded_space = fs as i128 + fs as i128 + n as i128 + n as i128;
+    let new_fs = if expanded_space <= int32_max as i128 {
+        fs + fs + n
+    } else {
+        int32_max - n
+    };
+
+    i32::try_from(new_fs).ok()
+}
+
+fn libsais64_run_32bit_omp(
+    t: &[u8],
+    sa: &mut [SaSint],
+    fs: SaSint,
+    freq: Option<&mut [SaSint]>,
+    threads: SaSint,
+    gsa: bool,
+) -> Option<SaSint> {
+    let new_fs = libsais64_new_32bit_fs(t.len(), fs)?;
+    let mut sa32 = vec![0i32; t.len() + usize::try_from(new_fs).expect("new_fs is non-negative")];
+
+    let index = if let Some(freq) = freq {
+        let mut freq32 = vec![0i32; ALPHABET_SIZE];
+        let index = if gsa {
+            crate::libsais_gsa_omp(t, &mut sa32, new_fs, Some(&mut freq32), threads as i32)
+        } else {
+            crate::libsais_omp(t, &mut sa32, new_fs, Some(&mut freq32), threads as i32)
+        };
+        if index >= 0 {
+            for (dst, src) in freq.iter_mut().zip(freq32.iter()) {
+                *dst = SaSint::from(*src);
+            }
+        }
+        index
+    } else if gsa {
+        crate::libsais_gsa_omp(t, &mut sa32, new_fs, None, threads as i32)
+    } else {
+        crate::libsais_omp(t, &mut sa32, new_fs, None, threads as i32)
+    };
+
+    if index >= 0 {
+        for (dst, src) in sa.iter_mut().zip(sa32.iter()).take(t.len()) {
+            *dst = SaSint::from(*src as u32);
+        }
+    }
+
+    Some(SaSint::from(index))
+}
+
+fn copy_freq32_to_64(freq: &mut [SaSint], freq32: &[i32]) {
+    for (dst, src) in freq.iter_mut().zip(freq32.iter()).take(ALPHABET_SIZE) {
+        *dst = SaSint::from(*src);
+    }
+}
+
+fn libsais64_bwt_run_32bit_omp(
+    t: &[u8],
+    u: &mut [u8],
+    fs: SaSint,
+    freq: Option<&mut [SaSint]>,
+    threads: SaSint,
+) -> Option<SaSint> {
+    let new_fs = libsais64_new_32bit_fs(t.len(), fs)?;
+    let mut a32 = vec![0i32; t.len() + usize::try_from(new_fs).expect("new_fs is non-negative")];
+
+    let index = if let Some(freq) = freq {
+        let mut freq32 = vec![0i32; ALPHABET_SIZE];
+        let index =
+            crate::libsais_bwt_omp(t, u, &mut a32, new_fs, Some(&mut freq32), threads as i32);
+        if index >= 0 {
+            copy_freq32_to_64(freq, &freq32);
+        }
+        index
+    } else {
+        crate::libsais_bwt_omp(t, u, &mut a32, new_fs, None, threads as i32)
+    };
+
+    Some(SaSint::from(index))
+}
+
+fn libsais64_bwt_aux_run_32bit_omp(
+    t: &[u8],
+    u: &mut [u8],
+    fs: SaSint,
+    freq: Option<&mut [SaSint]>,
+    r: SaSint,
+    i: &mut [SaSint],
+    threads: SaSint,
+) -> Option<SaSint> {
+    if r > i32::MAX as SaSint {
+        return None;
+    }
+
+    let new_fs = libsais64_new_32bit_fs(t.len(), fs)?;
+    let mut a32 = vec![0i32; t.len() + usize::try_from(new_fs).expect("new_fs is non-negative")];
+    let sample_count = if t.is_empty() {
+        1
+    } else {
+        (t.len() - 1) / usize::try_from(r).expect("r must be positive") + 1
+    };
+    let mut i32_out = vec![0i32; sample_count];
+
+    let index = if let Some(freq) = freq {
+        let mut freq32 = vec![0i32; ALPHABET_SIZE];
+        let index = crate::libsais_bwt_aux_omp(
+            t,
+            u,
+            &mut a32,
+            new_fs,
+            Some(&mut freq32),
+            r as i32,
+            &mut i32_out,
+            threads as i32,
+        );
+        if index >= 0 {
+            copy_freq32_to_64(freq, &freq32);
+        }
+        index
+    } else {
+        crate::libsais_bwt_aux_omp(
+            t,
+            u,
+            &mut a32,
+            new_fs,
+            None,
+            r as i32,
+            &mut i32_out,
+            threads as i32,
+        )
+    };
+
+    if index >= 0 {
+        for (dst, src) in i.iter_mut().zip(i32_out.iter()).take(sample_count) {
+            *dst = SaSint::from(*src);
+        }
+    }
+
+    Some(SaSint::from(index))
+}
+
+pub fn libsais64_omp(
     t: &[u8],
     sa: &mut [SaSint],
     fs: SaSint,
@@ -11292,45 +11527,11 @@ pub fn libsais_omp(
     if threads < 0 {
         return -1;
     }
-    if let Some(freq) = freq.as_ref() {
-        if freq.len() < ALPHABET_SIZE {
-            return -1;
-        }
-    }
-    let n = t.len();
-    if n <= 1 {
-        if let Some(freq) = freq {
-            freq[..ALPHABET_SIZE].fill(0);
-            if n == 1 {
-                sa[0] = 0;
-                freq[t[0] as usize] += 1;
-            }
-        } else if n == 1 {
-            sa[0] = 0;
-        }
-        return 0;
-    }
-
-    libsais_main(
-        t,
-        sa,
-        LIBSAIS_FLAGS_NONE,
-        0,
-        None,
-        fs,
-        freq,
-        normalize_omp_threads(threads),
-    )
-}
-
-pub fn libsais_gsa_omp(
-    t: &[u8],
-    sa: &mut [SaSint],
-    fs: SaSint,
-    freq: Option<&mut [SaSint]>,
-    threads: SaSint,
-) -> SaSint {
-    if threads < 0 || t.last().copied().unwrap_or(0) != 0 {
+    if fs < 0
+        || sa.len()
+            < t.len()
+                .saturating_add(usize::try_from(fs).unwrap_or(usize::MAX))
+    {
         return -1;
     }
     if let Some(freq) = freq.as_ref() {
@@ -11352,19 +11553,60 @@ pub fn libsais_gsa_omp(
         return 0;
     }
 
-    libsais_main(
-        t,
-        sa,
-        LIBSAIS_FLAGS_GSA,
-        0,
-        None,
-        fs,
-        freq,
-        normalize_omp_threads(threads),
-    )
+    let threads = normalize_omp_threads(threads);
+    if n <= i32::MAX as usize {
+        return libsais64_run_32bit_omp(t, sa, fs, freq, threads, false)
+            .expect("n <= INT32_MAX must have 32-bit workspace");
+    }
+
+    libsais64_main(t, sa, LIBSAIS_FLAGS_NONE, 0, None, fs, freq, threads)
 }
 
-pub fn libsais_int_omp(
+pub fn libsais64_gsa_omp(
+    t: &[u8],
+    sa: &mut [SaSint],
+    fs: SaSint,
+    freq: Option<&mut [SaSint]>,
+    threads: SaSint,
+) -> SaSint {
+    if threads < 0
+        || t.last().copied().unwrap_or(0) != 0
+        || fs < 0
+        || sa.len()
+            < t.len()
+                .saturating_add(usize::try_from(fs).unwrap_or(usize::MAX))
+    {
+        return -1;
+    }
+    if let Some(freq) = freq.as_ref() {
+        if freq.len() < ALPHABET_SIZE {
+            return -1;
+        }
+    }
+    let n = t.len();
+    if n <= 1 {
+        if let Some(freq) = freq {
+            freq[..ALPHABET_SIZE].fill(0);
+            if n == 1 {
+                sa[0] = 0;
+                freq[t[0] as usize] += 1;
+            }
+        } else if n == 1 {
+            sa[0] = 0;
+        }
+        return 0;
+    }
+
+    let threads = normalize_omp_threads(threads);
+    if n <= i32::MAX as usize {
+        return libsais64_run_32bit_omp(t, sa, fs, freq, threads, true)
+            .expect("n <= INT32_MAX must have 32-bit workspace");
+    }
+
+    libsais64_main(t, sa, LIBSAIS_FLAGS_GSA, 0, None, fs, freq, threads)
+}
+
+pub fn libsais64_int_omp(
     t: &mut [SaSint],
     sa: &mut [SaSint],
     k: SaSint,
@@ -11374,6 +11616,13 @@ pub fn libsais_int_omp(
     if threads < 0 {
         return -1;
     }
+    if fs < 0
+        || sa.len()
+            < t.len()
+                .saturating_add(usize::try_from(fs).unwrap_or(usize::MAX))
+    {
+        return -1;
+    }
     if t.len() <= 1 {
         if t.len() == 1 {
             sa[0] = 0;
@@ -11381,10 +11630,20 @@ pub fn libsais_int_omp(
         return 0;
     }
 
-    libsais_main_int(t, sa, k, fs, normalize_omp_threads(threads))
+    libsais64_main_int(t, sa, k, fs, normalize_omp_threads(threads))
 }
 
-pub fn libsais_bwt_omp(
+pub fn libsais64_long_omp(
+    t: &mut [SaSint],
+    sa: &mut [SaSint],
+    k: SaSint,
+    fs: SaSint,
+    threads: SaSint,
+) -> SaSint {
+    libsais64_int_omp(t, sa, k, fs, threads)
+}
+
+pub fn libsais64_bwt_omp(
     t: &[u8],
     u: &mut [u8],
     a: &mut [SaSint],
@@ -11415,8 +11674,13 @@ pub fn libsais_bwt_omp(
         return n as SaSint;
     }
 
-    let threads = if threads > 0 { threads } else { 1 };
-    let mut index = libsais_main(t, a, LIBSAIS_FLAGS_BWT, 0, None, fs, freq, threads);
+    let threads = normalize_omp_threads(threads);
+    if n <= i32::MAX as usize {
+        return libsais64_bwt_run_32bit_omp(t, u, fs, freq, threads)
+            .expect("n <= INT32_MAX must have 32-bit workspace");
+    }
+
+    let mut index = libsais64_main(t, a, LIBSAIS_FLAGS_BWT, 0, None, fs, freq, threads);
     if index >= 0 {
         index += 1;
         let index_usize = usize::try_from(index).expect("index must be non-negative");
@@ -11437,7 +11701,7 @@ pub fn libsais_bwt_omp(
     index
 }
 
-pub fn libsais_bwt_aux_omp(
+pub fn libsais64_bwt_aux_omp(
     t: &[u8],
     u: &mut [u8],
     a: &mut [SaSint],
@@ -11487,7 +11751,12 @@ pub fn libsais_bwt_aux_omp(
     }
 
     let threads = normalize_omp_threads(threads);
-    let index = libsais_main(t, a, LIBSAIS_FLAGS_BWT, r, Some(i), fs, freq, threads);
+    if n <= i32::MAX as usize && r <= i32::MAX as SaSint {
+        return libsais64_bwt_aux_run_32bit_omp(t, u, fs, freq, r, i, threads)
+            .expect("n/r <= INT32_MAX must have 32-bit workspace");
+    }
+
+    let index = libsais64_main(t, a, LIBSAIS_FLAGS_BWT, r, Some(i), fs, freq, threads);
     if index == 0 {
         let split = usize::try_from(i[0]).expect("primary index must be non-negative");
         u[0] = t[n - 1];
@@ -11721,8 +11990,11 @@ pub fn compute_lcp_omp(
     }
 }
 
-pub fn libsais_plcp(t: &[u8], sa: &[SaSint], plcp: &mut [SaSint]) -> SaSint {
+pub fn libsais64_plcp(t: &[u8], sa: &[SaSint], plcp: &mut [SaSint]) -> SaSint {
     if sa.len() != t.len() || plcp.len() != t.len() {
+        return -1;
+    }
+    if !suffix_entries_in_bounds(sa, t.len()) {
         return -1;
     }
     if t.len() <= 1 {
@@ -11738,11 +12010,14 @@ pub fn libsais_plcp(t: &[u8], sa: &[SaSint], plcp: &mut [SaSint]) -> SaSint {
     0
 }
 
-pub fn libsais_plcp_gsa(t: &[u8], sa: &[SaSint], plcp: &mut [SaSint]) -> SaSint {
+pub fn libsais64_plcp_gsa(t: &[u8], sa: &[SaSint], plcp: &mut [SaSint]) -> SaSint {
     if t.last().copied().unwrap_or(0) != 0 {
         return -1;
     }
     if sa.len() != t.len() || plcp.len() != t.len() {
+        return -1;
+    }
+    if !suffix_entries_in_bounds(sa, t.len()) {
         return -1;
     }
     if t.len() <= 1 {
@@ -11758,8 +12033,11 @@ pub fn libsais_plcp_gsa(t: &[u8], sa: &[SaSint], plcp: &mut [SaSint]) -> SaSint 
     0
 }
 
-pub fn libsais_plcp_int(t: &[SaSint], sa: &[SaSint], plcp: &mut [SaSint]) -> SaSint {
+pub fn libsais64_plcp_int(t: &[SaSint], sa: &[SaSint], plcp: &mut [SaSint]) -> SaSint {
     if sa.len() != t.len() || plcp.len() != t.len() {
+        return -1;
+    }
+    if !suffix_entries_in_bounds(sa, t.len()) {
         return -1;
     }
     if t.len() <= 1 {
@@ -11775,8 +12053,11 @@ pub fn libsais_plcp_int(t: &[SaSint], sa: &[SaSint], plcp: &mut [SaSint]) -> SaS
     0
 }
 
-pub fn libsais_lcp(plcp: &[SaSint], sa: &[SaSint], lcp: &mut [SaSint]) -> SaSint {
+pub fn libsais64_lcp(plcp: &[SaSint], sa: &[SaSint], lcp: &mut [SaSint]) -> SaSint {
     if plcp.len() != sa.len() || lcp.len() != sa.len() {
+        return -1;
+    }
+    if !suffix_entries_in_bounds(sa, plcp.len()) {
         return -1;
     }
     if sa.len() <= 1 {
@@ -11796,11 +12077,14 @@ pub fn libsais_lcp(plcp: &[SaSint], sa: &[SaSint], lcp: &mut [SaSint]) -> SaSint
     0
 }
 
-pub fn libsais_plcp_omp(t: &[u8], sa: &[SaSint], plcp: &mut [SaSint], threads: SaSint) -> SaSint {
+pub fn libsais64_plcp_omp(t: &[u8], sa: &[SaSint], plcp: &mut [SaSint], threads: SaSint) -> SaSint {
     if threads < 0 {
         return -1;
     }
     if sa.len() != t.len() || plcp.len() != t.len() {
+        return -1;
+    }
+    if !suffix_entries_in_bounds(sa, t.len()) {
         return -1;
     }
     if t.len() <= 1 {
@@ -11817,7 +12101,7 @@ pub fn libsais_plcp_omp(t: &[u8], sa: &[SaSint], plcp: &mut [SaSint], threads: S
     0
 }
 
-pub fn libsais_plcp_gsa_omp(
+pub fn libsais64_plcp_gsa_omp(
     t: &[u8],
     sa: &[SaSint],
     plcp: &mut [SaSint],
@@ -11827,6 +12111,9 @@ pub fn libsais_plcp_gsa_omp(
         return -1;
     }
     if sa.len() != t.len() || plcp.len() != t.len() {
+        return -1;
+    }
+    if !suffix_entries_in_bounds(sa, t.len()) {
         return -1;
     }
     if t.len() <= 1 {
@@ -11843,7 +12130,7 @@ pub fn libsais_plcp_gsa_omp(
     0
 }
 
-pub fn libsais_plcp_int_omp(
+pub fn libsais64_plcp_int_omp(
     t: &[SaSint],
     sa: &[SaSint],
     plcp: &mut [SaSint],
@@ -11853,6 +12140,9 @@ pub fn libsais_plcp_int_omp(
         return -1;
     }
     if sa.len() != t.len() || plcp.len() != t.len() {
+        return -1;
+    }
+    if !suffix_entries_in_bounds(sa, t.len()) {
         return -1;
     }
     if t.len() <= 1 {
@@ -11869,7 +12159,7 @@ pub fn libsais_plcp_int_omp(
     0
 }
 
-pub fn libsais_lcp_omp(
+pub fn libsais64_lcp_omp(
     plcp: &[SaSint],
     sa: &[SaSint],
     lcp: &mut [SaSint],
@@ -11879,6 +12169,9 @@ pub fn libsais_lcp_omp(
         return -1;
     }
     if plcp.len() != sa.len() || lcp.len() != sa.len() {
+        return -1;
+    }
+    if !suffix_entries_in_bounds(sa, plcp.len()) {
         return -1;
     }
     if sa.len() <= 1 {
@@ -11896,6 +12189,11 @@ pub fn libsais_lcp_omp(
         normalize_omp_threads(threads),
     );
     0
+}
+
+fn suffix_entries_in_bounds(sa: &[SaSint], len: usize) -> bool {
+    sa.iter()
+        .all(|&value| usize::try_from(value).is_ok_and(|index| index < len))
 }
 
 pub fn unbwt_compute_histogram(t: &[u8], n: FastSint, count: &mut [SaUint]) {
@@ -11993,10 +12291,9 @@ pub fn unbwt_calculate_bi_psi(
         let c = t[i] as usize;
         let pidx = bucket1[c] as usize;
         bucket1[c] += 1;
-        let tidx = index as isize - pidx as isize;
+        let tidx = index.wrapping_sub(pidx) as i64;
         if tidx != 0 {
-            let src =
-                pidx.wrapping_add((tidx >> ((std::mem::size_of::<FastSint>() * 8) - 1)) as usize);
+            let src = pidx.wrapping_add((tidx >> 63) as usize);
             let w = ((t[src] as usize) << 8) + c;
             let dst = bucket2[w] as usize;
             p[dst] = i as SaUint;
@@ -12014,10 +12311,9 @@ pub fn unbwt_calculate_bi_psi(
         let c = t[i - 1] as usize;
         let pidx = bucket1[c] as usize;
         bucket1[c] += 1;
-        let tidx = index as isize - pidx as isize;
+        let tidx = index.wrapping_sub(pidx) as i64;
         if tidx != 0 {
-            let src =
-                pidx.wrapping_add((tidx >> ((std::mem::size_of::<FastSint>() * 8) - 1)) as usize);
+            let src = pidx.wrapping_add((tidx >> 63) as usize);
             let w = ((t[src] as usize) << 8) + c;
             let dst = bucket2[w] as usize;
             p[dst] = i as SaUint;
@@ -12057,7 +12353,7 @@ pub fn unbwt_init_single(
     bucket2: &mut [SaUint],
     fastbits: &mut [u16],
 ) {
-    let mut bucket1 = vec![0u32; ALPHABET_SIZE];
+    let mut bucket1 = vec![0u64; ALPHABET_SIZE];
     let index = i[0] as usize;
     let lastc = t[0] as usize;
     let mut shift = 0usize;
@@ -12095,10 +12391,9 @@ pub fn unbwt_compute_bigram_histogram_parallel(
         let c = c_u8 as usize;
         let p = bucket1[c] as usize;
         bucket1[c] += 1;
-        let tidx = index as isize - p as isize;
+        let tidx = index.wrapping_sub(p) as i64;
         if tidx != 0 {
-            let src =
-                p.wrapping_add((tidx >> ((std::mem::size_of::<FastSint>() * 8) - 1)) as usize);
+            let src = p.wrapping_add((tidx >> 63) as usize);
             let w = ((t[src] as usize) << 8) + c;
             bucket2[w] += 1;
         }
@@ -12142,7 +12437,7 @@ pub fn unbwt_init_parallel(
         shift += 1;
     }
 
-    let mut bucket1 = vec![0u32; ALPHABET_SIZE];
+    let mut bucket1 = vec![0u64; ALPHABET_SIZE];
     bucket2.fill(0);
 
     let n_fast = n as FastSint;
@@ -13000,12 +13295,12 @@ pub fn unbwt_main(
         shift += 1;
     }
 
-    let mut bucket2 = vec![0u32; ALPHABET_SIZE * ALPHABET_SIZE];
+    let mut bucket2 = vec![0u64; ALPHABET_SIZE * ALPHABET_SIZE];
     let mut fastbits =
         vec![0u16; 1 + (usize::try_from(n).expect("n must be non-negative") >> shift)];
     let mut buckets = if threads > 1 && n >= 262_144 {
         Some(vec![
-            0u32;
+            0u64;
             usize::try_from(threads)
                 .expect("threads must be non-negative")
                 * (ALPHABET_SIZE + ALPHABET_SIZE * ALPHABET_SIZE)
@@ -13071,14 +13366,14 @@ pub fn unbwt_main_ctx(
     )
 }
 
-pub fn libsais_unbwt(
+pub fn libsais64_unbwt(
     t: &[u8],
     u: &mut [u8],
     a: &mut [SaSint],
     freq: Option<&[SaSint]>,
     i: SaSint,
 ) -> SaSint {
-    libsais_unbwt_aux(
+    libsais64_unbwt_aux(
         t,
         u,
         a,
@@ -13088,7 +13383,7 @@ pub fn libsais_unbwt(
     )
 }
 
-pub fn libsais_unbwt_ctx(
+pub fn libsais64_unbwt_ctx(
     ctx: &mut UnbwtContext,
     t: &[u8],
     u: &mut [u8],
@@ -13096,7 +13391,7 @@ pub fn libsais_unbwt_ctx(
     freq: Option<&[SaSint]>,
     i: SaSint,
 ) -> SaSint {
-    libsais_unbwt_aux_ctx(
+    libsais64_unbwt_aux_ctx(
         ctx,
         t,
         u,
@@ -13107,7 +13402,7 @@ pub fn libsais_unbwt_ctx(
     )
 }
 
-pub fn libsais_unbwt_aux(
+pub fn libsais64_unbwt_aux(
     t: &[u8],
     u: &mut [u8],
     a: &mut [SaSint],
@@ -13150,20 +13445,20 @@ pub fn libsais_unbwt_aux(
         }
     }
 
-    let i_u32: Vec<SaUint> = i
+    let i_uint: Vec<SaUint> = i
         .iter()
         .take(sample_count)
         .map(|&sample| SaUint::try_from(sample).expect("sample was validated positive"))
         .collect();
-    let mut p = vec![0u32; t_len + 1];
-    let result = unbwt_main(t, u, &mut p, n, freq, r, &i_u32, 1);
+    let mut p = vec![0u64; t_len + 1];
+    let result = unbwt_main(t, u, &mut p, n, freq, r, &i_uint, 1);
     for t in 0..t_len {
         a[t] = p[t] as SaSint;
     }
     result
 }
 
-pub fn libsais_unbwt_aux_ctx(
+pub fn libsais64_unbwt_aux_ctx(
     ctx: &mut UnbwtContext,
     t: &[u8],
     u: &mut [u8],
@@ -13207,13 +13502,13 @@ pub fn libsais_unbwt_aux_ctx(
         }
     }
 
-    let i_u32: Vec<SaUint> = i
+    let i_uint: Vec<SaUint> = i
         .iter()
         .take(sample_count)
         .map(|&sample| SaUint::try_from(sample).expect("sample was validated positive"))
         .collect();
-    let mut p = vec![0u32; t_len + 1];
-    let result = unbwt_main_ctx(ctx, t, u, &mut p, n, freq, r, &i_u32);
+    let mut p = vec![0u64; t_len + 1];
+    let result = unbwt_main_ctx(ctx, t, u, &mut p, n, freq, r, &i_uint);
     for t in 0..t_len {
         a[t] = p[t] as SaSint;
     }
@@ -13227,7 +13522,7 @@ pub fn unbwt_create_ctx_omp(threads: SaSint) -> Option<UnbwtContext> {
     unbwt_create_ctx_main(normalize_omp_threads(threads))
 }
 
-pub fn libsais_unbwt_omp(
+pub fn libsais64_unbwt_omp(
     t: &[u8],
     u: &mut [u8],
     a: &mut [SaSint],
@@ -13235,7 +13530,7 @@ pub fn libsais_unbwt_omp(
     i: SaSint,
     threads: SaSint,
 ) -> SaSint {
-    libsais_unbwt_aux_omp(
+    libsais64_unbwt_aux_omp(
         t,
         u,
         a,
@@ -13246,7 +13541,7 @@ pub fn libsais_unbwt_omp(
     )
 }
 
-pub fn libsais_unbwt_aux_omp(
+pub fn libsais64_unbwt_aux_omp(
     t: &[u8],
     u: &mut [u8],
     a: &mut [SaSint],
@@ -13292,13 +13587,13 @@ pub fn libsais_unbwt_aux_omp(
     }
 
     let threads = if threads > 0 { threads } else { 1 };
-    let i_u32: Vec<SaUint> = i
+    let i_uint: Vec<SaUint> = i
         .iter()
         .take(sample_count)
         .map(|&sample| SaUint::try_from(sample).expect("sample was validated positive"))
         .collect();
-    let mut p = vec![0u32; t_len + 1];
-    let result = unbwt_main(t, u, &mut p, n, freq, r, &i_u32, threads);
+    let mut p = vec![0u64; t_len + 1];
+    let result = unbwt_main(t, u, &mut p, n, freq, r, &i_uint, threads);
     for idx in 0..t_len {
         a[idx] = p[idx] as SaSint;
     }
@@ -13622,87 +13917,42 @@ mod tests {
     use super::*;
 
     unsafe extern "C" {
-        fn probe_renumber_lms_suffixes_8u(
-            sa: *mut SaSint,
-            m: SaSint,
-            name: SaSint,
-            omp_block_start: FastSint,
-            omp_block_size: FastSint,
-        ) -> SaSint;
-
-        fn probe_gather_marked_lms_suffixes(
-            sa: *mut SaSint,
-            m: SaSint,
-            l: FastSint,
-            omp_block_start: FastSint,
-            omp_block_size: FastSint,
-        ) -> FastSint;
-
-        fn probe_renumber_distinct_lms_suffixes_32s_4k(
-            sa: *mut SaSint,
-            m: SaSint,
-            name: SaSint,
-            omp_block_start: FastSint,
-            omp_block_size: FastSint,
-        ) -> SaSint;
-
-        fn probe_renumber_unique_and_nonunique_lms_suffixes_32s(
-            t: *mut SaSint,
-            sa: *mut SaSint,
-            m: SaSint,
-            f: SaSint,
-            omp_block_start: FastSint,
-            omp_block_size: FastSint,
-        ) -> SaSint;
-
-        fn probe_renumber_unique_and_nonunique_lms_suffixes_32s_omp(
-            t: *mut SaSint,
-            sa: *mut SaSint,
-            m: SaSint,
-            threads: SaSint,
-        ) -> SaSint;
-
-        fn probe_renumber_and_gather_lms_suffixes_omp(
+        fn probe_public_libsais64(t: *const u8, sa: *mut SaSint, n: SaSint, fs: SaSint) -> SaSint;
+        fn probe_public_libsais64_freq(
+            t: *const u8,
             sa: *mut SaSint,
             n: SaSint,
-            m: SaSint,
             fs: SaSint,
-            threads: SaSint,
+            freq: *mut SaSint,
         ) -> SaSint;
-
-        fn probe_renumber_and_mark_distinct_lms_suffixes_32s_4k_omp(
+        fn probe_public_libsais64_gsa(
+            t: *const u8,
             sa: *mut SaSint,
             n: SaSint,
-            m: SaSint,
-            threads: SaSint,
+            fs: SaSint,
         ) -> SaSint;
-
-        fn probe_main_32s_entry(
+        fn probe_public_libsais64_gsa_freq(
+            t: *const u8,
+            sa: *mut SaSint,
+            n: SaSint,
+            fs: SaSint,
+            freq: *mut SaSint,
+        ) -> SaSint;
+        fn probe_public_libsais64_long(
             t: *mut SaSint,
             sa: *mut SaSint,
             n: SaSint,
             k: SaSint,
             fs: SaSint,
-            threads: SaSint,
         ) -> SaSint;
-
-        fn probe_public_libsais_freq(
+        fn probe_public_libsais64_bwt(
             t: *const u8,
-            sa: *mut SaSint,
+            u: *mut u8,
+            a: *mut SaSint,
             n: SaSint,
             fs: SaSint,
-            freq: *mut SaSint,
         ) -> SaSint;
-
-        fn probe_public_libsais_gsa_freq(
-            t: *const u8,
-            sa: *mut SaSint,
-            n: SaSint,
-            fs: SaSint,
-            freq: *mut SaSint,
-        ) -> SaSint;
-
-        fn probe_public_libsais_bwt_freq(
+        fn probe_public_libsais64_bwt_freq(
             t: *const u8,
             u: *mut u8,
             a: *mut SaSint,
@@ -13710,8 +13960,16 @@ mod tests {
             fs: SaSint,
             freq: *mut SaSint,
         ) -> SaSint;
-
-        fn probe_public_libsais_bwt_aux_freq(
+        fn probe_public_libsais64_bwt_aux(
+            t: *const u8,
+            u: *mut u8,
+            a: *mut SaSint,
+            n: SaSint,
+            fs: SaSint,
+            r: SaSint,
+            i: *mut SaSint,
+        ) -> SaSint;
+        fn probe_public_libsais64_bwt_aux_freq(
             t: *const u8,
             u: *mut u8,
             a: *mut SaSint,
@@ -13721,8 +13979,14 @@ mod tests {
             r: SaSint,
             i: *mut SaSint,
         ) -> SaSint;
-
-        fn probe_public_libsais_unbwt_freq(
+        fn probe_public_libsais64_unbwt(
+            t: *const u8,
+            u: *mut u8,
+            a: *mut SaSint,
+            n: SaSint,
+            i: SaSint,
+        ) -> SaSint;
+        fn probe_public_libsais64_unbwt_freq(
             t: *const u8,
             u: *mut u8,
             a: *mut SaSint,
@@ -13730,8 +13994,15 @@ mod tests {
             freq: *const SaSint,
             i: SaSint,
         ) -> SaSint;
-
-        fn probe_public_libsais_unbwt_aux_freq(
+        fn probe_public_libsais64_unbwt_aux(
+            t: *const u8,
+            u: *mut u8,
+            a: *mut SaSint,
+            n: SaSint,
+            r: SaSint,
+            i: *const SaSint,
+        ) -> SaSint;
+        fn probe_public_libsais64_unbwt_aux_freq(
             t: *const u8,
             u: *mut u8,
             a: *mut SaSint,
@@ -13740,103 +14011,76 @@ mod tests {
             r: SaSint,
             i: *const SaSint,
         ) -> SaSint;
-    }
-
-    fn make_recursive_main_32s_text(repeats: usize) -> Vec<SaSint> {
-        let motif = [9, 4, 9, 2, 9, 4, 9, 1];
-        let mut t = Vec::with_capacity(repeats * motif.len() + 1);
-        for _ in 0..repeats {
-            t.extend_from_slice(&motif);
-        }
-        t.push(0);
-        t
-    }
-
-    fn make_large_main_32s_stress_text(len: usize, alphabet: SaSint) -> Vec<SaSint> {
-        let mut state: u32 = 0x1357_9bdf;
-        let mut t = Vec::with_capacity(len + 1);
-
-        for i in 0..len {
-            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-            let mut value = ((state >> 16) % (alphabet as u32 - 1)) as SaSint + 1;
-
-            if i % 17 < 8 {
-                value = ((i / 17) as SaSint % 11) + 1;
-            }
-            if i % 29 < 10 {
-                value = (((i / 29) as SaSint * 3) % 19) + 1;
-            }
-            if i % 64 >= 48 {
-                value = t[i - 48];
-            }
-
-            t.push(value);
-        }
-
-        t.push(0);
-        t
-    }
-
-    fn assert_main_32s_entry_matches_upstream_c(
-        t: Vec<SaSint>,
-        k: SaSint,
-        fs: SaSint,
-        compare_full_sa: bool,
-    ) {
-        let mut t = t;
-        let n = t.len() as SaSint;
-        let n_usize = t.len();
-        let threads = 1;
-        let extra = usize::try_from(fs).expect("fs must be non-negative");
-        let mut sa = vec![0; t.len() + extra];
-
-        let initial_t = t.clone();
-        let initial_sa = sa.clone();
-
-        let c_result =
-            unsafe { probe_main_32s_entry(t.as_mut_ptr(), sa.as_mut_ptr(), n, k, fs, threads) };
-        let c_t = t.clone();
-        let c_sa = sa.clone();
-
-        t.copy_from_slice(&initial_t);
-        sa.copy_from_slice(&initial_sa);
-
-        let mut thread_state = alloc_thread_state(threads).expect("thread state");
-        let rust_result =
-            libsais_main_32s_entry(&mut t, &mut sa, n, k, fs, threads, &mut thread_state);
-
-        assert_eq!(rust_result, c_result);
-        assert_slice_eq_with_first_diff("T", &t, &c_t);
-        if compare_full_sa {
-            assert_slice_eq_with_first_diff("SA", &sa, &c_sa);
-        } else {
-            assert_slice_eq_with_first_diff("SA", &sa[..n_usize], &c_sa[..n_usize]);
-        }
-    }
-
-    fn assert_main_32s_entry_matches_upstream_c_for_branch(k: SaSint) {
-        assert_main_32s_entry_matches_upstream_c(
-            vec![17, 3, 17, 9, 5, 9, 2, 11, 2, 7, 1, 7, 0],
-            k,
-            0,
-            true,
-        );
-    }
-
-    fn assert_slice_eq_with_first_diff(label: &str, left: &[SaSint], right: &[SaSint]) {
-        assert_eq!(left.len(), right.len(), "{label} length mismatch");
-        if let Some((idx, (l, r))) = left
-            .iter()
-            .zip(right.iter())
-            .enumerate()
-            .find(|(_, (l, r))| l != r)
-        {
-            panic!("{label} first diff at index {idx}: rust={l}, c={r}");
-        }
+        fn probe_public_libsais64_plcp(
+            t: *const u8,
+            sa: *const SaSint,
+            plcp: *mut SaSint,
+            n: SaSint,
+        ) -> SaSint;
+        fn probe_public_libsais64_plcp_gsa(
+            t: *const u8,
+            sa: *const SaSint,
+            plcp: *mut SaSint,
+            n: SaSint,
+        ) -> SaSint;
+        fn probe_public_libsais64_lcp(
+            plcp: *const SaSint,
+            sa: *const SaSint,
+            lcp: *mut SaSint,
+            n: SaSint,
+        ) -> SaSint;
+        fn probe_libsais64_renumber_lms_suffixes_8u(
+            sa: *mut SaSint,
+            m: SaSint,
+            name: SaSint,
+            omp_block_start: FastSint,
+            omp_block_size: FastSint,
+        ) -> SaSint;
+        fn probe_libsais64_gather_marked_lms_suffixes(
+            sa: *mut SaSint,
+            m: SaSint,
+            l: FastSint,
+            omp_block_start: FastSint,
+            omp_block_size: FastSint,
+        ) -> FastSint;
+        fn probe_libsais64_renumber_and_gather_lms_suffixes_omp(
+            sa: *mut SaSint,
+            n: SaSint,
+            m: SaSint,
+            fs: SaSint,
+            threads: SaSint,
+        ) -> SaSint;
+        fn probe_libsais64_renumber_distinct_lms_suffixes_32s_4k(
+            sa: *mut SaSint,
+            m: SaSint,
+            name: SaSint,
+            omp_block_start: FastSint,
+            omp_block_size: FastSint,
+        ) -> SaSint;
+        fn probe_libsais64_renumber_and_mark_distinct_lms_suffixes_32s_4k_omp(
+            sa: *mut SaSint,
+            n: SaSint,
+            m: SaSint,
+            threads: SaSint,
+        ) -> SaSint;
+        fn probe_libsais64_renumber_unique_and_nonunique_lms_suffixes_32s(
+            t: *mut SaSint,
+            sa: *mut SaSint,
+            m: SaSint,
+            f: SaSint,
+            omp_block_start: FastSint,
+            omp_block_size: FastSint,
+        ) -> SaSint;
+        fn probe_libsais64_renumber_unique_and_nonunique_lms_suffixes_32s_omp(
+            t: *mut SaSint,
+            sa: *mut SaSint,
+            m: SaSint,
+            threads: SaSint,
+        ) -> SaSint;
     }
 
     #[test]
-    fn align_up_matches_power_of_two_alignment() {
+    fn libsais64_align_up_matches_power_of_two_alignment() {
         assert_eq!(align_up(0, 4096), 0);
         assert_eq!(align_up(1, 4096), 4096);
         assert_eq!(align_up(4095, 4096), 4096);
@@ -13846,7 +14090,7 @@ mod tests {
     }
 
     #[test]
-    fn shared_mut_array_projects_mutable_spans_from_one_backing_buffer() {
+    fn libsais64_shared_mut_array_projects_mutable_spans_from_one_backing_buffer() {
         let mut backing = vec![1, 2, 3, 4, 5, 6];
         let len;
         {
@@ -13860,7 +14104,7 @@ mod tests {
     }
 
     #[test]
-    fn create_ctx_main_matches_single_thread_layout() {
+    fn libsais64_create_ctx_main_matches_single_thread_layout() {
         let ctx = create_ctx_main(1).expect("context");
         assert_eq!(ctx.buckets.len(), 8 * ALPHABET_SIZE);
         assert_eq!(ctx.threads, 1);
@@ -13868,7 +14112,7 @@ mod tests {
     }
 
     #[test]
-    fn create_ctx_main_allocates_thread_state_for_multi_threaded_mode() {
+    fn libsais64_create_ctx_main_allocates_thread_state_for_multi_threaded_mode() {
         let ctx = create_ctx_main(3).expect("context");
         let states = ctx.thread_state.expect("thread state");
         assert_eq!(states.len(), 3);
@@ -13881,7 +14125,7 @@ mod tests {
     }
 
     #[test]
-    fn create_ctx_wraps_single_thread_main_context() {
+    fn libsais64_create_ctx_wraps_single_thread_main_context() {
         let ctx = create_ctx().expect("context");
         assert_eq!(ctx.threads, 1);
         assert_eq!(ctx.buckets.len(), 8 * ALPHABET_SIZE);
@@ -13889,9 +14133,137 @@ mod tests {
     }
 
     #[test]
-    fn free_ctx_accepts_context_value() {
+    fn libsais64_free_ctx_accepts_context_value() {
         let ctx = create_ctx().expect("context");
         free_ctx(ctx);
+    }
+
+    #[test]
+    fn libsais64_unbwt_create_ctx_main_allocates_expected_buffers() {
+        let ctx = unbwt_create_ctx_main(3).expect("context");
+        assert_eq!(ctx.bucket2.len(), ALPHABET_SIZE * ALPHABET_SIZE);
+        assert_eq!(ctx.fastbits.len(), 1 + (1 << UNBWT_FASTBITS));
+        assert_eq!(
+            ctx.buckets.as_ref().expect("parallel buckets").len(),
+            3 * (ALPHABET_SIZE + ALPHABET_SIZE * ALPHABET_SIZE)
+        );
+        assert_eq!(ctx.threads, 3);
+    }
+
+    #[test]
+    fn libsais64_unbwt_compute_histogram_counts_bytes() {
+        let t = b"banana";
+        let mut count = vec![0u64; ALPHABET_SIZE];
+        unbwt_compute_histogram(t, t.len() as FastSint, &mut count);
+        assert_eq!(count[b'a' as usize], 3);
+        assert_eq!(count[b'b' as usize], 1);
+        assert_eq!(count[b'n' as usize], 2);
+    }
+
+    #[test]
+    fn libsais64_unbwt_transpose_bucket2_swaps_matrix_entries() {
+        let mut bucket2 = vec![0u64; ALPHABET_SIZE * ALPHABET_SIZE];
+        bucket2[(2 << 8) + 1] = 7;
+        bucket2[(1 << 8) + 2] = 9;
+        unbwt_transpose_bucket2(&mut bucket2);
+        assert_eq!(bucket2[(1 << 8) + 2], 7);
+        assert_eq!(bucket2[(2 << 8) + 1], 9);
+    }
+
+    #[test]
+    fn libsais64_unbwt_init_single_builds_monotone_fastbits_and_writes_psi() {
+        let t = b"annb\x00aa";
+        let mut p = vec![0u64; t.len() + 1];
+        let mut bucket2 = vec![0u64; ALPHABET_SIZE * ALPHABET_SIZE];
+        let mut fastbits = vec![0u16; 1 + (1 << UNBWT_FASTBITS)];
+        let i = vec![4u64];
+
+        unbwt_init_single(
+            t,
+            &mut p,
+            t.len() as SaSint,
+            None,
+            &i,
+            &mut bucket2,
+            &mut fastbits,
+        );
+
+        assert!(fastbits
+            .iter()
+            .all(|&value| usize::from(value) < ALPHABET_SIZE * ALPHABET_SIZE));
+        assert!(fastbits.iter().any(|&value| value != 0));
+        assert!(p.iter().any(|&value| value != 0));
+    }
+
+    #[test]
+    fn libsais64_unbwt_init_parallel_currently_matches_single_initializer() {
+        let t = b"annb\x00aa";
+        let mut p_single = vec![0u64; t.len() + 1];
+        let mut p_parallel = vec![0u64; t.len() + 1];
+        let mut bucket2_single = vec![0u64; ALPHABET_SIZE * ALPHABET_SIZE];
+        let mut bucket2_parallel = vec![0u64; ALPHABET_SIZE * ALPHABET_SIZE];
+        let mut fastbits_single = vec![0u16; 1 + (1 << UNBWT_FASTBITS)];
+        let mut fastbits_parallel = vec![0u16; 1 + (1 << UNBWT_FASTBITS)];
+        let i = vec![4u64];
+        let mut scratch = vec![0u64; 2 * (ALPHABET_SIZE + ALPHABET_SIZE * ALPHABET_SIZE)];
+
+        unbwt_init_single(
+            t,
+            &mut p_single,
+            t.len() as SaSint,
+            None,
+            &i,
+            &mut bucket2_single,
+            &mut fastbits_single,
+        );
+        unbwt_init_parallel(
+            t,
+            &mut p_parallel,
+            t.len() as SaSint,
+            None,
+            &i,
+            &mut bucket2_parallel,
+            &mut fastbits_parallel,
+            Some(&mut scratch),
+            2,
+        );
+
+        assert_eq!(p_parallel, p_single);
+        assert_eq!(bucket2_parallel, bucket2_single);
+        assert_eq!(fastbits_parallel, fastbits_single);
+    }
+
+    #[test]
+    fn libsais64_unbwt_decode_1_writes_big_endian_symbol_words() {
+        let mut u = vec![0u8; 4];
+        let p = vec![1u64, 0u64];
+        let mut bucket2 = vec![0u64; ALPHABET_SIZE * ALPHABET_SIZE];
+        bucket2[0x1234] = 0;
+        bucket2[0x1235] = 2;
+        let mut fastbits = vec![0u16; 1 + (1 << UNBWT_FASTBITS)];
+        fastbits[0] = 0x1234;
+        let mut i0 = 0usize;
+
+        unbwt_decode_1(&mut u, &p, &bucket2, &fastbits, 0, &mut i0, 2);
+
+        assert_eq!(u, vec![0x12, 0x35, 0x12, 0x35]);
+        assert_eq!(i0, 0);
+    }
+
+    #[test]
+    fn libsais64_unbwt_decode_dispatches_two_block_tail_shape() {
+        let mut u = vec![0u8; 8];
+        let p = vec![1u64, 0u64];
+        let mut bucket2 = vec![0u64; ALPHABET_SIZE * ALPHABET_SIZE];
+        bucket2[0x1234] = 0;
+        bucket2[0x1235] = 2;
+        let mut fastbits = vec![0u16; 1 + (1 << UNBWT_FASTBITS)];
+        fastbits[0] = 0x1234;
+        let i = vec![0u64, 0u64];
+
+        unbwt_decode(&mut u, &p, 4, 2, &i, &bucket2, &fastbits, 2, 2);
+
+        assert_eq!(u, vec![0x12, 0x35, 0x12, 0x35, 0x00, 0x00, 0x00, 0x00]);
     }
 
     fn brute_force_suffix_array_u8(t: &[u8]) -> Vec<SaSint> {
@@ -13956,13 +14328,95 @@ mod tests {
         lcp
     }
 
+    fn make_libsais64_recursive_main_32s_text(repeats: usize) -> Vec<SaSint> {
+        let motif = [9, 4, 9, 2, 9, 4, 9, 1];
+        let mut t = Vec::with_capacity(repeats * motif.len() + 1);
+        for _ in 0..repeats {
+            t.extend_from_slice(&motif);
+        }
+        t.push(0);
+        t
+    }
+
+    fn make_libsais64_large_main_32s_stress_text(len: usize, alphabet: SaSint) -> Vec<SaSint> {
+        let mut state: u32 = 0x1357_9bdf;
+        let mut t = Vec::with_capacity(len + 1);
+
+        for i in 0..len {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let mut value = ((state >> 16) % (alphabet as u32 - 1)) as SaSint + 1;
+
+            if i % 17 < 8 {
+                value = ((i / 17) as SaSint % 11) + 1;
+            }
+            if i % 29 < 10 {
+                value = (((i / 29) as SaSint * 3) % 19) + 1;
+            }
+            if i % 64 >= 48 {
+                value = t[i - 48];
+            }
+
+            t.push(value);
+        }
+
+        t.push(0);
+        t
+    }
+
+    fn assert_libsais64_main_32s_entry_matches_public_c_long(
+        t: Vec<SaSint>,
+        k: SaSint,
+        fs: SaSint,
+        compare_full_sa: bool,
+    ) {
+        let n = t.len() as SaSint;
+        let n_usize = t.len();
+        let threads = 1;
+        let extra = usize::try_from(fs).expect("fs must be non-negative");
+
+        let mut c_t = t.clone();
+        let mut c_sa = vec![0; t.len() + extra];
+        let c_result =
+            unsafe { probe_public_libsais64_long(c_t.as_mut_ptr(), c_sa.as_mut_ptr(), n, k, fs) };
+
+        let mut rust_t = t;
+        let mut rust_sa = vec![0; rust_t.len() + extra];
+        let mut thread_state = alloc_thread_state(threads).expect("thread state");
+        let rust_result = libsais64_main_32s_entry(
+            &mut rust_t,
+            &mut rust_sa,
+            n,
+            k,
+            fs,
+            threads,
+            &mut thread_state,
+        );
+
+        assert_eq!(rust_result, c_result);
+        assert_eq!(rust_t, c_t);
+        if compare_full_sa {
+            assert_eq!(rust_sa, c_sa);
+        } else {
+            assert_eq!(&rust_sa[..n_usize], &c_sa[..n_usize]);
+        }
+    }
+
+    fn assert_libsais64_main_32s_entry_matches_public_c_long_for_branch(k: SaSint) {
+        assert_libsais64_main_32s_entry_matches_public_c_long(
+            vec![17, 3, 17, 9, 5, 9, 2, 11, 2, 7, 1, 7, 0],
+            k,
+            0,
+            true,
+        );
+    }
+
     #[test]
-    fn libsais_matches_bruteforce_suffix_array_for_small_text() {
+    fn libsais64_matches_bruteforce_suffix_array_for_small_text() {
         let t = b"banana";
         let mut sa = vec![0; t.len()];
         let mut freq = vec![0; ALPHABET_SIZE];
 
-        let result = libsais(t, &mut sa, 0, Some(&mut freq));
+        let result = libsais64(t, &mut sa, 0, Some(&mut freq));
 
         assert_eq!(result, 0);
         assert_eq!(sa, brute_force_suffix_array_u8(t));
@@ -13972,594 +14426,7 @@ mod tests {
     }
 
     #[test]
-    fn public_libsais_frequency_outputs_match_upstream_c() {
-        let text = b"banana";
-        let gsa_text = b"ban\0ana\0";
-        let mut rust_sa = vec![0; text.len()];
-        let mut c_sa = vec![0; text.len()];
-        let mut rust_freq = vec![-1; ALPHABET_SIZE];
-        let mut c_freq = vec![-1; ALPHABET_SIZE];
-
-        let rust_rc = libsais(text, &mut rust_sa, 0, Some(&mut rust_freq));
-        let c_rc = unsafe {
-            probe_public_libsais_freq(
-                text.as_ptr(),
-                c_sa.as_mut_ptr(),
-                text.len() as SaSint,
-                0,
-                c_freq.as_mut_ptr(),
-            )
-        };
-        assert_eq!(rust_rc, c_rc);
-        assert_eq!(rust_sa, c_sa);
-        assert_eq!(rust_freq, c_freq);
-
-        let mut rust_gsa = vec![0; gsa_text.len()];
-        let mut c_gsa = vec![0; gsa_text.len()];
-        rust_freq.fill(-1);
-        c_freq.fill(-1);
-        let rust_rc = libsais_gsa(gsa_text, &mut rust_gsa, 0, Some(&mut rust_freq));
-        let c_rc = unsafe {
-            probe_public_libsais_gsa_freq(
-                gsa_text.as_ptr(),
-                c_gsa.as_mut_ptr(),
-                gsa_text.len() as SaSint,
-                0,
-                c_freq.as_mut_ptr(),
-            )
-        };
-        assert_eq!(rust_rc, c_rc);
-        assert_eq!(rust_gsa, c_gsa);
-        assert_eq!(rust_freq, c_freq);
-
-        let mut rust_u = vec![0; text.len()];
-        let mut rust_a = vec![0; text.len()];
-        let mut c_u = vec![0; text.len()];
-        let mut c_a = vec![0; text.len()];
-        rust_freq.fill(-1);
-        c_freq.fill(-1);
-        let rust_rc = libsais_bwt(text, &mut rust_u, &mut rust_a, 0, Some(&mut rust_freq));
-        let c_rc = unsafe {
-            probe_public_libsais_bwt_freq(
-                text.as_ptr(),
-                c_u.as_mut_ptr(),
-                c_a.as_mut_ptr(),
-                text.len() as SaSint,
-                0,
-                c_freq.as_mut_ptr(),
-            )
-        };
-        assert_eq!(rust_rc, c_rc);
-        assert_eq!(rust_u, c_u);
-        assert_eq!(rust_freq, c_freq);
-
-        let r = 4;
-        let mut rust_i = vec![0; (text.len() - 1) / r as usize + 1];
-        let mut c_i = vec![0; rust_i.len()];
-        rust_freq.fill(-1);
-        c_freq.fill(-1);
-        let rust_rc = libsais_bwt_aux(
-            text,
-            &mut rust_u,
-            &mut rust_a,
-            0,
-            Some(&mut rust_freq),
-            r,
-            &mut rust_i,
-        );
-        let c_rc = unsafe {
-            probe_public_libsais_bwt_aux_freq(
-                text.as_ptr(),
-                c_u.as_mut_ptr(),
-                c_a.as_mut_ptr(),
-                text.len() as SaSint,
-                0,
-                c_freq.as_mut_ptr(),
-                r,
-                c_i.as_mut_ptr(),
-            )
-        };
-        assert_eq!(rust_rc, c_rc);
-        assert_eq!(rust_u, c_u);
-        assert_eq!(rust_i, c_i);
-        assert_eq!(rust_freq, c_freq);
-    }
-
-    #[test]
-    fn public_libsais_unbwt_with_frequency_matches_upstream_c() {
-        let text = b"abracadabra";
-        let mut freq = vec![0; ALPHABET_SIZE];
-        let mut bwt = vec![0; text.len()];
-        let mut work = vec![0; text.len()];
-        let primary = libsais_bwt(text, &mut bwt, &mut work, 0, Some(&mut freq));
-        assert!(primary >= 0);
-
-        let mut rust_u = vec![0; text.len()];
-        let mut rust_a = vec![0; text.len() + 1];
-        let mut c_u = vec![0; text.len()];
-        let mut c_a = vec![0; text.len() + 1];
-        let rust_rc = libsais_unbwt(&bwt, &mut rust_u, &mut rust_a, Some(&freq), primary);
-        let c_rc = unsafe {
-            probe_public_libsais_unbwt_freq(
-                bwt.as_ptr(),
-                c_u.as_mut_ptr(),
-                c_a.as_mut_ptr(),
-                bwt.len() as SaSint,
-                freq.as_ptr(),
-                primary,
-            )
-        };
-        assert_eq!(rust_rc, c_rc);
-        assert_eq!(rust_u, c_u);
-        assert_eq!(rust_u, text);
-
-        let r = 4;
-        let mut aux = vec![0; (text.len() - 1) / r as usize + 1];
-        let bwt_rc = libsais_bwt_aux(text, &mut bwt, &mut work, 0, Some(&mut freq), r, &mut aux);
-        assert_eq!(bwt_rc, 0);
-
-        rust_u.fill(0);
-        rust_a.fill(0);
-        c_u.fill(0);
-        c_a.fill(0);
-        let rust_rc = libsais_unbwt_aux(&bwt, &mut rust_u, &mut rust_a, Some(&freq), r, &aux);
-        let c_rc = unsafe {
-            probe_public_libsais_unbwt_aux_freq(
-                bwt.as_ptr(),
-                c_u.as_mut_ptr(),
-                c_a.as_mut_ptr(),
-                bwt.len() as SaSint,
-                freq.as_ptr(),
-                r,
-                aux.as_ptr(),
-            )
-        };
-        assert_eq!(rust_rc, c_rc);
-        assert_eq!(rust_u, c_u);
-        assert_eq!(rust_u, text);
-    }
-
-    #[test]
-    fn libsais_omp_frequency_wrappers_match_direct_calls() {
-        let text = b"banana";
-        let gsa_text = b"ban\0ana\0";
-
-        let mut direct_sa = vec![0; text.len()];
-        let mut omp_sa = vec![0; text.len()];
-        let mut direct_freq = vec![-1; ALPHABET_SIZE];
-        let mut omp_freq = vec![-1; ALPHABET_SIZE];
-        assert_eq!(libsais(text, &mut direct_sa, 0, Some(&mut direct_freq)), 0);
-        assert_eq!(libsais_omp(text, &mut omp_sa, 0, Some(&mut omp_freq), 2), 0);
-        assert_eq!(omp_sa, direct_sa);
-        assert_eq!(omp_freq, direct_freq);
-
-        let mut direct_gsa = vec![0; gsa_text.len()];
-        let mut omp_gsa = vec![0; gsa_text.len()];
-        direct_freq.fill(-1);
-        omp_freq.fill(-1);
-        assert_eq!(
-            libsais_gsa(gsa_text, &mut direct_gsa, 0, Some(&mut direct_freq)),
-            0
-        );
-        assert_eq!(
-            libsais_gsa_omp(gsa_text, &mut omp_gsa, 0, Some(&mut omp_freq), 2),
-            0
-        );
-        assert_eq!(omp_gsa, direct_gsa);
-        assert_eq!(omp_freq, direct_freq);
-
-        let mut direct_bwt = vec![0; text.len()];
-        let mut direct_work = vec![0; text.len()];
-        let mut omp_bwt = vec![0; text.len()];
-        let mut omp_work = vec![0; text.len()];
-        direct_freq.fill(-1);
-        omp_freq.fill(-1);
-        assert_eq!(
-            libsais_bwt(
-                text,
-                &mut direct_bwt,
-                &mut direct_work,
-                0,
-                Some(&mut direct_freq)
-            ),
-            libsais_bwt_omp(text, &mut omp_bwt, &mut omp_work, 0, Some(&mut omp_freq), 2)
-        );
-        assert_eq!(omp_bwt, direct_bwt);
-        assert_eq!(omp_freq, direct_freq);
-
-        let mut direct_aux = vec![0; 2];
-        let mut omp_aux = vec![0; 2];
-        direct_freq.fill(-1);
-        omp_freq.fill(-1);
-        assert_eq!(
-            libsais_bwt_aux(
-                text,
-                &mut direct_bwt,
-                &mut direct_work,
-                0,
-                Some(&mut direct_freq),
-                4,
-                &mut direct_aux
-            ),
-            libsais_bwt_aux_omp(
-                text,
-                &mut omp_bwt,
-                &mut omp_work,
-                0,
-                Some(&mut omp_freq),
-                4,
-                &mut omp_aux,
-                2
-            )
-        );
-        assert_eq!(omp_bwt, direct_bwt);
-        assert_eq!(omp_aux, direct_aux);
-        assert_eq!(omp_freq, direct_freq);
-    }
-
-    #[test]
-    #[ignore = "large real-data regression; requires local minibwa yeast fixture"]
-    fn public_libsais_omp_handles_minibwa_yeast_two_strand_index_input() {
-        let l2b_path =
-            "/data/henriksson/github/claude/minibwa/.tmp/compare-yeast-now/ref.split.rust.l2b";
-        let fasta_path =
-            "/data/henriksson/github/claude/minibwa/.tmp/large-real/yeast/ref.sanitized.fa";
-        let forward = if let Ok(bytes) = std::fs::read(l2b_path) {
-            assert!(bytes.len() >= 64, "short l2b fixture: {l2b_path}");
-            assert_eq!(&bytes[..4], b"L2B\x01", "bad l2b magic in {l2b_path}");
-            let n_ctg = u64::from_le_bytes(bytes[8..16].try_into().unwrap()) as usize;
-            let tot_len = u64::from_le_bytes(bytes[16..24].try_into().unwrap()) as usize;
-            let n_ambi = u64::from_le_bytes(bytes[24..32].try_into().unwrap()) as usize;
-            let n_mask = u64::from_le_bytes(bytes[32..40].try_into().unwrap()) as usize;
-            let n_pac = u64::from_le_bytes(bytes[56..64].try_into().unwrap()) as usize;
-            let pac_start = 64 + 8 * n_ctg + 16 * n_ambi + 16 * n_mask;
-            assert!(
-                bytes.len() >= pac_start + 8 * n_pac,
-                "truncated l2b pac in {l2b_path}"
-            );
-            let mut pac = Vec::with_capacity(n_pac);
-            for chunk in bytes[pac_start..pac_start + 8 * n_pac].chunks_exact(8) {
-                pac.push(u64::from_le_bytes(chunk.try_into().unwrap()));
-            }
-            (0..tot_len)
-                .map(|i| ((pac[i >> 5] >> ((i & 31) << 1)) & 3) as u8)
-                .collect::<Vec<_>>()
-        } else if let Ok(fasta) = std::fs::read_to_string(fasta_path) {
-            let mut rng = 11u64;
-            let mut forward = Vec::new();
-            for line in fasta.lines() {
-                if line.starts_with('>') {
-                    continue;
-                }
-                forward.extend(line.bytes().map(|b| {
-                    let mut c = match b {
-                        b'A' | b'a' => 0,
-                        b'C' | b'c' => 1,
-                        b'G' | b'g' => 2,
-                        b'T' | b't' | b'U' | b'u' => 3,
-                        _ => {
-                            rng = rng.wrapping_add(0x9e3779b97f4a7c15);
-                            let mut z = rng;
-                            z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
-                            z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
-                            4 | ((z ^ (z >> 31)) & 3) as u8
-                        }
-                    };
-                    if b < b'A' || b > b'Z' {
-                        c |= 1 << 3;
-                    }
-                    c & 3
-                }));
-            }
-            forward
-        } else {
-            eprintln!("skipping missing fixtures: {l2b_path} and {fasta_path}");
-            return;
-        };
-        assert!(
-            forward.len() > 12_000_000,
-            "fixture should exercise the minibwa yeast index workload"
-        );
-
-        let mut text = Vec::with_capacity(forward.len() * 2);
-        text.extend_from_slice(&forward);
-        text.extend(forward.iter().rev().map(|&c| 3 - c));
-
-        const FS: SaSint = 10_000;
-        let mut sa = vec![0; text.len() + FS as usize + 1];
-        assert_eq!(libsais_omp(&text, &mut sa[1..], FS, None, 4), 0);
-        if let Some((i, &value)) = sa[1..1 + text.len()]
-            .iter()
-            .enumerate()
-            .find(|&(_, &value)| value < 0 || value as usize >= text.len())
-        {
-            panic!("invalid suffix-array entry at {i}: {value}");
-        }
-    }
-
-    #[test]
-    #[ignore = "large real-data regression; requires local minibwa yeast fixture"]
-    fn public_libsais_omp_matches_plain_on_minibwa_yeast_two_strand_index_input() {
-        let l2b_path =
-            "/data/henriksson/github/claude/minibwa/.tmp/compare-yeast-now/ref.split.rust.l2b";
-        let fasta_path =
-            "/data/henriksson/github/claude/minibwa/.tmp/large-real/yeast/ref.sanitized.fa";
-        let forward = if let Ok(bytes) = std::fs::read(l2b_path) {
-            assert!(bytes.len() >= 64, "short l2b fixture: {l2b_path}");
-            assert_eq!(&bytes[..4], b"L2B\x01", "bad l2b magic in {l2b_path}");
-            let n_ctg = u64::from_le_bytes(bytes[8..16].try_into().unwrap()) as usize;
-            let tot_len = u64::from_le_bytes(bytes[16..24].try_into().unwrap()) as usize;
-            let n_ambi = u64::from_le_bytes(bytes[24..32].try_into().unwrap()) as usize;
-            let n_mask = u64::from_le_bytes(bytes[32..40].try_into().unwrap()) as usize;
-            let n_pac = u64::from_le_bytes(bytes[56..64].try_into().unwrap()) as usize;
-            let pac_start = 64 + 8 * n_ctg + 16 * n_ambi + 16 * n_mask;
-            assert!(
-                bytes.len() >= pac_start + 8 * n_pac,
-                "truncated l2b pac in {l2b_path}"
-            );
-            let mut pac = Vec::with_capacity(n_pac);
-            for chunk in bytes[pac_start..pac_start + 8 * n_pac].chunks_exact(8) {
-                pac.push(u64::from_le_bytes(chunk.try_into().unwrap()));
-            }
-            (0..tot_len)
-                .map(|i| ((pac[i >> 5] >> ((i & 31) << 1)) & 3) as u8)
-                .collect::<Vec<_>>()
-        } else if let Ok(fasta) = std::fs::read_to_string(fasta_path) {
-            let mut rng = 11u64;
-            let mut forward = Vec::new();
-            for line in fasta.lines() {
-                if line.starts_with('>') {
-                    continue;
-                }
-                forward.extend(line.bytes().map(|b| {
-                    let mut c = match b {
-                        b'A' | b'a' => 0,
-                        b'C' | b'c' => 1,
-                        b'G' | b'g' => 2,
-                        b'T' | b't' | b'U' | b'u' => 3,
-                        _ => {
-                            rng = rng.wrapping_add(0x9e3779b97f4a7c15);
-                            let mut z = rng;
-                            z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
-                            z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
-                            4 | ((z ^ (z >> 31)) & 3) as u8
-                        }
-                    };
-                    if b < b'A' || b > b'Z' {
-                        c |= 1 << 3;
-                    }
-                    c & 3
-                }));
-            }
-            forward
-        } else {
-            eprintln!("skipping missing fixtures: {l2b_path} and {fasta_path}");
-            return;
-        };
-        assert!(
-            forward.len() > 12_000_000,
-            "fixture should exercise the minibwa yeast index workload"
-        );
-
-        let mut text = Vec::with_capacity(forward.len() * 2);
-        text.extend_from_slice(&forward);
-        text.extend(forward.iter().rev().map(|&c| 3 - c));
-
-        const FS: SaSint = 10_000;
-        let mut plain_sa = vec![0; text.len() + FS as usize + 1];
-        let mut omp_sa = vec![0; text.len() + FS as usize + 1];
-        assert_eq!(libsais(&text, &mut plain_sa[1..], FS, None), 0);
-        assert_eq!(libsais_omp(&text, &mut omp_sa[1..], FS, None, 4), 0);
-        plain_sa[0] = text.len() as SaSint;
-        omp_sa[0] = text.len() as SaSint;
-        if let Some(i) = plain_sa[..=text.len()]
-            .iter()
-            .zip(&omp_sa[..=text.len()])
-            .position(|(plain, omp)| plain != omp)
-        {
-            panic!(
-                "first suffix-array diff at {i}: plain={} omp={}",
-                plain_sa[i], omp_sa[i]
-            );
-        }
-    }
-
-    #[test]
-    fn libsais_unbwt_omp_frequency_wrappers_match_direct_calls() {
-        let text = b"abracadabra";
-        let mut freq = vec![0; ALPHABET_SIZE];
-        let mut bwt = vec![0; text.len()];
-        let mut work = vec![0; text.len()];
-        let primary = libsais_bwt(text, &mut bwt, &mut work, 0, Some(&mut freq));
-        assert!(primary >= 0);
-
-        let mut direct = vec![0; text.len()];
-        let mut direct_work = vec![0; text.len() + 1];
-        let mut omp = vec![0; text.len()];
-        let mut omp_work = vec![0; text.len() + 1];
-        assert_eq!(
-            libsais_unbwt(&bwt, &mut direct, &mut direct_work, Some(&freq), primary),
-            libsais_unbwt_omp(&bwt, &mut omp, &mut omp_work, Some(&freq), primary, 2)
-        );
-        assert_eq!(omp, direct);
-        assert_eq!(omp, text);
-
-        let mut aux = vec![0; (text.len() - 1) / 4 + 1];
-        assert_eq!(
-            libsais_bwt_aux(text, &mut bwt, &mut work, 0, Some(&mut freq), 4, &mut aux),
-            0
-        );
-        direct.fill(0);
-        direct_work.fill(0);
-        omp.fill(0);
-        omp_work.fill(0);
-        assert_eq!(
-            libsais_unbwt_aux(&bwt, &mut direct, &mut direct_work, Some(&freq), 4, &aux),
-            libsais_unbwt_aux_omp(&bwt, &mut omp, &mut omp_work, Some(&freq), 4, &aux, 2)
-        );
-        assert_eq!(omp, direct);
-        assert_eq!(omp, text);
-    }
-
-    #[test]
-    fn libsais_ctx_matches_plain_entry_point_for_small_text() {
-        let t = b"mississippi";
-        let mut sa_plain = vec![0; t.len()];
-        let mut sa_ctx = vec![0; t.len()];
-        let plain = libsais(t, &mut sa_plain, 0, None);
-
-        let mut ctx = create_ctx().expect("context");
-        let with_ctx = libsais_ctx(&mut ctx, t, &mut sa_ctx, 0, None);
-
-        assert_eq!(plain, 0);
-        assert_eq!(with_ctx, 0);
-        assert_eq!(sa_ctx, sa_plain);
-    }
-
-    #[test]
-    fn libsais_ctx_frequency_wrappers_match_direct_calls() {
-        let text = b"banana";
-        let gsa_text = b"ban\0ana\0";
-        let mut ctx = create_ctx().expect("context");
-
-        let mut direct_sa = vec![0; text.len()];
-        let mut ctx_sa = vec![0; text.len()];
-        let mut direct_freq = vec![-1; ALPHABET_SIZE];
-        let mut ctx_freq = vec![-1; ALPHABET_SIZE];
-        assert_eq!(libsais(text, &mut direct_sa, 0, Some(&mut direct_freq)), 0);
-        assert_eq!(
-            libsais_ctx(&mut ctx, text, &mut ctx_sa, 0, Some(&mut ctx_freq)),
-            0
-        );
-        assert_eq!(ctx_sa, direct_sa);
-        assert_eq!(ctx_freq, direct_freq);
-
-        let mut direct_gsa = vec![0; gsa_text.len()];
-        let mut ctx_gsa = vec![0; gsa_text.len()];
-        direct_freq.fill(-1);
-        ctx_freq.fill(-1);
-        assert_eq!(
-            libsais_gsa(gsa_text, &mut direct_gsa, 0, Some(&mut direct_freq)),
-            0
-        );
-        assert_eq!(
-            libsais_gsa_ctx(&mut ctx, gsa_text, &mut ctx_gsa, 0, Some(&mut ctx_freq)),
-            0
-        );
-        assert_eq!(ctx_gsa, direct_gsa);
-        assert_eq!(ctx_freq, direct_freq);
-
-        let mut direct_bwt = vec![0; text.len()];
-        let mut direct_work = vec![0; text.len()];
-        let mut ctx_bwt = vec![0; text.len()];
-        let mut ctx_work = vec![0; text.len()];
-        direct_freq.fill(-1);
-        ctx_freq.fill(-1);
-        assert_eq!(
-            libsais_bwt(
-                text,
-                &mut direct_bwt,
-                &mut direct_work,
-                0,
-                Some(&mut direct_freq)
-            ),
-            libsais_bwt_ctx(
-                &mut ctx,
-                text,
-                &mut ctx_bwt,
-                &mut ctx_work,
-                0,
-                Some(&mut ctx_freq)
-            )
-        );
-        assert_eq!(ctx_bwt, direct_bwt);
-        assert_eq!(ctx_freq, direct_freq);
-
-        let mut direct_aux = vec![0; 2];
-        let mut ctx_aux = vec![0; 2];
-        direct_freq.fill(-1);
-        ctx_freq.fill(-1);
-        assert_eq!(
-            libsais_bwt_aux(
-                text,
-                &mut direct_bwt,
-                &mut direct_work,
-                0,
-                Some(&mut direct_freq),
-                4,
-                &mut direct_aux
-            ),
-            libsais_bwt_aux_ctx(
-                &mut ctx,
-                text,
-                &mut ctx_bwt,
-                &mut ctx_work,
-                0,
-                Some(&mut ctx_freq),
-                4,
-                &mut ctx_aux
-            )
-        );
-        assert_eq!(ctx_bwt, direct_bwt);
-        assert_eq!(ctx_aux, direct_aux);
-        assert_eq!(ctx_freq, direct_freq);
-    }
-
-    #[test]
-    fn libsais_unbwt_ctx_frequency_wrappers_match_direct_calls() {
-        let text = b"abracadabra";
-        let mut freq = vec![0; ALPHABET_SIZE];
-        let mut bwt = vec![0; text.len()];
-        let mut work = vec![0; text.len()];
-        let primary = libsais_bwt(text, &mut bwt, &mut work, 0, Some(&mut freq));
-        assert!(primary >= 0);
-
-        let mut ctx = unbwt_create_ctx().expect("unbwt context");
-        let mut direct = vec![0; text.len()];
-        let mut direct_work = vec![0; text.len() + 1];
-        let mut via_ctx = vec![0; text.len()];
-        let mut ctx_work = vec![0; text.len() + 1];
-        assert_eq!(
-            libsais_unbwt(&bwt, &mut direct, &mut direct_work, Some(&freq), primary),
-            libsais_unbwt_ctx(
-                &mut ctx,
-                &bwt,
-                &mut via_ctx,
-                &mut ctx_work,
-                Some(&freq),
-                primary
-            )
-        );
-        assert_eq!(via_ctx, direct);
-        assert_eq!(via_ctx, text);
-
-        let mut aux = vec![0; (text.len() - 1) / 4 + 1];
-        assert_eq!(
-            libsais_bwt_aux(text, &mut bwt, &mut work, 0, Some(&mut freq), 4, &mut aux),
-            0
-        );
-        direct.fill(0);
-        direct_work.fill(0);
-        via_ctx.fill(0);
-        ctx_work.fill(0);
-        assert_eq!(
-            libsais_unbwt_aux(&bwt, &mut direct, &mut direct_work, Some(&freq), 4, &aux),
-            libsais_unbwt_aux_ctx(
-                &mut ctx,
-                &bwt,
-                &mut via_ctx,
-                &mut ctx_work,
-                Some(&freq),
-                4,
-                &aux
-            )
-        );
-        assert_eq!(via_ctx, direct);
-        assert_eq!(via_ctx, text);
-    }
-
-    #[test]
-    fn libsais_int_matches_bruteforce_suffix_array_for_small_integer_text() {
+    fn libsais64_int_matches_bruteforce_suffix_array_for_small_integer_text() {
         let mut t = vec![2, 1, 3, 1, 0];
         let expected = {
             let mut sa: Vec<SaSint> = (0..t.len())
@@ -14573,32 +14440,32 @@ mod tests {
         };
         let mut sa = vec![0; t.len()];
 
-        let result = libsais_int(&mut t, &mut sa, 4, 0);
+        let result = libsais64_int(&mut t, &mut sa, 4, 0);
 
         assert_eq!(result, 0);
         assert_eq!(sa, expected);
     }
 
     #[test]
-    fn libsais_plcp_matches_bruteforce_for_small_text() {
+    fn libsais64_plcp_matches_bruteforce_for_small_text() {
         let t = b"banana";
         let sa = brute_force_suffix_array_u8(t);
         let expected = brute_force_plcp_u8(t, &sa);
         let mut plcp = vec![0; t.len()];
 
-        let result = libsais_plcp(t, &sa, &mut plcp);
+        let result = libsais64_plcp(t, &sa, &mut plcp);
 
         assert_eq!(result, 0);
         assert_eq!(plcp, expected);
     }
 
     #[test]
-    fn libsais_plcp_gsa_stops_at_separator() {
+    fn libsais64_plcp_gsa_stops_at_separator() {
         let t = b"ab\0b\0";
         let sa = brute_force_suffix_array_u8(t);
         let mut plcp = vec![0; t.len()];
 
-        let result = libsais_plcp_gsa(t, &sa, &mut plcp);
+        let result = libsais64_plcp_gsa(t, &sa, &mut plcp);
 
         assert_eq!(result, 0);
         assert_eq!(plcp[2], 0);
@@ -14606,338 +14473,34 @@ mod tests {
     }
 
     #[test]
-    fn libsais_lcp_matches_bruteforce_for_small_text() {
+    fn libsais64_lcp_matches_bruteforce_for_small_text() {
         let t = b"banana";
         let sa = brute_force_suffix_array_u8(t);
         let plcp = brute_force_plcp_u8(t, &sa);
         let expected = brute_force_lcp_from_sa_u8(t, &sa);
         let mut lcp = vec![0; t.len()];
 
-        let result = libsais_lcp(&plcp, &sa, &mut lcp);
+        let result = libsais64_lcp(&plcp, &sa, &mut lcp);
 
         assert_eq!(result, 0);
         assert_eq!(lcp, expected);
     }
 
     #[test]
-    fn libsais_ctx_rejects_invalid_public_arguments() {
-        let text = b"banana";
-        let mut ctx = create_ctx().expect("context");
-        let mut short_sa = vec![0; text.len() - 1];
-        let mut full_sa = vec![0; text.len()];
-        let mut short_freq = vec![0; ALPHABET_SIZE - 1];
-        let mut short_u = vec![0; text.len() - 1];
-        let mut full_u = vec![0; text.len()];
-        let mut short_a = vec![0; text.len() - 1];
-        let mut full_a = vec![0; text.len()];
-        let mut aux = vec![0; 2];
-
-        assert_eq!(libsais_ctx(&mut ctx, text, &mut short_sa, 0, None), -1);
-        assert_eq!(
-            libsais_ctx(&mut ctx, text, &mut full_sa, 0, Some(&mut short_freq)),
-            -1
-        );
-        assert_eq!(
-            libsais_gsa_ctx(&mut ctx, b"banana", &mut full_sa, 0, None),
-            -1
-        );
-        assert_eq!(
-            libsais_gsa_ctx(&mut ctx, b"banana\0", &mut short_sa, 0, None),
-            -1
-        );
-        assert_eq!(
-            libsais_bwt_ctx(&mut ctx, text, &mut short_u, &mut full_a, 0, None),
-            -1
-        );
-        assert_eq!(
-            libsais_bwt_ctx(&mut ctx, text, &mut full_u, &mut short_a, 0, None),
-            -1
-        );
-        assert_eq!(
-            libsais_bwt_ctx(
-                &mut ctx,
-                text,
-                &mut full_u,
-                &mut full_a,
-                0,
-                Some(&mut short_freq)
-            ),
-            -1
-        );
-        assert_eq!(
-            libsais_bwt_aux_ctx(
-                &mut ctx,
-                text,
-                &mut full_u,
-                &mut full_a,
-                0,
-                None,
-                0,
-                &mut aux
-            ),
-            -1
-        );
-        assert_eq!(
-            libsais_bwt_aux_ctx(
-                &mut ctx,
-                text,
-                &mut full_u,
-                &mut full_a,
-                0,
-                None,
-                3,
-                &mut aux
-            ),
-            -1
-        );
-        assert_eq!(
-            libsais_bwt_aux_ctx(
-                &mut ctx,
-                text,
-                &mut full_u,
-                &mut full_a,
-                0,
-                None,
-                4,
-                &mut []
-            ),
-            -1
-        );
-
-        let mut missing_thread_state_ctx = Context {
-            buckets: vec![0; 8 * ALPHABET_SIZE],
-            thread_state: None,
-            threads: 2,
-        };
-        assert_eq!(
-            libsais_ctx(&mut missing_thread_state_ctx, text, &mut full_sa, 0, None),
-            -2
-        );
-
-        let mut zero_thread_ctx = Context {
-            buckets: vec![0; 8 * ALPHABET_SIZE],
-            thread_state: None,
-            threads: 0,
-        };
-        assert_eq!(
-            libsais_ctx(&mut zero_thread_ctx, text, &mut full_sa, 0, None),
-            -2
-        );
-
-        let mut short_thread_state_ctx = create_ctx_main(2).expect("context");
-        short_thread_state_ctx
-            .thread_state
-            .as_mut()
-            .expect("thread state")
-            .truncate(1);
-        assert_eq!(
-            libsais_ctx(&mut short_thread_state_ctx, text, &mut full_sa, 0, None),
-            -2
-        );
-    }
-
-    #[test]
-    fn libsais_unbwt_ctx_rejects_invalid_public_arguments() {
-        let text = b"banana";
-        let mut bwt = vec![0; text.len()];
-        let mut work = vec![0; text.len()];
-        let primary = libsais_bwt(text, &mut bwt, &mut work, 0, None);
-        let mut ctx = unbwt_create_ctx().expect("context");
-
-        let mut short_u = vec![0; text.len() - 1];
-        let mut full_u = vec![0; text.len()];
-        let mut short_a = vec![0; text.len() - 1];
-        let mut full_a = vec![0; text.len()];
-        let short_freq = vec![0; ALPHABET_SIZE - 1];
-        let good_aux = vec![primary, 4];
-
-        assert_eq!(
-            libsais_unbwt_ctx(&mut ctx, &bwt, &mut short_u, &mut full_a, None, primary),
-            -1
-        );
-        assert_eq!(
-            libsais_unbwt_ctx(&mut ctx, &bwt, &mut full_u, &mut short_a, None, primary),
-            -1
-        );
-        assert_eq!(
-            libsais_unbwt_ctx(
-                &mut ctx,
-                &bwt,
-                &mut full_u,
-                &mut full_a,
-                Some(&short_freq),
-                primary
-            ),
-            -1
-        );
-        assert_eq!(
-            libsais_unbwt_ctx(&mut ctx, &bwt, &mut full_u, &mut full_a, None, 0),
-            -1
-        );
-        assert_eq!(
-            libsais_unbwt_aux_ctx(&mut ctx, &bwt, &mut full_u, &mut full_a, None, 3, &good_aux),
-            -1
-        );
-        assert_eq!(
-            libsais_unbwt_aux_ctx(
-                &mut ctx,
-                &bwt,
-                &mut full_u,
-                &mut full_a,
-                None,
-                4,
-                &[primary]
-            ),
-            -1
-        );
-
-        let mut malformed_ctx = UnbwtContext {
-            bucket2: Vec::new(),
-            fastbits: Vec::new(),
-            buckets: None,
-            threads: 1,
-        };
-        assert_eq!(
-            libsais_unbwt_ctx(
-                &mut malformed_ctx,
-                &bwt,
-                &mut full_u,
-                &mut full_a,
-                None,
-                primary
-            ),
-            -2
-        );
-
-        let mut missing_parallel_buckets_ctx = UnbwtContext {
-            bucket2: vec![0; ALPHABET_SIZE * ALPHABET_SIZE],
-            fastbits: vec![0; 1 + (1 << UNBWT_FASTBITS)],
-            buckets: None,
-            threads: 2,
-        };
-        assert_eq!(
-            libsais_unbwt_ctx(
-                &mut missing_parallel_buckets_ctx,
-                &bwt,
-                &mut full_u,
-                &mut full_a,
-                None,
-                primary
-            ),
-            -2
-        );
-    }
-
-    #[test]
-    fn unbwt_create_ctx_main_allocates_expected_buffers() {
-        let ctx = unbwt_create_ctx_main(3).expect("context");
-        assert_eq!(ctx.bucket2.len(), ALPHABET_SIZE * ALPHABET_SIZE);
-        assert_eq!(ctx.fastbits.len(), 1 + (1 << UNBWT_FASTBITS));
-        assert_eq!(
-            ctx.buckets.as_ref().expect("parallel buckets").len(),
-            3 * (ALPHABET_SIZE + ALPHABET_SIZE * ALPHABET_SIZE)
-        );
-        assert_eq!(ctx.threads, 3);
-    }
-
-    #[test]
-    fn unbwt_compute_histogram_counts_bytes() {
-        let t = b"banana";
-        let mut count = vec![0u32; ALPHABET_SIZE];
-        unbwt_compute_histogram(t, t.len() as FastSint, &mut count);
-        assert_eq!(count[b'a' as usize], 3);
-        assert_eq!(count[b'b' as usize], 1);
-        assert_eq!(count[b'n' as usize], 2);
-    }
-
-    #[test]
-    fn unbwt_transpose_bucket2_swaps_matrix_entries() {
-        let mut bucket2 = vec![0u32; ALPHABET_SIZE * ALPHABET_SIZE];
-        bucket2[(2 << 8) + 1] = 7;
-        bucket2[(1 << 8) + 2] = 9;
-        unbwt_transpose_bucket2(&mut bucket2);
-        assert_eq!(bucket2[(1 << 8) + 2], 7);
-        assert_eq!(bucket2[(2 << 8) + 1], 9);
-    }
-
-    #[test]
-    fn unbwt_init_single_builds_monotone_fastbits_and_writes_psi() {
-        let t = b"annb\x00aa";
-        let mut p = vec![0u32; t.len() + 1];
-        let mut bucket2 = vec![0u32; ALPHABET_SIZE * ALPHABET_SIZE];
-        let mut fastbits = vec![0u16; 1 + (1 << UNBWT_FASTBITS)];
-        let i = vec![4u32];
-
-        unbwt_init_single(
-            t,
-            &mut p,
-            t.len() as SaSint,
-            None,
-            &i,
-            &mut bucket2,
-            &mut fastbits,
-        );
-
-        assert!(fastbits
-            .iter()
-            .all(|&value| usize::from(value) < ALPHABET_SIZE * ALPHABET_SIZE));
-        assert!(fastbits.iter().any(|&value| value != 0));
-        assert!(p.iter().any(|&value| value != 0));
-    }
-
-    #[test]
-    fn unbwt_init_parallel_currently_matches_single_initializer() {
-        let t = b"annb\x00aa";
-        let mut p_single = vec![0u32; t.len() + 1];
-        let mut p_parallel = vec![0u32; t.len() + 1];
-        let mut bucket2_single = vec![0u32; ALPHABET_SIZE * ALPHABET_SIZE];
-        let mut bucket2_parallel = vec![0u32; ALPHABET_SIZE * ALPHABET_SIZE];
-        let mut fastbits_single = vec![0u16; 1 + (1 << UNBWT_FASTBITS)];
-        let mut fastbits_parallel = vec![0u16; 1 + (1 << UNBWT_FASTBITS)];
-        let i = vec![4u32];
-        let mut scratch = vec![0u32; 2 * (ALPHABET_SIZE + ALPHABET_SIZE * ALPHABET_SIZE)];
-
-        unbwt_init_single(
-            t,
-            &mut p_single,
-            t.len() as SaSint,
-            None,
-            &i,
-            &mut bucket2_single,
-            &mut fastbits_single,
-        );
-        unbwt_init_parallel(
-            t,
-            &mut p_parallel,
-            t.len() as SaSint,
-            None,
-            &i,
-            &mut bucket2_parallel,
-            &mut fastbits_parallel,
-            Some(&mut scratch),
-            2,
-        );
-
-        assert_eq!(p_parallel, p_single);
-        assert_eq!(bucket2_parallel, bucket2_single);
-        assert_eq!(fastbits_parallel, fastbits_single);
-    }
-
-    #[test]
-    fn unbwt_init_parallel_uses_block_partition_for_large_inputs() {
+    fn libsais64_unbwt_init_parallel_uses_block_partition_for_large_inputs() {
         let n = 70_003usize;
         let t: Vec<u8> = (0..n)
             .map(|i| i.wrapping_mul(37).wrapping_add(i >> 3) as u8)
             .collect();
-        let i = [12_345u32];
+        let i = [12_345u64];
 
-        let mut single_p = vec![0u32; n + 1];
-        let mut threaded_p = vec![0u32; n + 1];
-        let mut single_bucket2 = vec![0u32; ALPHABET_SIZE * ALPHABET_SIZE];
-        let mut threaded_bucket2 = vec![0u32; ALPHABET_SIZE * ALPHABET_SIZE];
+        let mut single_p = vec![0u64; n + 1];
+        let mut threaded_p = vec![0u64; n + 1];
+        let mut single_bucket2 = vec![0u64; ALPHABET_SIZE * ALPHABET_SIZE];
+        let mut threaded_bucket2 = vec![0u64; ALPHABET_SIZE * ALPHABET_SIZE];
         let mut single_fastbits = vec![0u16; 1 + (1 << UNBWT_FASTBITS)];
         let mut threaded_fastbits = vec![0u16; 1 + (1 << UNBWT_FASTBITS)];
-        let mut buckets = vec![0u32; 4 * (ALPHABET_SIZE + ALPHABET_SIZE * ALPHABET_SIZE)];
+        let mut buckets = vec![0u64; 4 * (ALPHABET_SIZE + ALPHABET_SIZE * ALPHABET_SIZE)];
 
         unbwt_init_single(
             &t,
@@ -14966,487 +14529,7 @@ mod tests {
     }
 
     #[test]
-    fn unbwt_decode_1_writes_big_endian_symbol_words() {
-        let mut u = vec![0u8; 4];
-        let p = vec![1u32, 0u32];
-        let mut bucket2 = vec![0u32; ALPHABET_SIZE * ALPHABET_SIZE];
-        bucket2[0x1234] = 0;
-        bucket2[0x1235] = 2;
-        let mut fastbits = vec![0u16; 1 + (1 << UNBWT_FASTBITS)];
-        fastbits[0] = 0x1234;
-        let mut i0 = 0usize;
-
-        unbwt_decode_1(&mut u, &p, &bucket2, &fastbits, 0, &mut i0, 2);
-
-        assert_eq!(u, vec![0x12, 0x35, 0x12, 0x35]);
-        assert_eq!(i0, 0);
-    }
-
-    #[test]
-    fn unbwt_decode_dispatches_two_block_tail_shape() {
-        let mut u = vec![0u8; 8];
-        let p = vec![1u32, 0u32];
-        let mut bucket2 = vec![0u32; ALPHABET_SIZE * ALPHABET_SIZE];
-        bucket2[0x1234] = 0;
-        bucket2[0x1235] = 2;
-        let mut fastbits = vec![0u16; 1 + (1 << UNBWT_FASTBITS)];
-        fastbits[0] = 0x1234;
-        let i = vec![0u32, 0u32];
-
-        unbwt_decode(&mut u, &p, 4, 2, &i, &bucket2, &fastbits, 2, 2);
-
-        assert_eq!(u, vec![0x12, 0x35, 0x12, 0x35, 0x00, 0x00, 0x00, 0x00]);
-    }
-
-    #[test]
-    fn libsais_unbwt_aux_rejects_invalid_sampling_range() {
-        let t = b"abc";
-        let mut u = vec![0u8; t.len()];
-        let mut a = vec![0i32; t.len()];
-
-        let result = libsais_unbwt_aux(t, &mut u, &mut a, None, 2, &[0, 4]);
-
-        assert_eq!(result, -1);
-
-        assert_eq!(libsais_unbwt_aux(t, &mut u, &mut a, None, 0, &[1]), -1);
-
-        let mut ctx = unbwt_create_ctx().expect("context");
-        assert_eq!(
-            libsais_unbwt_aux_ctx(&mut ctx, t, &mut u, &mut a, None, 0, &[1]),
-            -1
-        );
-        assert_eq!(
-            libsais_unbwt_aux_omp(t, &mut u, &mut a, None, 0, &[1], 2),
-            -1
-        );
-    }
-
-    #[test]
-    fn libsais_bwt_and_unbwt_round_trip_small_text() {
-        let t = b"banana";
-        let mut bwt = vec![0u8; t.len()];
-        let mut a = vec![0i32; t.len()];
-
-        let primary = libsais_bwt(t, &mut bwt, &mut a, 0, None);
-        assert!(primary > 0);
-
-        let mut restored = vec![0u8; t.len()];
-        let result = libsais_unbwt(&bwt, &mut restored, &mut a, None, primary);
-
-        assert_eq!(result, 0);
-        assert_eq!(restored, t);
-    }
-
-    #[test]
-    fn libsais_bwt_aux_and_unbwt_aux_round_trip_small_text() {
-        let t = b"mississippi";
-        let mut bwt = vec![0u8; t.len()];
-        let mut a = vec![0i32; t.len()];
-        let mut samples = vec![0i32; 4];
-
-        let result = libsais_bwt_aux(t, &mut bwt, &mut a, 0, None, 4, &mut samples);
-        assert_eq!(result, 0);
-
-        let mut restored = vec![0u8; t.len()];
-        let result = libsais_unbwt_aux(&bwt, &mut restored, &mut a, None, 4, &samples);
-
-        assert_eq!(result, 0);
-        assert_eq!(restored, t);
-    }
-
-    #[test]
-    fn libsais_bwt_aux_and_unbwt_aux_omp_round_trip_small_text() {
-        let t = b"mississippi";
-        let mut bwt = vec![0u8; t.len()];
-        let mut a = vec![0i32; t.len()];
-        let mut samples = vec![0i32; 4];
-
-        let result = libsais_bwt_aux(t, &mut bwt, &mut a, 0, None, 4, &mut samples);
-        assert_eq!(result, 0);
-
-        let mut restored = vec![0u8; t.len()];
-        let result = libsais_unbwt_aux_omp(&bwt, &mut restored, &mut a, None, 4, &samples, 2);
-
-        assert_eq!(result, 0);
-        assert_eq!(restored, t);
-    }
-
-    #[test]
-    fn real_world_round_trip_on_upstream_readme() {
-        let t = include_bytes!("../libsais/README.md");
-        let mut bwt = vec![0u8; t.len()];
-        let mut a = vec![0i32; t.len()];
-
-        let primary = libsais_bwt(t, &mut bwt, &mut a, 0, None);
-        assert!(primary > 0);
-
-        let mut restored = vec![0u8; t.len()];
-        let result = libsais_unbwt(&bwt, &mut restored, &mut a, None, primary);
-
-        assert_eq!(result, 0);
-        assert_eq!(restored, t);
-    }
-
-    #[test]
-    fn real_world_aux_omp_round_trip_on_upstream_c_source() {
-        let t = include_bytes!("../libsais/src/libsais.c");
-        let mut bwt = vec![0u8; t.len()];
-        let mut a = vec![0i32; t.len()];
-        let r = 128i32;
-        let mut samples = vec![0i32; (t.len() - 1) / usize::try_from(r).expect("fits") + 1];
-
-        let result = libsais_bwt_aux(t, &mut bwt, &mut a, 0, None, r, &mut samples);
-        assert_eq!(result, 0);
-
-        let mut restored = vec![0u8; t.len()];
-        let result = libsais_unbwt_aux_omp(&bwt, &mut restored, &mut a, None, r, &samples, 2);
-
-        assert_eq!(result, 0);
-        assert_eq!(restored, t);
-    }
-
-    #[test]
-    fn libsais_bwt_aux_rejects_undersized_sampling_array() {
-        let t = b"upstream source text";
-        let mut bwt = vec![0u8; t.len()];
-        let mut a = vec![0i32; t.len()];
-        let mut samples = vec![0i32; 1];
-
-        let result = libsais_bwt_aux(t, &mut bwt, &mut a, 0, None, 2, &mut samples);
-
-        assert_eq!(result, -1);
-
-        let result = libsais_bwt_aux(t, &mut bwt, &mut a, 0, None, 0, &mut samples);
-
-        assert_eq!(result, -1);
-    }
-
-    #[test]
-    fn libsais_bwt_aux_omp_rejects_invalid_sampling_rate_without_panicking() {
-        let t = b"upstream source text";
-        let mut bwt = vec![0u8; t.len()];
-        let mut a = vec![0i32; t.len()];
-        let mut samples = vec![0i32; 4];
-
-        let result = libsais_bwt_aux_omp(t, &mut bwt, &mut a, 0, None, 0, &mut samples, 2);
-
-        assert_eq!(result, -1);
-    }
-
-    #[test]
-    fn count_helpers_match_c_predicates() {
-        let sa = [1, -1, 0, -3, 4, 0, -9];
-        assert_eq!(
-            count_negative_marked_suffixes(&sa, 0, sa.len() as FastSint),
-            3
-        );
-        assert_eq!(count_zero_marked_suffixes(&sa, 0, sa.len() as FastSint), 2);
-        assert_eq!(count_negative_marked_suffixes(&sa, 2, 3), 1);
-        assert_eq!(count_zero_marked_suffixes(&sa, 2, 3), 1);
-    }
-
-    #[test]
-    fn flip_suffix_markers_omp_toggles_saint_min_bits() {
-        let mut sa = vec![1, -2, 3, -4];
-        flip_suffix_markers_omp(&mut sa, 4, 1);
-        assert_eq!(
-            sa,
-            vec![1 ^ SAINT_MIN, -2 ^ SAINT_MIN, 3 ^ SAINT_MIN, -4 ^ SAINT_MIN]
-        );
-    }
-
-    #[test]
-    fn flip_suffix_markers_omp_uses_block_partition_for_large_inputs() {
-        let n = 65_600usize;
-        let mut single: Vec<SaSint> = (0..n).map(|i| (i as SaSint) ^ SAINT_MIN).collect();
-        let mut threaded = single.clone();
-
-        flip_suffix_markers_omp(&mut single, n as SaSint, 1);
-        flip_suffix_markers_omp(&mut threaded, n as SaSint, 4);
-
-        assert_eq!(threaded, single);
-    }
-
-    #[test]
-    fn place_cached_suffixes_writes_indices_to_symbol_slots() {
-        let mut sa = vec![0; 8];
-        let cache = vec![
-            ThreadCache {
-                symbol: 2,
-                index: 10,
-            },
-            ThreadCache {
-                symbol: 5,
-                index: 20,
-            },
-            ThreadCache {
-                symbol: 1,
-                index: 30,
-            },
-        ];
-
-        place_cached_suffixes(&mut sa, &cache, 0, cache.len() as FastSint);
-
-        assert_eq!(sa[2], 10);
-        assert_eq!(sa[5], 20);
-        assert_eq!(sa[1], 30);
-    }
-
-    #[test]
-    fn compact_and_place_cached_suffixes_discards_negative_symbols() {
-        let mut sa = vec![0; 8];
-        let mut cache = vec![
-            ThreadCache {
-                symbol: 2,
-                index: 10,
-            },
-            ThreadCache {
-                symbol: -1,
-                index: 99,
-            },
-            ThreadCache {
-                symbol: 5,
-                index: 20,
-            },
-            ThreadCache {
-                symbol: -4,
-                index: 77,
-            },
-            ThreadCache {
-                symbol: 1,
-                index: 30,
-            },
-        ];
-        let cache_len = cache.len() as FastSint;
-
-        compact_and_place_cached_suffixes(&mut sa, &mut cache, 0, cache_len);
-
-        assert_eq!(sa[2], 10);
-        assert_eq!(sa[5], 20);
-        assert_eq!(sa[1], 30);
-        assert_eq!(
-            cache[0],
-            ThreadCache {
-                symbol: 2,
-                index: 10
-            }
-        );
-        assert_eq!(
-            cache[1],
-            ThreadCache {
-                symbol: 5,
-                index: 20
-            }
-        );
-        assert_eq!(
-            cache[2],
-            ThreadCache {
-                symbol: 1,
-                index: 30
-            }
-        );
-    }
-
-    #[test]
-    fn gather_lms_suffixes_32s_collects_expected_suffix_starts() {
-        let t = vec![2, 1, 3, 1, 0];
-        let mut sa = vec![0; t.len()];
-        let m = gather_lms_suffixes_32s(&t, &mut sa, t.len() as SaSint);
-        assert!(m >= 0);
-        assert!(sa
-            .iter()
-            .all(|&value| value >= 0 && value <= t.len() as SaSint));
-        assert!(sa[t.len() - 1] >= 1 && sa[t.len() - 1] <= t.len() as SaSint - 1);
-    }
-
-    #[test]
-    fn gather_compacted_lms_suffixes_32s_skips_negative_marked_symbols() {
-        let t = vec![2, -1, 3, 1, 0];
-        let mut sa = vec![0; t.len()];
-        let m = gather_compacted_lms_suffixes_32s(&t, &mut sa, t.len() as SaSint);
-        assert!(m >= 0);
-        assert!(sa
-            .iter()
-            .all(|&value| value >= 0 && value <= t.len() as SaSint));
-    }
-
-    #[test]
-    fn count_lms_suffixes_32s_2k_counts_two_bucket_categories() {
-        let t = vec![2, 1, 3, 1, 0];
-        let mut buckets = vec![0; 2 * 4];
-        count_lms_suffixes_32s_2k(&t, t.len() as SaSint, 4, &mut buckets);
-        assert_eq!(buckets.iter().sum::<SaSint>(), t.len() as SaSint);
-    }
-
-    #[test]
-    fn count_lms_suffixes_32s_4k_counts_four_bucket_categories() {
-        let t = vec![2, 1, 3, 1, 0];
-        let mut buckets = vec![0; 4 * 4];
-        count_lms_suffixes_32s_4k(&t, t.len() as SaSint, 4, &mut buckets);
-        assert_eq!(buckets.iter().sum::<SaSint>(), t.len() as SaSint);
-    }
-
-    #[test]
-    fn count_compacted_lms_suffixes_32s_2k_masks_saint_bits() {
-        let t = vec![2, SAINT_MIN | 1, 3, 1, 0];
-        let mut buckets = vec![0; 2 * 4];
-        count_compacted_lms_suffixes_32s_2k(&t, t.len() as SaSint, 4, &mut buckets);
-        assert_eq!(buckets.iter().sum::<SaSint>(), t.len() as SaSint);
-    }
-
-    #[test]
-    fn count_and_gather_lms_suffixes_8u_updates_sa_and_buckets() {
-        let t = vec![2_u8, 1, 3, 1, 0];
-        let mut sa = vec![0; t.len()];
-        let mut buckets = vec![0; 4 * ALPHABET_SIZE];
-        let m = count_and_gather_lms_suffixes_8u(
-            &t,
-            &mut sa,
-            t.len() as SaSint,
-            &mut buckets,
-            0,
-            t.len() as FastSint,
-        );
-        assert_eq!(m, 1);
-        assert_eq!(sa[t.len() - 1], 1);
-        assert_eq!(buckets.iter().sum::<SaSint>(), t.len() as SaSint);
-    }
-
-    #[test]
-    fn get_bucket_stride_prefers_aligned_sizes_when_space_allows() {
-        assert_eq!(get_bucket_stride(8192, 1000, 2), 1024);
-        assert_eq!(get_bucket_stride(256, 17, 2), 32);
-        assert_eq!(get_bucket_stride(8, 17, 2), 17);
-    }
-
-    #[test]
-    fn count_suffixes_32s_counts_symbol_histogram() {
-        let t = vec![2, 1, 2, 3, 1, 0, 2];
-        let mut buckets = vec![0; 4];
-        count_suffixes_32s(&t, t.len() as SaSint, 4, &mut buckets);
-        assert_eq!(buckets, vec![1, 2, 3, 1]);
-    }
-
-    #[test]
-    fn initialize_buckets_start_and_end_8u_sets_ranges_and_freq() {
-        let mut buckets = vec![0; 8 * ALPHABET_SIZE];
-        buckets[buckets_index4(0, 0)] = 1;
-        buckets[buckets_index4(1, 1)] = 2;
-        buckets[buckets_index4(2, 3)] = 3;
-        let mut freq = vec![0; ALPHABET_SIZE];
-        let k = initialize_buckets_start_and_end_8u(&mut buckets, Some(&mut freq));
-        assert_eq!(k, 3);
-        assert_eq!(freq[0], 1);
-        assert_eq!(freq[1], 2);
-        assert_eq!(freq[2], 3);
-        assert_eq!(buckets[6 * ALPHABET_SIZE], 0);
-        assert_eq!(buckets[7 * ALPHABET_SIZE], 1);
-        assert_eq!(buckets[6 * ALPHABET_SIZE + 1], 1);
-        assert_eq!(buckets[7 * ALPHABET_SIZE + 1], 3);
-    }
-
-    #[test]
-    fn initialize_buckets_start_and_end_32s_6k_sets_prefix_ranges() {
-        let k = 3;
-        let mut buckets = vec![0; 6 * k];
-        buckets[buckets_index4(0, 0)] = 1;
-        buckets[buckets_index4(0, 1)] = 2;
-        buckets[buckets_index4(1, 2)] = 3;
-        buckets[buckets_index4(2, 3)] = 4;
-        initialize_buckets_start_and_end_32s_6k(k as SaSint, &mut buckets);
-        assert_eq!(&buckets[4 * k..5 * k], &[0, 3, 6]);
-        assert_eq!(&buckets[5 * k..6 * k], &[3, 6, 10]);
-    }
-
-    #[test]
-    fn initialize_buckets_start_and_end_32s_4k_sets_prefix_ranges() {
-        let k = 3;
-        let mut buckets = vec![0; 4 * k];
-        buckets[buckets_index2(0, 0)] = 1;
-        buckets[buckets_index2(0, 1)] = 2;
-        buckets[buckets_index2(1, 0)] = 3;
-        buckets[buckets_index2(2, 1)] = 4;
-        initialize_buckets_start_and_end_32s_4k(k as SaSint, &mut buckets);
-        assert_eq!(&buckets[2 * k..3 * k], &[0, 3, 6]);
-        assert_eq!(&buckets[3 * k..4 * k], &[3, 6, 10]);
-    }
-
-    #[test]
-    fn initialize_buckets_end_32s_2k_rewrites_first_lanes_to_end_positions() {
-        let k = 3;
-        let mut buckets = vec![1, 2, 3, 4, 5, 6];
-        initialize_buckets_end_32s_2k(k as SaSint, &mut buckets);
-        assert_eq!(buckets[0], 3);
-        assert_eq!(buckets[2], 10);
-        assert_eq!(buckets[4], 21);
-    }
-
-    #[test]
-    fn initialize_buckets_start_and_end_32s_2k_copies_start_positions() {
-        let k = 3;
-        let mut buckets = vec![3, 2, 10, 4, 21, 6];
-        initialize_buckets_start_and_end_32s_2k(k as SaSint, &mut buckets);
-        assert_eq!(&buckets[..k], &[3, 10, 21]);
-        assert_eq!(&buckets[k..2 * k], &[0, 3, 10]);
-    }
-
-    #[test]
-    fn initialize_buckets_start_32s_1k_builds_prefix_starts() {
-        let mut buckets = vec![1, 2, 3];
-        initialize_buckets_start_32s_1k(3, &mut buckets);
-        assert_eq!(buckets, vec![0, 1, 3]);
-    }
-
-    #[test]
-    fn initialize_buckets_end_32s_1k_builds_prefix_ends() {
-        let mut buckets = vec![1, 2, 3];
-        initialize_buckets_end_32s_1k(3, &mut buckets);
-        assert_eq!(buckets, vec![1, 3, 6]);
-    }
-
-    #[test]
-    fn initialize_buckets_for_lms_suffixes_radix_sort_8u_returns_total_lms_slots() {
-        let t = vec![2_u8, 1, 3, 1, 0];
-        let mut buckets = vec![0; 6 * ALPHABET_SIZE];
-        buckets[buckets_index4(0, 1)] = 1;
-        buckets[buckets_index4(1, 3)] = 2;
-        let sum = initialize_buckets_for_lms_suffixes_radix_sort_8u(&t, &mut buckets, 4);
-        assert!(sum >= 0);
-    }
-
-    #[test]
-    fn initialize_buckets_for_lms_suffixes_radix_sort_32s_2k_rewrites_two_lane_prefixes() {
-        let t = vec![2, 1, 3, 1, 0];
-        let mut buckets = vec![0; 2 * 4];
-        initialize_buckets_for_lms_suffixes_radix_sort_32s_2k(&t, 4, &mut buckets, 4);
-        assert!(buckets.iter().any(|&v| v != 0));
-    }
-
-    #[test]
-    fn initialize_buckets_for_lms_suffixes_radix_sort_32s_6k_returns_total_lms_slots() {
-        let t = vec![2, 1, 3, 1, 0];
-        let mut buckets = vec![0; 6 * 4];
-        buckets[buckets_index4(0, 1)] = 1;
-        buckets[buckets_index4(1, 3)] = 2;
-        let sum = initialize_buckets_for_lms_suffixes_radix_sort_32s_6k(&t, 4, &mut buckets, 4);
-        assert!(sum >= 0);
-    }
-
-    #[test]
-    fn initialize_buckets_for_radix_and_partial_sorting_32s_4k_sets_start_end_views() {
-        let t = vec![2, 1, 3, 1, 0];
-        let k = 4usize;
-        let mut buckets = vec![0; 4 * k];
-        buckets[buckets_index2(0, 0)] = 1;
-        buckets[buckets_index2(0, 1)] = 2;
-        buckets[buckets_index2(1, 0)] = 3;
-        initialize_buckets_for_radix_and_partial_sorting_32s_4k(&t, k as SaSint, &mut buckets, 4);
-        assert_eq!(buckets[2 * k], 0);
-        assert!(buckets[3 * k] >= buckets[2 * k]);
-    }
-
-    #[test]
-    fn radix_sort_lms_suffixes_8u_places_suffixes_by_bucket() {
+    fn libsais64_radix_sort_lms_suffixes_8u_places_suffixes_by_bucket() {
         let t = vec![1_u8, 0, 1, 0];
         let mut sa = vec![9, 9, 9, 9, 0, 1, 2, 3];
         let mut induction_bucket = vec![0; 2 * ALPHABET_SIZE];
@@ -15457,7 +14540,7 @@ mod tests {
     }
 
     #[test]
-    fn radix_sort_lms_suffixes_8u_omp_wraps_sequential_version() {
+    fn libsais64_radix_sort_lms_suffixes_8u_omp_wraps_sequential_version() {
         let t = vec![9_u8, 1, 0, 1, 0];
         let mut sa = vec![9, 9, 9, 9, 9, 1, 2, 3, 4];
         let mut buckets = vec![0; 6 * ALPHABET_SIZE];
@@ -15469,7 +14552,93 @@ mod tests {
     }
 
     #[test]
-    fn radix_sort_lms_suffixes_8u_omp_uses_thread_state_for_large_inputs() {
+    fn libsais64_radix_sort_lms_suffixes_32s_6k_places_suffixes_by_bucket() {
+        let t = vec![1, 0, 1, 0];
+        let mut sa = vec![9, 9, 9, 9, 0, 1, 2, 3];
+        let mut induction_bucket = vec![2, 4];
+        radix_sort_lms_suffixes_32s_6k(&t, &mut sa, &mut induction_bucket, 4, 4);
+        assert_eq!(&sa[..4], &[1, 3, 0, 2]);
+    }
+
+    #[test]
+    fn libsais64_radix_sort_lms_suffixes_32s_2k_places_suffixes_by_bucket() {
+        let t = vec![1, 0, 1, 0];
+        let mut sa = vec![9, 9, 9, 9, 0, 1, 2, 3];
+        let mut induction_bucket = vec![2, 0, 4, 0];
+        radix_sort_lms_suffixes_32s_2k(&t, &mut sa, &mut induction_bucket, 4, 4);
+        assert_eq!(&sa[..4], &[1, 3, 0, 2]);
+    }
+
+    #[test]
+    fn libsais64_radix_sort_lms_suffixes_32s_6k_omp_wraps_sequential_version() {
+        let t = vec![9, 1, 0, 1, 0];
+        let mut sa = vec![9, 9, 9, 9, 9, 1, 2, 3, 4];
+        let mut induction_bucket = vec![2, 4];
+        let mut thread_state = alloc_thread_state(2).unwrap();
+        radix_sort_lms_suffixes_32s_6k_omp(
+            &t,
+            &mut sa,
+            9,
+            5,
+            &mut induction_bucket,
+            2,
+            &mut thread_state,
+        );
+        assert_eq!(&sa[..4], &[2, 4, 1, 3]);
+    }
+
+    #[test]
+    fn libsais64_radix_sort_lms_suffixes_32s_2k_omp_wraps_sequential_version() {
+        let t = vec![9, 1, 0, 1, 0];
+        let mut sa = vec![9, 9, 9, 9, 9, 1, 2, 3, 4];
+        let mut induction_bucket = vec![2, 0, 4, 0];
+        let mut thread_state = alloc_thread_state(2).unwrap();
+        radix_sort_lms_suffixes_32s_2k_omp(
+            &t,
+            &mut sa,
+            9,
+            5,
+            &mut induction_bucket,
+            2,
+            &mut thread_state,
+        );
+        assert_eq!(&sa[..4], &[2, 4, 1, 3]);
+    }
+
+    #[test]
+    fn libsais64_radix_sort_lms_suffixes_32s_block_omp_runs_cache_pipeline() {
+        let t = vec![9, 1, 0, 1, 0];
+        let mut sa_6k = vec![9, 9, 9, 9, 9, 1, 2, 3, 4];
+        let mut bucket_6k = vec![2, 4];
+        let mut cache = vec![ThreadCache::default(); 9];
+        radix_sort_lms_suffixes_32s_6k_block_omp(
+            &t,
+            &mut sa_6k,
+            &mut bucket_6k,
+            &mut cache,
+            5,
+            4,
+            2,
+        );
+        assert_eq!(&sa_6k[..4], &[2, 4, 1, 3]);
+
+        let mut sa_2k = vec![9, 9, 9, 9, 9, 1, 2, 3, 4];
+        let mut bucket_2k = vec![2, 0, 4, 0];
+        cache.fill(ThreadCache::default());
+        radix_sort_lms_suffixes_32s_2k_block_omp(
+            &t,
+            &mut sa_2k,
+            &mut bucket_2k,
+            &mut cache,
+            5,
+            4,
+            2,
+        );
+        assert_eq!(&sa_2k[..4], &[2, 4, 1, 3]);
+    }
+
+    #[test]
+    fn libsais64_radix_sort_lms_suffixes_8u_omp_uses_thread_state_for_large_inputs() {
         let m = 65_600usize;
         let n = 2 * m + 16;
         let start = n - m + 1;
@@ -15520,93 +14689,7 @@ mod tests {
     }
 
     #[test]
-    fn radix_sort_lms_suffixes_32s_6k_places_suffixes_by_bucket() {
-        let t = vec![1, 0, 1, 0];
-        let mut sa = vec![9, 9, 9, 9, 0, 1, 2, 3];
-        let mut induction_bucket = vec![2, 4];
-        radix_sort_lms_suffixes_32s_6k(&t, &mut sa, &mut induction_bucket, 4, 4);
-        assert_eq!(&sa[..4], &[1, 3, 0, 2]);
-    }
-
-    #[test]
-    fn radix_sort_lms_suffixes_32s_2k_places_suffixes_by_bucket() {
-        let t = vec![1, 0, 1, 0];
-        let mut sa = vec![9, 9, 9, 9, 0, 1, 2, 3];
-        let mut induction_bucket = vec![2, 0, 4, 0];
-        radix_sort_lms_suffixes_32s_2k(&t, &mut sa, &mut induction_bucket, 4, 4);
-        assert_eq!(&sa[..4], &[1, 3, 0, 2]);
-    }
-
-    #[test]
-    fn radix_sort_lms_suffixes_32s_6k_omp_wraps_sequential_version() {
-        let t = vec![9, 1, 0, 1, 0];
-        let mut sa = vec![9, 9, 9, 9, 9, 1, 2, 3, 4];
-        let mut induction_bucket = vec![2, 4];
-        let mut thread_state = alloc_thread_state(2).unwrap();
-        radix_sort_lms_suffixes_32s_6k_omp(
-            &t,
-            &mut sa,
-            9,
-            5,
-            &mut induction_bucket,
-            2,
-            &mut thread_state,
-        );
-        assert_eq!(&sa[..4], &[2, 4, 1, 3]);
-    }
-
-    #[test]
-    fn radix_sort_lms_suffixes_32s_2k_omp_wraps_sequential_version() {
-        let t = vec![9, 1, 0, 1, 0];
-        let mut sa = vec![9, 9, 9, 9, 9, 1, 2, 3, 4];
-        let mut induction_bucket = vec![2, 0, 4, 0];
-        let mut thread_state = alloc_thread_state(2).unwrap();
-        radix_sort_lms_suffixes_32s_2k_omp(
-            &t,
-            &mut sa,
-            9,
-            5,
-            &mut induction_bucket,
-            2,
-            &mut thread_state,
-        );
-        assert_eq!(&sa[..4], &[2, 4, 1, 3]);
-    }
-
-    #[test]
-    fn radix_sort_lms_suffixes_32s_block_omp_runs_cache_pipeline() {
-        let t = vec![9, 1, 0, 1, 0];
-        let mut sa_6k = vec![9, 9, 9, 9, 9, 1, 2, 3, 4];
-        let mut bucket_6k = vec![2, 4];
-        let mut cache = vec![ThreadCache::default(); 9];
-        radix_sort_lms_suffixes_32s_6k_block_omp(
-            &t,
-            &mut sa_6k,
-            &mut bucket_6k,
-            &mut cache,
-            5,
-            4,
-            2,
-        );
-        assert_eq!(&sa_6k[..4], &[2, 4, 1, 3]);
-
-        let mut sa_2k = vec![9, 9, 9, 9, 9, 1, 2, 3, 4];
-        let mut bucket_2k = vec![2, 0, 4, 0];
-        cache.fill(ThreadCache::default());
-        radix_sort_lms_suffixes_32s_2k_block_omp(
-            &t,
-            &mut sa_2k,
-            &mut bucket_2k,
-            &mut cache,
-            5,
-            4,
-            2,
-        );
-        assert_eq!(&sa_2k[..4], &[2, 4, 1, 3]);
-    }
-
-    #[test]
-    fn radix_sort_lms_suffixes_32s_omp_uses_block_pipeline_for_large_inputs() {
+    fn libsais64_radix_sort_lms_suffixes_32s_omp_uses_block_pipeline_for_large_inputs() {
         let m = 65_600usize;
         let n = 2 * m + 16;
         let start = n - m + 1;
@@ -15684,7 +14767,7 @@ mod tests {
     }
 
     #[test]
-    fn radix_sort_lms_suffixes_32s_1k_collects_lms_suffixes() {
+    fn libsais64_radix_sort_lms_suffixes_32s_1k_collects_lms_suffixes() {
         let t = vec![2, 1, 3, 1, 0];
         let mut sa = vec![0; t.len()];
         let mut buckets = vec![0, 2, 4, 5];
@@ -15693,7 +14776,7 @@ mod tests {
     }
 
     #[test]
-    fn radix_sort_set_markers_32s_6k_marks_target_suffixes() {
+    fn libsais64_radix_sort_set_markers_32s_6k_marks_target_suffixes() {
         let mut sa = vec![0; 6];
         let induction_bucket = vec![1, 3, 5];
         radix_sort_set_markers_32s_6k(&mut sa, &induction_bucket, 0, 3);
@@ -15703,7 +14786,7 @@ mod tests {
     }
 
     #[test]
-    fn radix_sort_set_markers_32s_4k_marks_target_suffixes() {
+    fn libsais64_radix_sort_set_markers_32s_4k_marks_target_suffixes() {
         let mut sa = vec![0; 6];
         let induction_bucket = vec![1, 0, 3, 0, 5, 0];
         radix_sort_set_markers_32s_4k(&mut sa, &induction_bucket, 0, 3);
@@ -15713,7 +14796,7 @@ mod tests {
     }
 
     #[test]
-    fn radix_sort_set_markers_32s_6k_omp_wraps_sequential_version() {
+    fn libsais64_radix_sort_set_markers_32s_6k_omp_wraps_sequential_version() {
         let mut sa = vec![0; 6];
         let induction_bucket = vec![1, 3, 5];
         radix_sort_set_markers_32s_6k_omp(&mut sa, 4, &induction_bucket, 2);
@@ -15723,7 +14806,7 @@ mod tests {
     }
 
     #[test]
-    fn radix_sort_set_markers_32s_4k_omp_wraps_sequential_version() {
+    fn libsais64_radix_sort_set_markers_32s_4k_omp_wraps_sequential_version() {
         let mut sa = vec![0; 6];
         let induction_bucket = vec![1, 0, 3, 0, 5, 0];
         radix_sort_set_markers_32s_4k_omp(&mut sa, 4, &induction_bucket, 2);
@@ -15733,7 +14816,7 @@ mod tests {
     }
 
     #[test]
-    fn radix_sort_set_markers_32s_omp_partitions_large_inputs() {
+    fn libsais64_radix_sort_set_markers_32s_omp_partitions_large_inputs() {
         let k = 65_600usize;
         let induction_bucket_6k: Vec<SaSint> = (0..k).map(|i| i as SaSint).collect();
         let mut sa_single = vec![0; k];
@@ -15754,32 +14837,7 @@ mod tests {
     }
 
     #[test]
-    fn initialize_buckets_for_partial_sorting_8u_sets_start_and_distinct_views() {
-        let t = vec![2_u8, 1, 3, 1, 0];
-        let mut buckets = vec![0; 6 * ALPHABET_SIZE];
-        buckets[buckets_index4(0, 0)] = 1;
-        buckets[buckets_index4(0, 2)] = 2;
-        initialize_buckets_for_partial_sorting_8u(&t, &mut buckets, 4, 3);
-        assert!(buckets[0] >= 4);
-        assert!(buckets[1] >= 0);
-        assert!(buckets[4 * ALPHABET_SIZE] >= 4);
-    }
-
-    #[test]
-    fn initialize_buckets_for_partial_sorting_32s_6k_rewrites_bucket_views() {
-        let t = vec![2, 1, 3, 1, 0];
-        let k = 4usize;
-        let mut buckets = vec![0; 6 * k];
-        buckets[buckets_index4(0, 0)] = 1;
-        buckets[buckets_index4(0, 1)] = 2;
-        buckets[buckets_index4(1, 2)] = 3;
-        initialize_buckets_for_partial_sorting_32s_6k(&t, k as SaSint, &mut buckets, 4, 3);
-        assert!(buckets[0] >= 4);
-        assert!(buckets[4 * k] >= 4);
-    }
-
-    #[test]
-    fn partial_sorting_scan_left_to_right_8u_emits_induced_suffixes() {
+    fn libsais64_partial_sorting_scan_left_to_right_8u_emits_induced_suffixes() {
         let t = vec![2_u8, 1, 3, 1, 0];
         let mut sa = vec![2 | SAINT_MIN, 4, 0, 0, 0, 0];
         let mut buckets = vec![0; 6 * ALPHABET_SIZE];
@@ -15790,7 +14848,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_sorting_scan_left_to_right_8u_omp_wraps_sequential_version() {
+    fn libsais64_partial_sorting_scan_left_to_right_8u_omp_wraps_sequential_version() {
         let t = vec![2_u8, 1, 3, 1, 0];
         let mut sa = vec![0; 8];
         let mut buckets = vec![0; 6 * ALPHABET_SIZE];
@@ -15811,7 +14869,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_sorting_scan_left_to_right_32s_6k_emits_induced_suffixes() {
+    fn libsais64_partial_sorting_scan_left_to_right_32s_6k_emits_induced_suffixes() {
         let t = vec![2, 1, 3, 1, 0];
         let mut sa = vec![2 | SAINT_MIN, 4, 0, 0, 0, 0];
         let mut buckets = vec![0; 4 * 4];
@@ -15822,7 +14880,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_sorting_scan_left_to_right_32s_4k_emits_induced_suffixes() {
+    fn libsais64_partial_sorting_scan_left_to_right_32s_4k_emits_induced_suffixes() {
         let t = vec![2, 1, 3, 1, 0];
         let k = 4usize;
         let mut sa = vec![2 | SUFFIX_GROUP_MARKER, 4, 0, 0, 0, 0];
@@ -15842,7 +14900,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_sorting_scan_left_to_right_32s_1k_emits_induced_suffixes() {
+    fn libsais64_partial_sorting_scan_left_to_right_32s_1k_emits_induced_suffixes() {
         let t = vec![2, 1, 3, 1, 0];
         let mut sa = vec![2, 4, 0, 0, 0, 0];
         let mut buckets = vec![0; 4];
@@ -15852,7 +14910,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_sorting_scan_left_to_right_32s_6k_omp_wraps_sequential_version() {
+    fn libsais64_partial_sorting_scan_left_to_right_32s_6k_omp_wraps_sequential_version() {
         let t = vec![2, 1, 3, 1, 0];
         let mut sa = vec![0; 8];
         let mut buckets = vec![0; 4 * 4];
@@ -15871,7 +14929,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_sorting_scan_left_to_right_32s_4k_omp_wraps_sequential_version() {
+    fn libsais64_partial_sorting_scan_left_to_right_32s_4k_omp_wraps_sequential_version() {
         let t = vec![2, 1, 3, 1, 0];
         let k = 4usize;
         let mut sa = vec![0; 8];
@@ -15891,7 +14949,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_sorting_scan_left_to_right_32s_1k_omp_wraps_sequential_version() {
+    fn libsais64_partial_sorting_scan_left_to_right_32s_1k_omp_wraps_sequential_version() {
         let t = vec![2, 1, 3, 1, 0];
         let mut sa = vec![0; 8];
         let mut buckets = vec![0; 4];
@@ -15908,7 +14966,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_sorting_scan_left_to_right_32s_6k_block_gather_records_bucket_symbols() {
+    fn libsais64_partial_sorting_scan_left_to_right_32s_6k_block_gather_records_bucket_symbols() {
         let t = vec![3, 1, 2, 0];
         let mut sa = vec![2 | SAINT_MIN, 0, 0, 0];
         let mut cache = vec![ThreadCache::default(); 1];
@@ -15920,7 +14978,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_sorting_scan_left_to_right_32s_1k_block_gather_zeroes_positive_entries() {
+    fn libsais64_partial_sorting_scan_left_to_right_32s_1k_block_gather_zeroes_positive_entries() {
         let t = vec![3, 1, 2, 0];
         let mut sa = vec![2, 0, 0, 0];
         let mut cache = vec![ThreadCache::default(); 1];
@@ -15933,7 +14991,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_sorting_scan_left_to_right_32s_1k_block_omp_uses_relative_cache() {
+    fn libsais64_partial_sorting_scan_left_to_right_32s_1k_block_omp_uses_relative_cache() {
         let block_start = 20_000usize;
         let block_size = 16_384usize;
         let n = block_start + block_size + 8;
@@ -15969,7 +15027,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_sorting_scan_left_to_right_8u_block_prepare_records_cache_and_counts() {
+    fn libsais64_partial_sorting_scan_left_to_right_8u_block_prepare_records_cache_and_counts() {
         let t = vec![2_u8, 1, 3, 1, 0];
         let sa = vec![2 | SAINT_MIN, 4, 0, 0, 0, 0];
         let k = 4;
@@ -15995,7 +15053,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_sorting_scan_left_to_right_8u_block_place_writes_induced_values() {
+    fn libsais64_partial_sorting_scan_left_to_right_8u_block_place_writes_induced_values() {
         let mut sa = vec![0; 8];
         let mut buckets = vec![0; 8];
         buckets[0] = 0;
@@ -16015,7 +15073,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_sorting_scan_left_to_right_8u_block_omp_wraps_sequential_version() {
+    fn libsais64_partial_sorting_scan_left_to_right_8u_block_omp_wraps_sequential_version() {
         let t = vec![2_u8, 1, 3, 1, 0];
         let mut sa = vec![2 | SAINT_MIN, 4, 0, 0, 0, 0];
         let mut buckets = vec![0; 6 * ALPHABET_SIZE];
@@ -16035,45 +15093,10 @@ mod tests {
     }
 
     #[test]
-    fn partial_sorting_shift_markers_8u_omp_toggles_segment_markers() {
-        let mut sa = vec![1 | SAINT_MIN, 2 | SAINT_MIN, 3, 4 | SAINT_MIN, 5];
-        let mut buckets = vec![0; 6 * ALPHABET_SIZE];
-        buckets[4 * ALPHABET_SIZE + buckets_index2(1, 0)] = 5;
-        buckets[buckets_index2(0, 0)] = 0;
-        let len = sa.len() as SaSint;
-        partial_sorting_shift_markers_8u_omp(&mut sa, len, &buckets, 1);
-        assert!(sa.iter().any(|&v| (v & SAINT_MIN) == 0));
-    }
-
-    #[test]
-    fn partial_sorting_shift_markers_32s_6k_omp_toggles_segment_markers() {
-        let mut sa = vec![1 | SAINT_MIN, 2 | SAINT_MIN, 3, 4 | SAINT_MIN, 5];
+    fn libsais64_partial_sorting_shift_buckets_32s_6k_moves_temp_bucket_view_into_main_slots() {
         let k = 3usize;
         let mut buckets = vec![0; 6 * k];
-        buckets[buckets_index4(1, 0)] = 5;
-        buckets[4 * k + buckets_index2(0, 0)] = 0;
-        partial_sorting_shift_markers_32s_6k_omp(&mut sa, k as SaSint, &buckets, 1);
-        assert!(sa.iter().any(|&v| (v & SAINT_MIN) == 0));
-    }
-
-    #[test]
-    fn partial_sorting_shift_markers_32s_4k_toggles_group_markers() {
-        let mut sa = vec![
-            1 | SUFFIX_GROUP_MARKER,
-            2 | SUFFIX_GROUP_MARKER,
-            3,
-            4 | SUFFIX_GROUP_MARKER,
-        ];
-        let len = sa.len() as SaSint;
-        partial_sorting_shift_markers_32s_4k(&mut sa, len);
-        assert!(sa.iter().any(|&v| (v & SUFFIX_GROUP_MARKER) == 0));
-    }
-
-    #[test]
-    fn partial_sorting_shift_buckets_32s_6k_moves_temp_bucket_view_into_main_slots() {
-        let k = 3usize;
-        let mut buckets = vec![0; 6 * k];
-        buckets[4 * k + 0] = 10;
+        buckets[4 * k] = 10;
         buckets[4 * k + 1] = 11;
         buckets[4 * k + 2] = 12;
         buckets[4 * k + 3] = 13;
@@ -16085,7 +15108,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_sorting_scan_right_to_left_8u_emits_induced_suffixes() {
+    fn libsais64_partial_sorting_scan_right_to_left_8u_emits_induced_suffixes() {
         let t = vec![0_u8, 1, 2, 1, 0];
         let mut sa = vec![0, 0, 4 | SAINT_MIN];
         let mut buckets = vec![0; 4 * ALPHABET_SIZE];
@@ -16100,7 +15123,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_gsa_scan_right_to_left_8u_skips_separator_bucket() {
+    fn libsais64_partial_gsa_scan_right_to_left_8u_skips_separator_bucket() {
         let t = vec![1_u8, 0, 0];
         let mut sa = vec![0, 2 | SAINT_MIN];
         let mut buckets = vec![0; 4 * ALPHABET_SIZE];
@@ -16114,7 +15137,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_sorting_scan_right_to_left_32s_6k_emits_induced_suffixes() {
+    fn libsais64_partial_sorting_scan_right_to_left_32s_6k_emits_induced_suffixes() {
         let t = vec![0, 1, 2, 1, 0];
         let mut sa = vec![0, 0, 4 | SAINT_MIN];
         let mut buckets = vec![0; 4 * 3];
@@ -16129,7 +15152,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_sorting_scan_right_to_left_32s_1k_omp_wraps_sequential_version() {
+    fn libsais64_partial_sorting_scan_right_to_left_32s_1k_omp_wraps_sequential_version() {
         let t = vec![0, 1, 2, 1, 0];
         let mut sa = vec![0, 0, 4];
         let mut buckets = vec![0; 3];
@@ -16150,7 +15173,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_sorting_scan_right_to_left_32s_6k_block_gather_records_symbols() {
+    fn libsais64_partial_sorting_scan_right_to_left_32s_6k_block_gather_records_symbols() {
         let t = vec![0, 1, 2, 1, 0];
         let sa = vec![0, 4 | SAINT_MIN, 0];
         let mut cache = vec![ThreadCache::default(); sa.len()];
@@ -16162,7 +15185,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_sorting_scan_right_to_left_32s_4k_block_gather_zeroes_positive_entries() {
+    fn libsais64_partial_sorting_scan_right_to_left_32s_4k_block_gather_zeroes_positive_entries() {
         let t = vec![0, 1, 2, 1, 0];
         let mut sa = vec![0, 4 | SUFFIX_GROUP_MARKER, 0];
         let mut cache = vec![ThreadCache::default(); sa.len()];
@@ -16175,7 +15198,8 @@ mod tests {
     }
 
     #[test]
-    fn partial_sorting_scan_right_to_left_32s_1k_block_gather_stores_preinduced_entries() {
+    fn libsais64_partial_sorting_scan_right_to_left_32s_1k_block_gather_stores_preinduced_entries()
+    {
         let t = vec![0, 1, 2, 1, 0];
         let mut sa = vec![0, 4, 0];
         let mut cache = vec![ThreadCache::default(); sa.len()];
@@ -16188,7 +15212,8 @@ mod tests {
     }
 
     #[test]
-    fn partial_sorting_scan_right_to_left_32s_6k_block_sort_updates_bucket_and_marker_state() {
+    fn libsais64_partial_sorting_scan_right_to_left_32s_6k_block_sort_updates_bucket_and_marker_state(
+    ) {
         let t = vec![0, 1, 2, 1, 0];
         let mut cache = vec![ThreadCache::default(); 3];
         cache[0].index = 4 | SAINT_MIN;
@@ -16212,7 +15237,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_sorting_scan_right_to_left_32s_1k_block_omp_places_cached_suffixes() {
+    fn libsais64_partial_sorting_scan_right_to_left_32s_1k_block_omp_places_cached_suffixes() {
         let t = vec![0, 1, 2, 1, 0];
         let mut sa = vec![0, 4, 0];
         let mut buckets = vec![0; 3];
@@ -16234,7 +15259,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_sorting_scan_right_to_left_32s_1k_block_omp_uses_relative_cache() {
+    fn libsais64_partial_sorting_scan_right_to_left_32s_1k_block_omp_uses_relative_cache() {
         let block_start = 20_000usize;
         let block_size = 16_384usize;
         let n = block_start + block_size + 8;
@@ -16270,19 +15295,19 @@ mod tests {
     }
 
     #[test]
-    fn partial_sorting_gather_lms_suffixes_32s_4k_compacts_negative_marked_entries() {
+    fn libsais64_partial_sorting_gather_lms_suffixes_32s_4k_compacts_negative_marked_entries() {
         let mut sa = vec![1 | SUFFIX_GROUP_MARKER, -3, 5 | SUFFIX_GROUP_MARKER, -7];
         let n = sa.len() as FastSint;
 
         let l = partial_sorting_gather_lms_suffixes_32s_4k(&mut sa, 0, n);
 
         assert_eq!(l, 2);
-        assert_eq!(sa[0], -1073741827);
-        assert_eq!(sa[1], -1073741831);
+        assert_eq!(sa[0], (SAINT_MIN | SUFFIX_GROUP_MARKER) - 3);
+        assert_eq!(sa[1], (SAINT_MIN | SUFFIX_GROUP_MARKER) - 7);
     }
 
     #[test]
-    fn partial_sorting_gather_lms_suffixes_32s_1k_compacts_negative_marked_entries() {
+    fn libsais64_partial_sorting_gather_lms_suffixes_32s_1k_compacts_negative_marked_entries() {
         let mut sa = vec![1, -3, 5, -7];
         let n = sa.len() as FastSint;
 
@@ -16294,18 +15319,18 @@ mod tests {
     }
 
     #[test]
-    fn partial_sorting_gather_lms_suffixes_32s_4k_omp_wraps_sequential_version() {
+    fn libsais64_partial_sorting_gather_lms_suffixes_32s_4k_omp_wraps_sequential_version() {
         let mut sa = vec![1 | SUFFIX_GROUP_MARKER, -3, 5 | SUFFIX_GROUP_MARKER, -7];
         let mut thread_state = alloc_thread_state(2).unwrap();
 
         partial_sorting_gather_lms_suffixes_32s_4k_omp(&mut sa, 4, 2, &mut thread_state);
 
-        assert_eq!(sa[0], -1073741827);
-        assert_eq!(sa[1], -1073741831);
+        assert_eq!(sa[0], (SAINT_MIN | SUFFIX_GROUP_MARKER) - 3);
+        assert_eq!(sa[1], (SAINT_MIN | SUFFIX_GROUP_MARKER) - 7);
     }
 
     #[test]
-    fn partial_sorting_gather_lms_suffixes_32s_1k_omp_wraps_sequential_version() {
+    fn libsais64_partial_sorting_gather_lms_suffixes_32s_1k_omp_wraps_sequential_version() {
         let mut sa = vec![1, -3, 5, -7];
         let mut thread_state = alloc_thread_state(2).unwrap();
 
@@ -16316,7 +15341,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_sorting_gather_lms_suffixes_32s_omp_uses_block_partition() {
+    fn libsais64_partial_sorting_gather_lms_suffixes_32s_omp_uses_block_partition() {
         let n = 65_600usize;
         let input_4k: Vec<SaSint> = (0..n)
             .map(|i| {
@@ -16367,450 +15392,54 @@ mod tests {
     }
 
     #[test]
-    fn renumber_lms_suffixes_8u_writes_names_into_second_half() {
-        let mut sa = vec![1 | SAINT_MIN, 3, 0, 0];
-
-        let name = renumber_lms_suffixes_8u(&mut sa, 2, 0, 0, 2);
-
-        assert_eq!(name, 1);
-        assert_eq!(sa[2], SAINT_MIN);
-        assert_eq!(sa[3], SAINT_MIN | 1);
+    fn libsais64_partial_sorting_shift_markers_8u_omp_toggles_segment_markers() {
+        let mut sa = vec![1 | SAINT_MIN, 2 | SAINT_MIN, 3, 4 | SAINT_MIN, 5];
+        let mut buckets = vec![0; 6 * ALPHABET_SIZE];
+        buckets[4 * ALPHABET_SIZE + buckets_index2(1, 0)] = 5;
+        buckets[buckets_index2(0, 0)] = 0;
+        let len = sa.len() as SaSint;
+        partial_sorting_shift_markers_8u_omp(&mut sa, len, &buckets, 1);
+        assert!(sa.iter().any(|&v| (v & SAINT_MIN) == 0));
     }
 
     #[test]
-    fn renumber_lms_suffixes_8u_matches_upstream_c_helper() {
-        let mut sa_rust = vec![1 | SAINT_MIN, 3, 0, 0];
-        let mut sa_c = sa_rust.clone();
-
-        let rust_name = renumber_lms_suffixes_8u(&mut sa_rust, 2, 0, 0, 2);
-        let c_name = unsafe { probe_renumber_lms_suffixes_8u(sa_c.as_mut_ptr(), 2, 0, 0, 2) };
-
-        assert_eq!(rust_name, c_name);
-        assert_eq!(sa_rust, sa_c);
-    }
-
-    #[test]
-    fn gather_marked_lms_suffixes_moves_negative_marked_entries_to_tail() {
-        let mut sa = vec![0, 0, 1 | SAINT_MIN, 3];
-
-        let l = gather_marked_lms_suffixes(&mut sa, 2, 4, 0, 2);
-
-        assert_eq!(l, 3);
-        assert_eq!(sa[3], 1);
-    }
-
-    #[test]
-    fn gather_marked_lms_suffixes_matches_upstream_c_helper() {
-        let mut sa_rust = vec![0, 0, 1 | SAINT_MIN, 3];
-        let mut sa_c = sa_rust.clone();
-
-        let rust_l = gather_marked_lms_suffixes(&mut sa_rust, 2, 4, 0, 2);
-        let c_l = unsafe { probe_gather_marked_lms_suffixes(sa_c.as_mut_ptr(), 2, 4, 0, 2) };
-
-        assert_eq!(rust_l, c_l);
-        assert_eq!(sa_rust, sa_c);
-    }
-
-    #[test]
-    fn renumber_lms_suffixes_8u_omp_wraps_sequential_version() {
-        let mut sa = vec![1 | SAINT_MIN, 3, 0, 0];
-        let mut thread_state = alloc_thread_state(2).unwrap();
-
-        let name = renumber_lms_suffixes_8u_omp(&mut sa, 2, 2, &mut thread_state);
-
-        assert_eq!(name, 1);
-        assert_eq!(sa[2], SAINT_MIN);
-    }
-
-    #[test]
-    fn renumber_lms_suffixes_8u_omp_uses_block_partition_for_large_inputs() {
-        let m = 65_600usize;
-        let mut input = vec![0; 2 * m];
-        for (i, slot) in input[..m].iter_mut().enumerate() {
-            let suffix = (2 * i + 1) as SaSint;
-            *slot = if i % 5 == 0 {
-                suffix | SAINT_MIN
-            } else {
-                suffix
-            };
-        }
-
-        let mut single = input.clone();
-        let mut threaded = input;
-        let mut thread_state = alloc_thread_state(4).unwrap();
-        let single_name = renumber_lms_suffixes_8u(&mut single, m as SaSint, 0, 0, m as FastSint);
-        let threaded_name =
-            renumber_lms_suffixes_8u_omp(&mut threaded, m as SaSint, 4, &mut thread_state);
-
-        assert_eq!(threaded_name, single_name);
-        assert_eq!(threaded, single);
-    }
-
-    #[test]
-    fn gather_marked_lms_suffixes_omp_uses_block_partition_for_large_inputs() {
-        let n = 131_200usize;
-        let half_n = n >> 1;
-        let mut input = vec![-77; n];
-        for (i, slot) in input[..half_n].iter_mut().enumerate() {
-            let suffix = (3 * i + 1) as SaSint;
-            *slot = if i % 7 == 0 {
-                suffix | SAINT_MIN
-            } else {
-                suffix
-            };
-        }
-        let marked_count = input[..half_n].iter().filter(|&&value| value < 0).count();
-
-        let mut single = input.clone();
-        let mut threaded = input;
-        let mut thread_state = alloc_thread_state(4).unwrap();
-        let _ = gather_marked_lms_suffixes(&mut single, 0, n as FastSint, 0, half_n as FastSint);
-        gather_marked_lms_suffixes_omp(&mut threaded, n as SaSint, 0, 0, 4, &mut thread_state);
-
-        assert_eq!(&threaded[n - marked_count..], &single[n - marked_count..]);
-    }
-
-    #[test]
-    fn renumber_and_gather_lms_suffixes_omp_uses_large_input_paths() {
-        let m = 65_600usize;
-        let n = 2 * m;
-        let mut input = vec![0; n];
-        for (i, slot) in input[..m].iter_mut().enumerate() {
-            let suffix = (2 * i + 1) as SaSint;
-            *slot = if i % 5 == 0 {
-                suffix | SAINT_MIN
-            } else {
-                suffix
-            };
-        }
-
-        let mut single = input.clone();
-        let mut threaded = input;
-        let mut single_state = alloc_thread_state(1).unwrap();
-        let mut threaded_state = alloc_thread_state(4).unwrap();
-        let single_name = renumber_and_gather_lms_suffixes_omp(
-            &mut single,
-            n as SaSint,
-            m as SaSint,
-            0,
-            1,
-            &mut single_state,
-        );
-        let threaded_name = renumber_and_gather_lms_suffixes_omp(
-            &mut threaded,
-            n as SaSint,
-            m as SaSint,
-            0,
-            4,
-            &mut threaded_state,
-        );
-
-        assert_eq!(threaded_name, single_name);
-        assert_eq!(threaded, single);
-    }
-
-    #[test]
-    fn renumber_and_gather_lms_suffixes_omp_gathers_when_names_are_not_distinct() {
-        let mut sa = vec![1 | SAINT_MIN, 3, 0, 0];
-        let mut thread_state = alloc_thread_state(2).unwrap();
-
-        let name = renumber_and_gather_lms_suffixes_omp(&mut sa, 4, 2, 0, 2, &mut thread_state);
-
-        assert_eq!(name, 1);
-        assert_eq!(sa[3], 1);
-    }
-
-    #[test]
-    fn renumber_and_gather_lms_suffixes_omp_matches_upstream_c_helper() {
-        let mut sa_rust = vec![1 | SAINT_MIN, 3, 0, 0];
-        let mut sa_c = sa_rust.clone();
-        let mut thread_state = alloc_thread_state(2).unwrap();
-
-        let rust_name =
-            renumber_and_gather_lms_suffixes_omp(&mut sa_rust, 4, 2, 0, 2, &mut thread_state);
-        let c_name =
-            unsafe { probe_renumber_and_gather_lms_suffixes_omp(sa_c.as_mut_ptr(), 4, 2, 0, 2) };
-
-        assert_eq!(rust_name, c_name);
-        assert_eq!(sa_rust, sa_c);
-    }
-
-    #[test]
-    fn renumber_distinct_lms_suffixes_32s_4k_masks_sources_and_writes_second_half() {
-        let mut sa = vec![1 | SAINT_MIN, 3 | SAINT_MIN, 0, 0];
-
-        let name = renumber_distinct_lms_suffixes_32s_4k(&mut sa, 2, 1, 0, 2);
-
-        assert_eq!(name, 3);
-        assert_eq!(sa[0], 1);
-        assert_eq!(sa[1], 3);
-        assert_eq!(sa[2], 1);
-        assert_eq!(sa[3], 2 | SAINT_MIN);
-    }
-
-    #[test]
-    fn renumber_distinct_lms_suffixes_32s_4k_matches_upstream_c_helper() {
-        let mut sa_rust = vec![1 | SAINT_MIN, 3 | SAINT_MIN, 0, 0];
-        let mut sa_c = sa_rust.clone();
-
-        let rust_name = renumber_distinct_lms_suffixes_32s_4k(&mut sa_rust, 2, 1, 0, 2);
-        let c_name =
-            unsafe { probe_renumber_distinct_lms_suffixes_32s_4k(sa_c.as_mut_ptr(), 2, 1, 0, 2) };
-
-        assert_eq!(rust_name, c_name);
-        assert_eq!(sa_rust, sa_c);
-    }
-
-    #[test]
-    fn mark_distinct_lms_suffixes_32s_propagates_previous_nonzero_marker() {
-        let mut sa = vec![0, 0, SAINT_MIN | 5, 0, SAINT_MIN | 7];
-
-        mark_distinct_lms_suffixes_32s(&mut sa, 2, 0, 3);
-
-        assert_eq!(sa[2], 5);
-        assert_eq!(sa[3], 0);
-        assert_eq!(sa[4], SAINT_MIN | 7);
-    }
-
-    #[test]
-    fn clamp_lms_suffixes_length_32s_keeps_only_negative_lengths() {
-        let mut sa = vec![0, 0, SAINT_MIN | 5, 7, SAINT_MIN | 3];
-
-        clamp_lms_suffixes_length_32s(&mut sa, 2, 0, 3);
-
-        assert_eq!(sa[2], 5);
-        assert_eq!(sa[3], 0);
-        assert_eq!(sa[4], 3);
-    }
-
-    #[test]
-    fn renumber_and_mark_distinct_lms_suffixes_32s_4k_omp_marks_second_half_when_names_repeat() {
-        let mut sa = vec![1 | SAINT_MIN, 3 | SAINT_MIN, 0, 0];
-        let mut thread_state = alloc_thread_state(2).unwrap();
-
-        let name =
-            renumber_and_mark_distinct_lms_suffixes_32s_4k_omp(&mut sa, 4, 2, 2, &mut thread_state);
-
-        assert_eq!(name, 2);
-        assert_eq!(sa[2], 1);
-        assert_eq!(sa[3], SAINT_MIN | 2);
-    }
-
-    #[test]
-    fn renumber_and_mark_distinct_lms_suffixes_32s_4k_omp_matches_upstream_c_helper() {
-        let mut sa_rust = vec![1 | SAINT_MIN, 3 | SAINT_MIN, 0, 0];
-        let mut sa_c = sa_rust.clone();
-        let mut thread_state = alloc_thread_state(2).unwrap();
-
-        let rust_name = renumber_and_mark_distinct_lms_suffixes_32s_4k_omp(
-            &mut sa_rust,
-            4,
-            2,
-            2,
-            &mut thread_state,
-        );
-        let c_name = unsafe {
-            probe_renumber_and_mark_distinct_lms_suffixes_32s_4k_omp(sa_c.as_mut_ptr(), 4, 2, 2)
-        };
-
-        assert_eq!(rust_name, c_name);
-        assert_eq!(sa_rust, sa_c);
-    }
-
-    #[test]
-    fn reconstruct_lms_suffixes_maps_indices_from_tail_interval() {
-        let mut sa = vec![0, 1, 2, 7, 11, 13];
-
-        reconstruct_lms_suffixes(&mut sa, 6, 3, 0, 3);
-
-        assert_eq!(&sa[..3], &[7, 11, 13]);
-    }
-
-    #[test]
-    fn reconstruct_lms_suffixes_omp_wraps_sequential_version() {
-        let mut sa = vec![0, 1, 2, 7, 11, 13];
-
-        reconstruct_lms_suffixes_omp(&mut sa, 6, 3, 2);
-
-        assert_eq!(&sa[..3], &[7, 11, 13]);
-    }
-
-    #[test]
-    fn reconstruct_lms_suffixes_omp_uses_block_partition_for_large_inputs() {
-        let m = 65_600usize;
-        let n = 2 * m;
-        let mut input = vec![0; n];
-        for (i, slot) in input[..m].iter_mut().enumerate() {
-            *slot = (m - 1 - i) as SaSint;
-        }
-        for (i, slot) in input[m..].iter_mut().enumerate() {
-            *slot = (i * 17 + 3) as SaSint;
-        }
-
-        let mut single = input.clone();
-        let mut threaded = input;
-        reconstruct_lms_suffixes(&mut single, n as SaSint, m as SaSint, 0, m as FastSint);
-        reconstruct_lms_suffixes_omp(&mut threaded, n as SaSint, m as SaSint, 4);
-
-        assert_eq!(threaded, single);
-    }
-
-    #[test]
-    fn renumber_and_mark_distinct_lms_suffixes_32s_1k_omp_handles_single_lms_suffix() {
-        let t = vec![2, 1, 0];
-        let mut sa = vec![0; t.len()];
-
-        let name = renumber_and_mark_distinct_lms_suffixes_32s_1k_omp(&t, &mut sa, 3, 1, 1);
-
-        assert_eq!(name, 1);
-        assert_eq!(sa[1], SAINT_MIN | 1);
-    }
-
-    #[test]
-    fn libsais_main_32s_entry_matches_upstream_c_on_6k_branch() {
-        assert_main_32s_entry_matches_upstream_c_for_branch(300);
-    }
-
-    #[test]
-    fn libsais_main_32s_entry_matches_upstream_c_on_4k_branch() {
-        assert_main_32s_entry_matches_upstream_c_for_branch(400);
-    }
-
-    #[test]
-    fn libsais_main_32s_entry_matches_upstream_c_on_2k_branch() {
-        assert_main_32s_entry_matches_upstream_c_for_branch(700);
-    }
-
-    #[test]
-    fn libsais_main_32s_entry_matches_upstream_c_on_1k_branch() {
-        assert_main_32s_entry_matches_upstream_c_for_branch(1501);
-    }
-
-    #[test]
-    fn libsais_main_32s_entry_matches_upstream_c_on_recursive_repetitive_6k_case() {
-        assert_main_32s_entry_matches_upstream_c(make_recursive_main_32s_text(24), 300, 0, true);
-    }
-
-    #[test]
-    fn libsais_main_32s_entry_matches_upstream_c_on_recursive_repetitive_1k_case() {
-        assert_main_32s_entry_matches_upstream_c(make_recursive_main_32s_text(24), 1501, 0, true);
-    }
-
-    #[test]
-    fn libsais_main_32s_entry_matches_upstream_c_on_large_generated_6k_case() {
-        assert_main_32s_entry_matches_upstream_c(
-            make_large_main_32s_stress_text(1024, 300),
-            300,
-            0,
-            true,
-        );
-    }
-
-    #[test]
-    fn libsais_main_32s_entry_matches_upstream_c_on_large_generated_6k_case_with_fs() {
-        assert_main_32s_entry_matches_upstream_c(
-            make_large_main_32s_stress_text(1024, 300),
-            300,
-            2048,
-            false,
-        );
-    }
-
-    #[test]
-    fn libsais_main_32s_entry_matches_upstream_c_on_large_generated_4k_case() {
-        assert_main_32s_entry_matches_upstream_c(
-            make_large_main_32s_stress_text(1024, 400),
-            400,
-            0,
-            true,
-        );
-    }
-
-    #[test]
-    fn libsais_main_32s_entry_matches_upstream_c_on_large_generated_4k_case_with_fs() {
-        assert_main_32s_entry_matches_upstream_c(
-            make_large_main_32s_stress_text(1024, 400),
-            400,
-            2048,
-            false,
-        );
-    }
-
-    #[test]
-    fn libsais_main_32s_entry_matches_upstream_c_on_large_generated_2k_case() {
-        assert_main_32s_entry_matches_upstream_c(
-            make_large_main_32s_stress_text(1024, 700),
-            700,
-            0,
-            true,
-        );
-    }
-
-    #[test]
-    fn libsais_main_32s_entry_matches_upstream_c_on_large_generated_2k_case_with_fs() {
-        assert_main_32s_entry_matches_upstream_c(
-            make_large_main_32s_stress_text(1024, 700),
-            700,
-            2048,
-            false,
-        );
-    }
-
-    #[test]
-    fn libsais_main_32s_entry_matches_upstream_c_on_large_generated_1k_case_with_fs() {
-        assert_main_32s_entry_matches_upstream_c(
-            make_large_main_32s_stress_text(1024, 1501),
-            1501,
-            2048,
-            false,
-        );
-    }
-
-    #[test]
-    fn place_lms_suffixes_interval_32s_4k_moves_suffixes_into_bucket_intervals() {
-        let mut sa = vec![10, 11, 12, 13, 14];
+    fn libsais64_partial_sorting_shift_markers_32s_6k_omp_toggles_segment_markers() {
+        let mut sa = vec![1 | SAINT_MIN, 2 | SAINT_MIN, 3, 4 | SAINT_MIN, 5];
         let k = 3usize;
-        let mut buckets = vec![0; 4 * k];
-        buckets[buckets_index2(0, 1)] = 0;
-        buckets[buckets_index2(1, 1)] = 2;
-        buckets[buckets_index2(2, 1)] = 3;
-        buckets[3 * k] = 2;
-        buckets[3 * k + 1] = 5;
-
-        place_lms_suffixes_interval_32s_4k(&mut sa, 5, k as SaSint, 5, &buckets);
-
-        assert_eq!(sa, vec![0, 0, 0, 0, 14]);
+        let mut buckets = vec![0; 6 * k];
+        buckets[buckets_index4(1, 0)] = 5;
+        buckets[4 * k + buckets_index2(0, 0)] = 0;
+        partial_sorting_shift_markers_32s_6k_omp(&mut sa, k as SaSint, &buckets, 1);
+        assert!(sa.iter().any(|&v| (v & SAINT_MIN) == 0));
     }
 
     #[test]
-    fn place_lms_suffixes_interval_32s_2k_moves_suffixes_into_bucket_intervals() {
-        let mut sa = vec![10, 11, 12, 13, 14];
-        let mut buckets = vec![0; 2 * 3];
-        buckets[buckets_index2(0, 0)] = 2;
-        buckets[buckets_index2(0, 1)] = 0;
-        buckets[buckets_index2(1, 0)] = 5;
-        buckets[buckets_index2(1, 1)] = 2;
-        buckets[buckets_index2(2, 0)] = 5;
-        buckets[buckets_index2(2, 1)] = 3;
-
-        place_lms_suffixes_interval_32s_2k(&mut sa, 5, 3, 5, &buckets);
-
-        assert_eq!(sa, vec![0, 0, 0, 0, 14]);
+    fn libsais64_partial_sorting_shift_markers_32s_4k_toggles_group_markers() {
+        let mut sa = vec![
+            1 | SUFFIX_GROUP_MARKER,
+            2 | SUFFIX_GROUP_MARKER,
+            3,
+            4 | SUFFIX_GROUP_MARKER,
+        ];
+        let len = sa.len() as SaSint;
+        partial_sorting_shift_markers_32s_4k(&mut sa, len);
+        assert!(sa.iter().any(|&v| (v & SUFFIX_GROUP_MARKER) == 0));
     }
 
     #[test]
-    fn place_lms_suffixes_interval_32s_1k_places_suffixes_by_symbol_bucket() {
-        let t = vec![0, 1, 1, 2, 2];
-        let mut sa = vec![1, 2, 3, 4, 99];
-        let buckets = vec![0, 2, 5];
+    fn libsais64_clear_lms_suffixes_omp_zeroes_requested_bucket_ranges() {
+        let mut sa = vec![5, 4, 3, 2, 1, 9];
+        let n = sa.len() as SaSint;
+        let bucket_start = vec![1, 4, 5];
+        let bucket_end = vec![3, 5, 5];
 
-        place_lms_suffixes_interval_32s_1k(&t, &mut sa, 3, 4, &buckets);
+        clear_lms_suffixes_omp(&mut sa, n, 3, &bucket_start, &bucket_end, 2);
 
-        assert_eq!(sa, vec![1, 2, 0, 3, 4]);
+        assert_eq!(sa, vec![5, 0, 0, 2, 0, 9]);
     }
 
     #[test]
-    fn final_bwt_scan_left_to_right_8u_rewrites_sa_and_induces_suffixes() {
+    fn libsais64_final_bwt_scan_left_to_right_8u_rewrites_sa_and_induces_suffixes() {
         let t = vec![0_u8, 1, 2, 1, 0];
         let mut sa = vec![1, 0, 0];
         let mut induction_bucket = vec![0, 1, 3];
@@ -16822,7 +15451,7 @@ mod tests {
     }
 
     #[test]
-    fn final_bwt_aux_scan_left_to_right_8u_updates_sampling_array() {
+    fn libsais64_final_bwt_aux_scan_left_to_right_8u_updates_sampling_array() {
         let t = vec![0_u8, 1, 2, 1, 0];
         let mut sa = vec![1, 0, 0];
         let mut induction_bucket = vec![0, 1, 3];
@@ -16842,7 +15471,7 @@ mod tests {
     }
 
     #[test]
-    fn final_sorting_scan_left_to_right_8u_clears_marker_and_places_suffix() {
+    fn libsais64_final_sorting_scan_left_to_right_8u_clears_marker_and_places_suffix() {
         let t = vec![0_u8, 1, 2, 1, 0];
         let mut sa = vec![1, 0, 0];
         let mut induction_bucket = vec![0, 1, 3];
@@ -16854,7 +15483,7 @@ mod tests {
     }
 
     #[test]
-    fn final_sorting_scan_left_to_right_32s_clears_marker_and_places_suffix() {
+    fn libsais64_final_sorting_scan_left_to_right_32s_clears_marker_and_places_suffix() {
         let t = vec![0, 1, 2, 1, 0];
         let mut sa = vec![1, 0, 0];
         let mut induction_bucket = vec![0, 1, 3];
@@ -16866,7 +15495,7 @@ mod tests {
     }
 
     #[test]
-    fn final_bwt_scan_left_to_right_8u_block_prepare_records_cache_and_counts() {
+    fn libsais64_final_bwt_scan_left_to_right_8u_block_prepare_records_cache_and_counts() {
         let t = vec![0_u8, 1, 2, 1, 0];
         let mut sa = vec![1, 2, 0];
         let mut buckets = vec![99; ALPHABET_SIZE];
@@ -16894,30 +15523,7 @@ mod tests {
     }
 
     #[test]
-    fn final_sorting_scan_left_to_right_32s_block_omp_places_cached_suffixes() {
-        let t = vec![0, 1, 2, 1, 0];
-        let mut sa = vec![1, 2, 0, 0];
-        let mut induction_bucket = vec![0, 1, 3];
-        let mut cache = vec![ThreadCache::default(); LIBSAIS_PER_THREAD_CACHE_SIZE];
-
-        final_sorting_scan_left_to_right_32s_block_omp(
-            &t,
-            &mut sa,
-            &mut induction_bucket,
-            &mut cache,
-            0,
-            2,
-            2,
-        );
-
-        assert_eq!(sa[0] & SAINT_MAX, 0);
-        assert_eq!(sa[1] & SAINT_MAX, 1);
-        assert_eq!(induction_bucket[0], 1);
-        assert_eq!(induction_bucket[1], 2);
-    }
-
-    #[test]
-    fn final_sorting_scan_left_to_right_8u_omp_wraps_sequential_behavior() {
+    fn libsais64_final_sorting_scan_left_to_right_8u_omp_wraps_sequential_behavior() {
         let t = vec![0_u8, 1, 2, 1, 0];
         let mut sa = vec![0; t.len()];
         let mut induction_bucket = vec![0, 1, 3];
@@ -16951,125 +15557,7 @@ mod tests {
     }
 
     #[test]
-    fn final_sorting_scan_left_to_right_8u_block_omp_uses_thread_buckets() {
-        let block_start = 20_000usize;
-        let block_size = 16_384usize;
-        let n = block_start + block_size + 8;
-        let t = vec![1_u8; n];
-        let suffixes: Vec<SaSint> = (2..2 + block_size).map(|i| i as SaSint).collect();
-
-        let mut expected_sa = vec![0; n];
-        expected_sa[block_start..block_start + block_size].copy_from_slice(&suffixes);
-        let mut threaded_sa = expected_sa.clone();
-        let mut expected_bucket = vec![0; ALPHABET_SIZE];
-        let mut threaded_bucket = expected_bucket.clone();
-        let mut thread_state = alloc_thread_state(4).unwrap();
-
-        final_sorting_scan_left_to_right_8u(
-            &t,
-            &mut expected_sa,
-            &mut expected_bucket,
-            block_start as FastSint,
-            block_size as FastSint,
-        );
-        final_sorting_scan_left_to_right_8u_block_omp(
-            &t,
-            &mut threaded_sa,
-            ALPHABET_SIZE as SaSint,
-            &mut threaded_bucket,
-            block_start as FastSint,
-            block_size as FastSint,
-            4,
-            &mut thread_state,
-        );
-
-        assert_eq!(threaded_sa, expected_sa);
-        assert_eq!(threaded_bucket, expected_bucket);
-    }
-
-    #[test]
-    fn final_bwt_left_to_right_8u_block_omp_uses_thread_buckets() {
-        let block_start = 20_000usize;
-        let block_size = 16_384usize;
-        let n = block_start + block_size + 8;
-        let t = vec![1_u8; n];
-        let suffixes: Vec<SaSint> = (2..2 + block_size).map(|i| i as SaSint).collect();
-
-        let mut expected_sa = vec![0; n];
-        expected_sa[block_start..block_start + block_size].copy_from_slice(&suffixes);
-        let mut threaded_sa = expected_sa.clone();
-        let mut expected_bucket = vec![0; ALPHABET_SIZE];
-        let mut threaded_bucket = expected_bucket.clone();
-        let mut thread_state = alloc_thread_state(4).unwrap();
-
-        final_bwt_scan_left_to_right_8u(
-            &t,
-            &mut expected_sa,
-            &mut expected_bucket,
-            block_start as FastSint,
-            block_size as FastSint,
-        );
-        final_bwt_scan_left_to_right_8u_block_omp(
-            &t,
-            &mut threaded_sa,
-            ALPHABET_SIZE as SaSint,
-            &mut threaded_bucket,
-            block_start as FastSint,
-            block_size as FastSint,
-            4,
-            &mut thread_state,
-        );
-
-        assert_eq!(threaded_sa, expected_sa);
-        assert_eq!(threaded_bucket, expected_bucket);
-    }
-
-    #[test]
-    fn final_bwt_aux_left_to_right_8u_block_omp_uses_thread_buckets() {
-        let block_start = 20_000usize;
-        let block_size = 16_384usize;
-        let n = block_start + block_size + 8;
-        let t = vec![1_u8; n];
-        let suffixes: Vec<SaSint> = (2..2 + block_size).map(|i| i as SaSint).collect();
-
-        let mut expected_sa = vec![0; n];
-        expected_sa[block_start..block_start + block_size].copy_from_slice(&suffixes);
-        let mut threaded_sa = expected_sa.clone();
-        let mut expected_i = vec![0; n];
-        let mut threaded_i = vec![0; n];
-        let mut expected_bucket = vec![0; ALPHABET_SIZE];
-        let mut threaded_bucket = expected_bucket.clone();
-        let mut thread_state = alloc_thread_state(4).unwrap();
-
-        final_bwt_aux_scan_left_to_right_8u(
-            &t,
-            &mut expected_sa,
-            0,
-            &mut expected_i,
-            &mut expected_bucket,
-            block_start as FastSint,
-            block_size as FastSint,
-        );
-        final_bwt_aux_scan_left_to_right_8u_block_omp(
-            &t,
-            &mut threaded_sa,
-            ALPHABET_SIZE as SaSint,
-            0,
-            &mut threaded_i,
-            &mut threaded_bucket,
-            block_start as FastSint,
-            block_size as FastSint,
-            4,
-            &mut thread_state,
-        );
-
-        assert_eq!(threaded_sa, expected_sa);
-        assert_eq!(threaded_i, expected_i);
-        assert_eq!(threaded_bucket, expected_bucket);
-    }
-
-    #[test]
-    fn final_bwt_scan_right_to_left_8u_returns_zero_index_and_induces_suffixes() {
+    fn libsais64_final_bwt_scan_right_to_left_8u_returns_zero_index_and_induces_suffixes() {
         let t = vec![0_u8, 1, 2, 1, 0];
         let mut sa = vec![0, 2, 0];
         let mut induction_bucket = vec![1, 2, 3];
@@ -17082,190 +15570,7 @@ mod tests {
     }
 
     #[test]
-    fn final_sorting_scan_right_to_left_32s_block_omp_runs_block_pipeline() {
-        let t = vec![0, 1, 2, 1, 0];
-        let mut sa = vec![0, 2, 0, 0];
-        let mut induction_bucket = vec![1, 2, 3];
-        let mut expected_sa = sa.clone();
-        let mut expected_bucket = induction_bucket.clone();
-        let mut cache = vec![ThreadCache::default(); LIBSAIS_PER_THREAD_CACHE_SIZE];
-
-        final_sorting_scan_right_to_left_32s(&t, &mut expected_sa, &mut expected_bucket, 0, 2);
-        final_sorting_scan_right_to_left_32s_block_omp(
-            &t,
-            &mut sa,
-            &mut induction_bucket,
-            &mut cache,
-            0,
-            2,
-            2,
-        );
-
-        assert_eq!(sa, expected_sa);
-        assert_eq!(induction_bucket, expected_bucket);
-    }
-
-    #[test]
-    fn final_sorting_scan_right_to_left_8u_block_omp_uses_thread_buckets() {
-        let block_start = 20_000usize;
-        let block_size = 16_384usize;
-        let n = block_start + block_size + 8;
-        let t = vec![1_u8; n];
-        let suffixes: Vec<SaSint> = (2..2 + block_size).map(|i| i as SaSint).collect();
-
-        let mut expected_sa = vec![0; n];
-        expected_sa[block_start..block_start + block_size].copy_from_slice(&suffixes);
-        let mut threaded_sa = expected_sa.clone();
-        let mut expected_bucket = vec![0; ALPHABET_SIZE];
-        expected_bucket[1] = n as SaSint;
-        let mut threaded_bucket = expected_bucket.clone();
-        let mut thread_state = alloc_thread_state(4).unwrap();
-
-        final_sorting_scan_right_to_left_8u(
-            &t,
-            &mut expected_sa,
-            &mut expected_bucket,
-            block_start as FastSint,
-            block_size as FastSint,
-        );
-        final_sorting_scan_right_to_left_8u_block_omp(
-            &t,
-            &mut threaded_sa,
-            ALPHABET_SIZE as SaSint,
-            &mut threaded_bucket,
-            block_start as FastSint,
-            block_size as FastSint,
-            4,
-            &mut thread_state,
-        );
-
-        assert_eq!(threaded_sa, expected_sa);
-        assert_eq!(threaded_bucket, expected_bucket);
-    }
-
-    #[test]
-    fn final_bwt_right_to_left_8u_block_omp_uses_thread_buckets() {
-        let block_start = 20_000usize;
-        let block_size = 16_384usize;
-        let n = block_start + block_size + 8;
-        let t = vec![1_u8; n];
-        let suffixes: Vec<SaSint> = (2..2 + block_size).map(|i| i as SaSint).collect();
-
-        let mut expected_sa = vec![0; n];
-        expected_sa[block_start..block_start + block_size].copy_from_slice(&suffixes);
-        let mut threaded_sa = expected_sa.clone();
-        let mut expected_bucket = vec![0; ALPHABET_SIZE];
-        expected_bucket[1] = n as SaSint;
-        let mut threaded_bucket = expected_bucket.clone();
-        let mut thread_state = alloc_thread_state(4).unwrap();
-
-        final_bwt_scan_right_to_left_8u(
-            &t,
-            &mut expected_sa,
-            &mut expected_bucket,
-            block_start as FastSint,
-            block_size as FastSint,
-        );
-        final_bwt_scan_right_to_left_8u_block_omp(
-            &t,
-            &mut threaded_sa,
-            ALPHABET_SIZE as SaSint,
-            &mut threaded_bucket,
-            block_start as FastSint,
-            block_size as FastSint,
-            4,
-            &mut thread_state,
-        );
-
-        assert_eq!(threaded_sa, expected_sa);
-        assert_eq!(threaded_bucket, expected_bucket);
-    }
-
-    #[test]
-    fn final_bwt_aux_right_to_left_8u_block_omp_uses_thread_buckets() {
-        let block_start = 20_000usize;
-        let block_size = 16_384usize;
-        let n = block_start + block_size + 8;
-        let t = vec![1_u8; n];
-        let suffixes: Vec<SaSint> = (2..2 + block_size).map(|i| i as SaSint).collect();
-
-        let mut expected_sa = vec![0; n];
-        expected_sa[block_start..block_start + block_size].copy_from_slice(&suffixes);
-        let mut threaded_sa = expected_sa.clone();
-        let mut expected_i = vec![0; n];
-        let mut threaded_i = vec![0; n];
-        let mut expected_bucket = vec![0; ALPHABET_SIZE];
-        expected_bucket[1] = n as SaSint;
-        let mut threaded_bucket = expected_bucket.clone();
-        let mut thread_state = alloc_thread_state(4).unwrap();
-
-        final_bwt_aux_scan_right_to_left_8u(
-            &t,
-            &mut expected_sa,
-            0,
-            &mut expected_i,
-            &mut expected_bucket,
-            block_start as FastSint,
-            block_size as FastSint,
-        );
-        final_bwt_aux_scan_right_to_left_8u_block_omp(
-            &t,
-            &mut threaded_sa,
-            ALPHABET_SIZE as SaSint,
-            0,
-            &mut threaded_i,
-            &mut threaded_bucket,
-            block_start as FastSint,
-            block_size as FastSint,
-            4,
-            &mut thread_state,
-        );
-
-        assert_eq!(threaded_sa, expected_sa);
-        assert_eq!(threaded_i, expected_i);
-        assert_eq!(threaded_bucket, expected_bucket);
-    }
-
-    #[test]
-    fn final_gsa_right_to_left_8u_block_omp_uses_thread_buckets() {
-        let block_start = 20_000usize;
-        let block_size = 16_384usize;
-        let n = block_start + block_size + 8;
-        let t = vec![1_u8; n];
-        let suffixes: Vec<SaSint> = (2..2 + block_size).map(|i| i as SaSint).collect();
-
-        let mut expected_sa = vec![0; n];
-        expected_sa[block_start..block_start + block_size].copy_from_slice(&suffixes);
-        let mut threaded_sa = expected_sa.clone();
-        let mut expected_bucket = vec![0; ALPHABET_SIZE];
-        expected_bucket[1] = n as SaSint;
-        let mut threaded_bucket = expected_bucket.clone();
-        let mut thread_state = alloc_thread_state(4).unwrap();
-
-        final_gsa_scan_right_to_left_8u(
-            &t,
-            &mut expected_sa,
-            &mut expected_bucket,
-            block_start as FastSint,
-            block_size as FastSint,
-        );
-        final_gsa_scan_right_to_left_8u_block_omp(
-            &t,
-            &mut threaded_sa,
-            ALPHABET_SIZE as SaSint,
-            &mut threaded_bucket,
-            block_start as FastSint,
-            block_size as FastSint,
-            4,
-            &mut thread_state,
-        );
-
-        assert_eq!(threaded_sa, expected_sa);
-        assert_eq!(threaded_bucket, expected_bucket);
-    }
-
-    #[test]
-    fn final_sorting_scan_right_to_left_8u_omp_matches_sequential_path() {
+    fn libsais64_final_sorting_scan_right_to_left_8u_omp_matches_sequential_path() {
         let t = vec![0_u8, 1, 2, 1, 0];
         let mut sa = vec![0, 2, 0, 0];
         let mut induction_bucket = vec![1, 2, 3];
@@ -17300,19 +15605,7 @@ mod tests {
     }
 
     #[test]
-    fn clear_lms_suffixes_omp_zeroes_requested_bucket_ranges() {
-        let mut sa = vec![5, 4, 3, 2, 1, 9];
-        let n = sa.len() as SaSint;
-        let bucket_start = vec![1, 4, 5];
-        let bucket_end = vec![3, 5, 5];
-
-        clear_lms_suffixes_omp(&mut sa, n, 3, &bucket_start, &bucket_end, 2);
-
-        assert_eq!(sa, vec![5, 0, 0, 2, 0, 9]);
-    }
-
-    #[test]
-    fn induce_final_order_8u_omp_non_bwt_matches_direct_final_scans() {
+    fn libsais64_induce_final_order_8u_omp_non_bwt_matches_direct_final_scans() {
         let t = vec![0_u8, 1, 2, 1, 0];
         let mut sa = vec![0, 2, 0, 0, 0];
         let mut buckets = vec![0; 8 * ALPHABET_SIZE];
@@ -17369,466 +15662,174 @@ mod tests {
     }
 
     #[test]
-    fn renumber_unique_and_nonunique_lms_suffixes_32s_marks_new_unique_names() {
-        let mut t = vec![0, 0, 0, 0];
-        let mut sa = vec![0, 2, -1, 5];
-
-        let f = renumber_unique_and_nonunique_lms_suffixes_32s(&mut t, &mut sa, 2, 0, 0, 2);
-
-        assert_eq!(f, 1);
-        assert_eq!(t[0], SAINT_MIN);
-        assert_eq!(sa[2], SAINT_MIN);
-        assert_eq!(sa[3], 4);
-    }
-
-    #[test]
-    fn renumber_unique_and_nonunique_lms_suffixes_32s_matches_upstream_c_helper() {
-        let mut t_rust = vec![0, 0, 0, 0];
-        let mut sa_rust = vec![0, 2, -1, 5];
-        let mut t_c = t_rust.clone();
-        let mut sa_c = sa_rust.clone();
-
-        let rust_f =
-            renumber_unique_and_nonunique_lms_suffixes_32s(&mut t_rust, &mut sa_rust, 2, 0, 0, 2);
-        let c_f = unsafe {
-            probe_renumber_unique_and_nonunique_lms_suffixes_32s(
-                t_c.as_mut_ptr(),
-                sa_c.as_mut_ptr(),
-                2,
-                0,
-                0,
-                2,
-            )
-        };
-
-        assert_eq!(rust_f, c_f);
-        assert_eq!(t_rust, t_c);
-        assert_eq!(sa_rust, sa_c);
-    }
-
-    #[test]
-    fn renumber_unique_and_nonunique_lms_suffixes_32s_omp_matches_upstream_c_helper() {
-        let mut t_rust = vec![0, 0, 0, 0];
-        let mut sa_rust = vec![0, 2, -1, 5];
-        let mut t_c = t_rust.clone();
-        let mut sa_c = sa_rust.clone();
-        let mut thread_state = alloc_thread_state(1).unwrap();
-
-        let rust_f = renumber_unique_and_nonunique_lms_suffixes_32s_omp(
-            &mut t_rust,
-            &mut sa_rust,
-            2,
-            1,
-            &mut thread_state,
-        );
-        let c_f = unsafe {
-            probe_renumber_unique_and_nonunique_lms_suffixes_32s_omp(
-                t_c.as_mut_ptr(),
-                sa_c.as_mut_ptr(),
-                2,
-                1,
-            )
-        };
-
-        assert_eq!(rust_f, c_f);
-        assert_eq!(t_rust, t_c);
-        assert_eq!(sa_rust, sa_c);
-    }
-
-    #[test]
-    fn renumber_unique_and_nonunique_lms_suffixes_32s_omp_uses_block_partition() {
-        let m = 65_600usize;
-        let n = 2 * m;
-        let t = vec![0; n];
-        let mut sa = vec![0; n];
-        for i in 0..m {
-            sa[i] = (2 * i) as SaSint;
-            sa[m + i] = if i % 5 == 0 {
-                -((i as SaSint) + 1)
-            } else {
-                i as SaSint + 7
-            };
-        }
-
-        let mut single_t = t.clone();
-        let mut single_sa = sa.clone();
-        let mut threaded_t = t;
-        let mut threaded_sa = sa;
-        let mut thread_state = alloc_thread_state(4).unwrap();
-        let single_f = renumber_unique_and_nonunique_lms_suffixes_32s(
-            &mut single_t,
-            &mut single_sa,
-            m as SaSint,
-            0,
-            0,
-            m as FastSint,
-        );
-        let threaded_f = renumber_unique_and_nonunique_lms_suffixes_32s_omp(
-            &mut threaded_t,
-            &mut threaded_sa,
-            m as SaSint,
-            4,
-            &mut thread_state,
-        );
-
-        assert_eq!(threaded_f, single_f);
-        assert_eq!(threaded_t, single_t);
-        assert_eq!(threaded_sa, single_sa);
-    }
-
-    #[test]
-    fn compact_unique_and_nonunique_lms_suffixes_32s_splits_unique_and_nonunique_ranges() {
-        let mut sa = vec![0, 0, 0, 0, SAINT_MIN, 4];
-        let mut l = 2;
-        let mut r = 6;
-
-        compact_unique_and_nonunique_lms_suffixes_32s(&mut sa, 2, &mut l, &mut r, 0, 2);
-
-        assert_eq!(l, 2);
-        assert_eq!(r, 6);
-        assert_eq!(sa[2], 0);
-        assert_eq!(sa[3] & SAINT_MAX, 0);
-    }
-
-    #[test]
-    fn compact_lms_suffixes_32s_omp_runs_renumber_then_compaction() {
-        let mut t = vec![0, 0, 0, 0];
-        let mut sa = vec![0, 2, -1, 5, 77, 88];
-        let mut thread_state = alloc_thread_state(2).unwrap();
-
-        let f = compact_lms_suffixes_32s_omp(&mut t, &mut sa, 4, 2, 2, 2, &mut thread_state);
-
-        assert_eq!(f, 1);
-        assert_eq!(sa[2] & SAINT_MAX, 0);
-        assert_eq!(sa[5], 3);
-    }
-
-    #[test]
-    fn compact_unique_and_nonunique_lms_suffixes_32s_omp_uses_block_partition() {
-        let n = 131_200usize;
-        let m = 65_600usize;
-        let fs = m + 32;
-        let half_n = n >> 1;
-        let f = m / 5;
-        let mut sa = vec![0; n + fs];
-        for i in 0..half_n {
-            sa[m + i] = if i % 5 == 0 {
-                SAINT_MIN | i as SaSint
-            } else {
-                i as SaSint + 1
-            };
-        }
-        for i in 0..f {
-            sa[m - f + i] = (10_000 + i) as SaSint;
-        }
-
-        let mut single = sa.clone();
-        let mut threaded = sa;
-        let mut single_state = alloc_thread_state(1).unwrap();
-        let mut threaded_state = alloc_thread_state(4).unwrap();
-        compact_unique_and_nonunique_lms_suffixes_32s_omp(
-            &mut single,
-            n as SaSint,
-            m as SaSint,
-            fs as SaSint,
-            f as SaSint,
-            1,
-            &mut single_state,
-        );
-        compact_unique_and_nonunique_lms_suffixes_32s_omp(
-            &mut threaded,
-            n as SaSint,
-            m as SaSint,
-            fs as SaSint,
-            f as SaSint,
-            4,
-            &mut threaded_state,
-        );
-
-        let unique_dst = n + fs - m;
+    fn libsais64_count_helpers_match_c_predicates() {
+        let sa = [1, -1, 0, -3, 4, 0, -9];
         assert_eq!(
-            &threaded[unique_dst..unique_dst + f],
-            &single[unique_dst..unique_dst + f]
+            count_negative_marked_suffixes(&sa, 0, sa.len() as FastSint),
+            3
         );
+        assert_eq!(count_zero_marked_suffixes(&sa, 0, sa.len() as FastSint), 2);
+        assert_eq!(count_negative_marked_suffixes(&sa, 2, 3), 1);
+        assert_eq!(count_zero_marked_suffixes(&sa, 2, 3), 1);
     }
 
     #[test]
-    fn compact_lms_suffixes_32s_omp_uses_large_input_paths() {
-        let n = 131_200usize;
-        let m = 65_600usize;
-        let fs = m + 32;
-        let t = vec![0; n];
-        let mut sa = vec![0; n + fs];
-        for i in 0..m {
-            sa[i] = (2 * i) as SaSint;
-            sa[m + i] = if i % 5 == 0 {
-                -((i as SaSint) + 1)
-            } else {
-                i as SaSint + 7
-            };
-        }
-
-        let mut single_t = t.clone();
-        let mut single_sa = sa.clone();
-        let mut threaded_t = t;
-        let mut threaded_sa = sa;
-        let mut single_state = alloc_thread_state(1).unwrap();
-        let mut threaded_state = alloc_thread_state(4).unwrap();
-        let single_f = compact_lms_suffixes_32s_omp(
-            &mut single_t,
-            &mut single_sa,
-            n as SaSint,
-            m as SaSint,
-            fs as SaSint,
-            1,
-            &mut single_state,
-        );
-        let threaded_f = compact_lms_suffixes_32s_omp(
-            &mut threaded_t,
-            &mut threaded_sa,
-            n as SaSint,
-            m as SaSint,
-            fs as SaSint,
-            4,
-            &mut threaded_state,
-        );
-
-        assert_eq!(threaded_f, single_f);
-        assert_eq!(threaded_t, single_t);
-        let unique_dst = n + fs - m;
-        let unique_len = usize::try_from(threaded_f).expect("f must be non-negative");
+    fn libsais64_flip_suffix_markers_omp_toggles_saint_min_bits() {
+        let mut sa = vec![1, -2, 3, -4];
+        flip_suffix_markers_omp(&mut sa, 4, 1);
         assert_eq!(
-            &threaded_sa[unique_dst..unique_dst + unique_len],
-            &single_sa[unique_dst..unique_dst + unique_len]
+            sa,
+            vec![1 ^ SAINT_MIN, -2 ^ SAINT_MIN, 3 ^ SAINT_MIN, -4 ^ SAINT_MIN]
         );
     }
 
     #[test]
-    fn merge_unique_lms_suffixes_32s_noops_for_empty_block() {
-        let mut t = vec![1, SAINT_MIN, 2, SAINT_MIN];
-        let mut sa = vec![0, 0, 1, 3];
-        let before_t = t.clone();
-        let before_sa = sa.clone();
+    fn libsais64_place_cached_suffixes_writes_indices_to_symbol_slots() {
+        let mut sa = vec![0; 8];
+        let cache = vec![
+            ThreadCache {
+                symbol: 2,
+                index: 10,
+            },
+            ThreadCache {
+                symbol: 5,
+                index: 20,
+            },
+            ThreadCache {
+                symbol: 1,
+                index: 30,
+            },
+        ];
 
-        merge_unique_lms_suffixes_32s(&mut t, &mut sa, 4, 1, 0, 0, 0);
+        place_cached_suffixes(&mut sa, &cache, 0, cache.len() as FastSint);
 
-        assert_eq!(t, before_t);
-        assert_eq!(sa, before_sa);
+        assert_eq!(sa[2], 10);
+        assert_eq!(sa[5], 20);
+        assert_eq!(sa[1], 30);
     }
 
     #[test]
-    fn merge_nonunique_lms_suffixes_32s_noops_for_empty_block() {
-        let mut sa = vec![0, 7, 0, 13, 11];
-        let before = sa.clone();
+    fn libsais64_compact_and_place_cached_suffixes_discards_negative_symbols() {
+        let mut sa = vec![0; 8];
+        let mut cache = vec![
+            ThreadCache {
+                symbol: 2,
+                index: 10,
+            },
+            ThreadCache {
+                symbol: -1,
+                index: 99,
+            },
+            ThreadCache {
+                symbol: 5,
+                index: 20,
+            },
+            ThreadCache {
+                symbol: -4,
+                index: 77,
+            },
+            ThreadCache {
+                symbol: 1,
+                index: 30,
+            },
+        ];
+        let cache_len = cache.len() as FastSint;
 
-        merge_nonunique_lms_suffixes_32s(&mut sa, 4, 1, 0, 0, 0);
+        compact_and_place_cached_suffixes(&mut sa, &mut cache, 0, cache_len);
 
-        assert_eq!(sa, before);
-    }
-
-    #[test]
-    fn merge_compacted_lms_suffixes_32s_omp_preserves_input_text_and_fills_zero_slots() {
-        let mut t = vec![1, 2, 3, 4];
-        let mut sa = vec![0, 1, 2, 3, 4, 5];
-        let before_t = t.clone();
-        let mut thread_state = alloc_thread_state(2).unwrap();
-
-        merge_compacted_lms_suffixes_32s_omp(&mut t, &mut sa, 4, 1, 1, 2, &mut thread_state);
-
-        assert_eq!(t, before_t);
-        assert_eq!(sa[0], 3);
-        assert_eq!(sa[1], 1);
-    }
-
-    #[test]
-    fn merge_unique_lms_suffixes_32s_omp_uses_block_partition_for_large_inputs() {
-        let n = 65_600usize;
-        let m = 1_024usize;
-        let mut t = vec![1; n];
-        for i in (0..n).step_by(257) {
-            t[i] = SAINT_MIN | ((i % 251) as SaSint);
-        }
-        let f = t.iter().filter(|&&value| value < 0).count();
-        let mut sa = vec![-1; n];
-        let src = n - m - 1;
-        for i in 0..f {
-            sa[src + i] = i as SaSint;
-        }
-
-        let mut single_t = t.clone();
-        let mut single_sa = sa.clone();
-        let mut threaded_t = t;
-        let mut threaded_sa = sa;
-        let mut thread_state = alloc_thread_state(4).unwrap();
-        merge_unique_lms_suffixes_32s_omp(
-            &mut single_t,
-            &mut single_sa,
-            n as SaSint,
-            m as SaSint,
-            1,
-            &mut [],
+        assert_eq!(sa[2], 10);
+        assert_eq!(sa[5], 20);
+        assert_eq!(sa[1], 30);
+        assert_eq!(
+            cache[0],
+            ThreadCache {
+                symbol: 2,
+                index: 10
+            }
         );
-        merge_unique_lms_suffixes_32s_omp(
-            &mut threaded_t,
-            &mut threaded_sa,
-            n as SaSint,
-            m as SaSint,
-            4,
-            &mut thread_state,
+        assert_eq!(
+            cache[1],
+            ThreadCache {
+                symbol: 5,
+                index: 20
+            }
         );
-
-        assert_eq!(threaded_t, single_t);
-        assert_eq!(threaded_sa, single_sa);
-    }
-
-    #[test]
-    fn merge_nonunique_lms_suffixes_32s_omp_uses_block_partition_for_large_inputs() {
-        let n = 131_200usize;
-        let m = 65_600usize;
-        let f = 7usize;
-        let mut sa = vec![1; n];
-        let zero_count = (0..m).filter(|i| i % 17 == 0).count();
-        for i in (0..m).step_by(17) {
-            sa[i] = 0;
-        }
-        let src = n - m - 1 + f;
-        for i in 0..zero_count {
-            sa[src + i] = 10_000 + i as SaSint;
-        }
-
-        let mut single = sa.clone();
-        let mut threaded = sa;
-        let mut thread_state = alloc_thread_state(4).unwrap();
-        merge_nonunique_lms_suffixes_32s_omp(
-            &mut single,
-            n as SaSint,
-            m as SaSint,
-            f as SaSint,
-            1,
-            &mut [],
+        assert_eq!(
+            cache[2],
+            ThreadCache {
+                symbol: 1,
+                index: 30
+            }
         );
-        merge_nonunique_lms_suffixes_32s_omp(
-            &mut threaded,
-            n as SaSint,
-            m as SaSint,
-            f as SaSint,
-            4,
-            &mut thread_state,
+    }
+
+    #[test]
+    fn libsais64_gather_lms_suffixes_32s_collects_expected_suffix_starts() {
+        let t = vec![2, 1, 3, 1, 0];
+        let mut sa = vec![0; t.len()];
+        let m = gather_lms_suffixes_32s(&t, &mut sa, t.len() as SaSint);
+        assert!(m >= 0);
+        assert!(sa
+            .iter()
+            .all(|&value| value >= 0 && value <= t.len() as SaSint));
+        assert!(sa[t.len() - 1] >= 1 && sa[t.len() - 1] <= t.len() as SaSint - 1);
+    }
+
+    #[test]
+    fn libsais64_gather_compacted_lms_suffixes_32s_skips_negative_marked_symbols() {
+        let t = vec![2, -1, 3, 1, 0];
+        let mut sa = vec![0; t.len()];
+        let m = gather_compacted_lms_suffixes_32s(&t, &mut sa, t.len() as SaSint);
+        assert!(m >= 0);
+        assert!(sa
+            .iter()
+            .all(|&value| value >= 0 && value <= t.len() as SaSint));
+    }
+
+    #[test]
+    fn libsais64_count_lms_suffixes_32s_2k_counts_two_bucket_categories() {
+        let t = vec![2, 1, 3, 1, 0];
+        let mut buckets = vec![0; 2 * 4];
+        count_lms_suffixes_32s_2k(&t, t.len() as SaSint, 4, &mut buckets);
+        assert_eq!(buckets.iter().sum::<SaSint>(), t.len() as SaSint);
+    }
+
+    #[test]
+    fn libsais64_count_lms_suffixes_32s_4k_counts_four_bucket_categories() {
+        let t = vec![2, 1, 3, 1, 0];
+        let mut buckets = vec![0; 4 * 4];
+        count_lms_suffixes_32s_4k(&t, t.len() as SaSint, 4, &mut buckets);
+        assert_eq!(buckets.iter().sum::<SaSint>(), t.len() as SaSint);
+    }
+
+    #[test]
+    fn libsais64_count_compacted_lms_suffixes_32s_2k_masks_saint_bits() {
+        let t = vec![2, SAINT_MIN | 1, 3, 1, 0];
+        let mut buckets = vec![0; 2 * 4];
+        count_compacted_lms_suffixes_32s_2k(&t, t.len() as SaSint, 4, &mut buckets);
+        assert_eq!(buckets.iter().sum::<SaSint>(), t.len() as SaSint);
+    }
+
+    #[test]
+    fn libsais64_count_and_gather_lms_suffixes_8u_updates_sa_and_buckets() {
+        let t = vec![2_u8, 1, 3, 1, 0];
+        let mut sa = vec![0; t.len()];
+        let mut buckets = vec![0; 4 * ALPHABET_SIZE];
+        let m = count_and_gather_lms_suffixes_8u(
+            &t,
+            &mut sa,
+            t.len() as SaSint,
+            &mut buckets,
+            0,
+            t.len() as FastSint,
         );
-
-        assert_eq!(threaded, single);
+        assert_eq!(m, 1);
+        assert_eq!(sa[t.len() - 1], 1);
+        assert_eq!(buckets.iter().sum::<SaSint>(), t.len() as SaSint);
     }
 
     #[test]
-    fn merge_compacted_lms_suffixes_32s_omp_uses_block_partition_for_large_inputs() {
-        let n = 131_200usize;
-        let m = 65_600usize;
-        let mut t = vec![1; n];
-        for i in (0..n).step_by(257) {
-            t[i] = SAINT_MIN | ((i % 251) as SaSint);
-        }
-        let f = t.iter().filter(|&&value| value < 0).count();
-
-        let mut sa = vec![1; n];
-        let zero_count = (0..m).filter(|i| i % 17 == 0).count();
-        for i in (0..m).step_by(17) {
-            sa[i] = 0;
-        }
-        let unique_src = n - m - 1;
-        for i in 0..f {
-            sa[unique_src + i] = i as SaSint;
-        }
-        for i in 0..zero_count {
-            sa[unique_src + f + i] = 10_000 + i as SaSint;
-        }
-
-        let mut single_t = t.clone();
-        let mut single_sa = sa.clone();
-        let mut threaded_t = t;
-        let mut threaded_sa = sa;
-        let mut single_state = alloc_thread_state(1).unwrap();
-        let mut threaded_state = alloc_thread_state(4).unwrap();
-        merge_compacted_lms_suffixes_32s_omp(
-            &mut single_t,
-            &mut single_sa,
-            n as SaSint,
-            m as SaSint,
-            f as SaSint,
-            1,
-            &mut single_state,
-        );
-        merge_compacted_lms_suffixes_32s_omp(
-            &mut threaded_t,
-            &mut threaded_sa,
-            n as SaSint,
-            m as SaSint,
-            f as SaSint,
-            4,
-            &mut threaded_state,
-        );
-
-        assert_eq!(threaded_t, single_t);
-        assert_eq!(threaded_sa, single_sa);
-    }
-
-    #[test]
-    fn bwt_copy_8u_copies_low_bytes_from_suffix_array_storage() {
-        let a = vec![65, 255, 256, -1];
-        let mut u = vec![0_u8; 4];
-
-        bwt_copy_8u(&mut u, &a, 4);
-
-        assert_eq!(u, vec![65, 255, 0, 255]);
-    }
-
-    #[test]
-    fn bwt_copy_8u_omp_matches_sequential_copy() {
-        let a = vec![1, 2, 3, 4, 5];
-        let mut u = vec![0_u8; 5];
-
-        bwt_copy_8u_omp(&mut u, &a, 5, 4);
-
-        assert_eq!(u, vec![1, 2, 3, 4, 5]);
-    }
-
-    #[test]
-    fn bwt_copy_8u_omp_uses_block_partition_for_large_inputs() {
-        let n = 65_600usize;
-        let a: Vec<SaSint> = (0..n).map(|i| (i * 17) as SaSint).collect();
-        let mut threaded = vec![0; n];
-        let mut sequential = vec![0; n];
-
-        bwt_copy_8u_omp(&mut threaded, &a, n as SaSint, 4);
-        bwt_copy_8u(&mut sequential, &a, n as SaSint);
-
-        assert_eq!(threaded, sequential);
-    }
-
-    #[test]
-    fn plcp_lcp_omp_wrappers_match_single_thread_on_large_inputs() {
-        let n = 65_600usize;
-        let text: Vec<u8> = (0..n).map(|i| (1 + (i % 251)) as u8).collect();
-        let sa: Vec<SaSint> = (0..n as SaSint).collect();
-
-        let mut plcp_single = vec![0; n];
-        let mut plcp_threaded = vec![0; n];
-        compute_phi_omp(&sa, &mut plcp_single, n as SaSint, 1);
-        compute_phi_omp(&sa, &mut plcp_threaded, n as SaSint, 4);
-        assert_eq!(plcp_threaded, plcp_single);
-
-        compute_plcp_omp(&text, &mut plcp_single, n as SaSint, 1);
-        compute_plcp_omp(&text, &mut plcp_threaded, n as SaSint, 4);
-        assert_eq!(plcp_threaded, plcp_single);
-
-        let mut lcp_single = vec![0; n];
-        let mut lcp_threaded = vec![0; n];
-        compute_lcp_omp(&plcp_single, &sa, &mut lcp_single, n as SaSint, 1);
-        compute_lcp_omp(&plcp_threaded, &sa, &mut lcp_threaded, n as SaSint, 4);
-        assert_eq!(lcp_threaded, lcp_single);
-    }
-
-    #[test]
-    fn count_and_gather_lms_suffixes_8u_omp_preserves_sequential_wrapper_behavior() {
+    fn libsais64_count_and_gather_lms_suffixes_8u_omp_preserves_sequential_wrapper_behavior() {
         let t = vec![2_u8, 1, 3, 1, 0];
         let mut sa = vec![0; t.len()];
         let mut buckets = vec![0; 4 * ALPHABET_SIZE];
@@ -17846,403 +15847,209 @@ mod tests {
     }
 
     #[test]
-    fn count_and_gather_lms_suffixes_8u_omp_uses_block_partition_for_large_inputs() {
-        let n = 65_600usize;
-        let text: Vec<u8> = (0..n)
-            .map(|i| 1 + ((i * 37 + i / 17) % 251) as u8)
-            .collect();
-
-        let mut sa_threaded = vec![-99; n];
-        let mut sa_scalar = vec![-99; n];
-        let mut buckets_threaded = vec![0; 4 * ALPHABET_SIZE];
-        let mut buckets_scalar = vec![0; 4 * ALPHABET_SIZE];
-        let mut thread_state = alloc_thread_state(4).unwrap();
-
-        let m_threaded = count_and_gather_lms_suffixes_8u_omp(
-            &text,
-            &mut sa_threaded,
-            n as SaSint,
-            &mut buckets_threaded,
-            4,
-            &mut thread_state,
-        );
-        let m_scalar = count_and_gather_lms_suffixes_8u(
-            &text,
-            &mut sa_scalar,
-            n as SaSint,
-            &mut buckets_scalar,
-            0,
-            n as FastSint,
-        );
-
-        assert_eq!(m_threaded, m_scalar);
-        assert_eq!(
-            &sa_threaded[n - m_threaded as usize..],
-            &sa_scalar[n - m_scalar as usize..]
-        );
-        assert_eq!(buckets_threaded, buckets_scalar);
+    fn libsais64_get_bucket_stride_prefers_aligned_sizes_when_space_allows() {
+        assert_eq!(get_bucket_stride(8192, 1000, 2), 1024);
+        assert_eq!(get_bucket_stride(256, 17, 2), 32);
+        assert_eq!(get_bucket_stride(8, 17, 2), 17);
     }
 
     #[test]
-    fn gather_lms_suffixes_8u_omp_uses_thread_state_for_large_inputs() {
-        let n = 65_600usize;
-        let text: Vec<u8> = (0..n)
-            .map(|i| 1 + ((i * 37 + i / 17) % 251) as u8)
-            .collect();
-        let mut thread_state = alloc_thread_state(4).unwrap();
-        let mut count_sa = vec![-99; n];
-        let mut buckets = vec![0; 4 * ALPHABET_SIZE];
-        let m = count_and_gather_lms_suffixes_8u_omp(
-            &text,
-            &mut count_sa,
-            n as SaSint,
-            &mut buckets,
-            4,
-            &mut thread_state,
-        );
-
-        let mut threaded = vec![-99; n];
-        let mut scalar = vec![-99; n];
-        gather_lms_suffixes_8u_omp(&text, &mut threaded, n as SaSint, 4, &mut thread_state);
-        gather_lms_suffixes_8u(
-            &text,
-            &mut scalar,
-            n as SaSint,
-            n as FastSint - 1,
-            0,
-            n as FastSint,
-        );
-
-        assert_eq!(&threaded[n - m as usize..], &scalar[n - m as usize..]);
+    fn libsais64_count_suffixes_32s_counts_symbol_histogram() {
+        let t = vec![2, 1, 2, 3, 1, 0, 2];
+        let mut buckets = vec![0; 4];
+        count_suffixes_32s(&t, t.len() as SaSint, 4, &mut buckets);
+        assert_eq!(buckets, vec![1, 2, 3, 1]);
     }
 
     #[test]
-    fn count_and_gather_lms_suffixes_32s_4k_updates_counts_and_suffixes() {
+    fn libsais64_initialize_buckets_start_and_end_8u_sets_ranges_and_freq() {
+        let mut buckets = vec![0; 8 * ALPHABET_SIZE];
+        buckets[buckets_index4(0, 0)] = 1;
+        buckets[buckets_index4(1, 1)] = 2;
+        buckets[buckets_index4(2, 3)] = 3;
+        let mut freq = vec![0; ALPHABET_SIZE];
+        let k = initialize_buckets_start_and_end_8u(&mut buckets, Some(&mut freq));
+        assert_eq!(k, 3);
+        assert_eq!(freq[0], 1);
+        assert_eq!(freq[1], 2);
+        assert_eq!(freq[2], 3);
+        assert_eq!(buckets[6 * ALPHABET_SIZE], 0);
+        assert_eq!(buckets[7 * ALPHABET_SIZE], 1);
+        assert_eq!(buckets[6 * ALPHABET_SIZE + 1], 1);
+        assert_eq!(buckets[7 * ALPHABET_SIZE + 1], 3);
+    }
+
+    #[test]
+    fn libsais64_initialize_buckets_start_and_end_32s_6k_sets_prefix_ranges() {
+        let k = 3;
+        let mut buckets = vec![0; 6 * k];
+        buckets[buckets_index4(0, 0)] = 1;
+        buckets[buckets_index4(0, 1)] = 2;
+        buckets[buckets_index4(1, 2)] = 3;
+        buckets[buckets_index4(2, 3)] = 4;
+        initialize_buckets_start_and_end_32s_6k(k as SaSint, &mut buckets);
+        assert_eq!(&buckets[4 * k..5 * k], &[0, 3, 6]);
+        assert_eq!(&buckets[5 * k..6 * k], &[3, 6, 10]);
+    }
+
+    #[test]
+    fn libsais64_initialize_buckets_start_and_end_32s_4k_sets_prefix_ranges() {
+        let k = 3;
+        let mut buckets = vec![0; 4 * k];
+        buckets[buckets_index2(0, 0)] = 1;
+        buckets[buckets_index2(0, 1)] = 2;
+        buckets[buckets_index2(1, 0)] = 3;
+        buckets[buckets_index2(2, 1)] = 4;
+        initialize_buckets_start_and_end_32s_4k(k as SaSint, &mut buckets);
+        assert_eq!(&buckets[2 * k..3 * k], &[0, 3, 6]);
+        assert_eq!(&buckets[3 * k..4 * k], &[3, 6, 10]);
+    }
+
+    #[test]
+    fn libsais64_initialize_buckets_end_32s_2k_rewrites_first_lanes_to_end_positions() {
+        let k = 3;
+        let mut buckets = vec![1, 2, 3, 4, 5, 6];
+        initialize_buckets_end_32s_2k(k as SaSint, &mut buckets);
+        assert_eq!(buckets[0], 3);
+        assert_eq!(buckets[2], 10);
+        assert_eq!(buckets[4], 21);
+    }
+
+    #[test]
+    fn libsais64_initialize_buckets_start_and_end_32s_2k_copies_start_positions() {
+        let k = 3;
+        let mut buckets = vec![3, 2, 10, 4, 21, 6];
+        initialize_buckets_start_and_end_32s_2k(k as SaSint, &mut buckets);
+        assert_eq!(&buckets[..k], &[3, 10, 21]);
+        assert_eq!(&buckets[k..2 * k], &[0, 3, 10]);
+    }
+
+    #[test]
+    fn libsais64_initialize_buckets_start_32s_1k_builds_prefix_starts() {
+        let mut buckets = vec![1, 2, 3];
+        initialize_buckets_start_32s_1k(3, &mut buckets);
+        assert_eq!(buckets, vec![0, 1, 3]);
+    }
+
+    #[test]
+    fn libsais64_initialize_buckets_end_32s_1k_builds_prefix_ends() {
+        let mut buckets = vec![1, 2, 3];
+        initialize_buckets_end_32s_1k(3, &mut buckets);
+        assert_eq!(buckets, vec![1, 3, 6]);
+    }
+
+    #[test]
+    fn libsais64_initialize_buckets_for_lms_suffixes_radix_sort_8u_returns_total_lms_slots() {
+        let t = vec![2_u8, 1, 3, 1, 0];
+        let mut buckets = vec![0; 6 * ALPHABET_SIZE];
+        buckets[buckets_index4(0, 1)] = 1;
+        buckets[buckets_index4(1, 3)] = 2;
+        let sum = initialize_buckets_for_lms_suffixes_radix_sort_8u(&t, &mut buckets, 4);
+        assert!(sum >= 0);
+    }
+
+    #[test]
+    fn libsais64_initialize_buckets_for_lms_suffixes_radix_sort_32s_2k_rewrites_two_lane_prefixes()
+    {
         let t = vec![2, 1, 3, 1, 0];
-        let mut sa = vec![0; t.len()];
-        let mut buckets = vec![0; 4 * 4];
-        let m = count_and_gather_lms_suffixes_32s_4k(
-            &t,
-            &mut sa,
-            t.len() as SaSint,
-            4,
-            &mut buckets,
-            0,
-            t.len() as FastSint,
-        );
-        assert!(m >= 0);
-        assert_eq!(buckets.iter().sum::<SaSint>(), t.len() as SaSint);
+        let mut buckets = vec![0; 2 * 4];
+        initialize_buckets_for_lms_suffixes_radix_sort_32s_2k(&t, 4, &mut buckets, 4);
+        assert!(buckets.iter().any(|&v| v != 0));
     }
 
     #[test]
-    fn count_and_gather_lms_suffixes_32s_2k_updates_counts_and_suffixes() {
+    fn libsais64_initialize_buckets_for_lms_suffixes_radix_sort_32s_6k_returns_total_lms_slots() {
         let t = vec![2, 1, 3, 1, 0];
-        let mut sa = vec![0; t.len()];
-        let mut buckets = vec![0; 2 * 4];
-        let m = count_and_gather_lms_suffixes_32s_2k(
-            &t,
-            &mut sa,
-            t.len() as SaSint,
-            4,
-            &mut buckets,
-            0,
-            t.len() as FastSint,
-        );
-        assert!(m >= 0);
-        assert_eq!(buckets.iter().sum::<SaSint>(), t.len() as SaSint);
+        let mut buckets = vec![0; 6 * 4];
+        buckets[buckets_index4(0, 1)] = 1;
+        buckets[buckets_index4(1, 3)] = 2;
+        let sum = initialize_buckets_for_lms_suffixes_radix_sort_32s_6k(&t, 4, &mut buckets, 4);
+        assert!(sum >= 0);
     }
 
     #[test]
-    fn count_and_gather_compacted_lms_suffixes_32s_2k_updates_counts_and_suffixes() {
-        let t = vec![2, SAINT_MIN | 1, 3, 1, 0];
-        let mut sa = vec![0; t.len()];
-        let mut buckets = vec![0; 2 * 4];
-        let m = count_and_gather_compacted_lms_suffixes_32s_2k(
-            &t,
-            &mut sa,
-            t.len() as SaSint,
-            4,
-            &mut buckets,
-            0,
-            t.len() as FastSint,
-        );
-        assert!(m >= 0);
-        assert_eq!(buckets.iter().sum::<SaSint>(), t.len() as SaSint);
-    }
-
-    #[test]
-    fn count_and_gather_lms_suffixes_32s_4k_nofs_omp_wraps_sequential_version() {
+    fn libsais64_initialize_buckets_for_radix_and_partial_sorting_32s_4k_sets_start_end_views() {
         let t = vec![2, 1, 3, 1, 0];
-        let mut sa = vec![0; t.len()];
-        let mut buckets = vec![0; 4 * 4];
-        let m = count_and_gather_lms_suffixes_32s_4k_nofs_omp(
-            &t,
-            &mut sa,
-            t.len() as SaSint,
-            4,
-            &mut buckets,
-            2,
-        );
-        assert!(m >= 0);
-        assert_eq!(buckets.iter().sum::<SaSint>(), t.len() as SaSint);
+        let k = 4usize;
+        let mut buckets = vec![0; 4 * k];
+        buckets[buckets_index2(0, 0)] = 1;
+        buckets[buckets_index2(0, 1)] = 2;
+        buckets[buckets_index2(1, 0)] = 3;
+        initialize_buckets_for_radix_and_partial_sorting_32s_4k(&t, k as SaSint, &mut buckets, 4);
+        assert_eq!(buckets[2 * k], 0);
+        assert!(buckets[3 * k] >= buckets[2 * k]);
     }
 
     #[test]
-    fn count_and_gather_lms_suffixes_32s_2k_nofs_omp_wraps_sequential_version() {
+    fn libsais64_initialize_buckets_for_partial_sorting_8u_sets_start_and_distinct_views() {
+        let t = vec![2_u8, 1, 3, 1, 0];
+        let mut buckets = vec![0; 6 * ALPHABET_SIZE];
+        buckets[buckets_index4(0, 0)] = 1;
+        buckets[buckets_index4(0, 2)] = 2;
+        initialize_buckets_for_partial_sorting_8u(&t, &mut buckets, 4, 3);
+        assert!(buckets[0] >= 4);
+        assert!(buckets[1] >= 0);
+        assert!(buckets[4 * ALPHABET_SIZE] >= 4);
+    }
+
+    #[test]
+    fn libsais64_initialize_buckets_for_partial_sorting_32s_6k_rewrites_bucket_views() {
         let t = vec![2, 1, 3, 1, 0];
-        let mut sa = vec![0; t.len()];
-        let mut buckets = vec![0; 2 * 4];
-        let m = count_and_gather_lms_suffixes_32s_2k_nofs_omp(
-            &t,
-            &mut sa,
-            t.len() as SaSint,
-            4,
-            &mut buckets,
-            2,
-        );
-        assert!(m >= 0);
-        assert_eq!(buckets.iter().sum::<SaSint>(), t.len() as SaSint);
+        let k = 4usize;
+        let mut buckets = vec![0; 6 * k];
+        buckets[buckets_index4(0, 0)] = 1;
+        buckets[buckets_index4(0, 1)] = 2;
+        buckets[buckets_index4(1, 2)] = 3;
+        initialize_buckets_for_partial_sorting_32s_6k(&t, k as SaSint, &mut buckets, 4, 3);
+        assert!(buckets[0] >= 4);
+        assert!(buckets[4 * k] >= 4);
     }
 
     #[test]
-    fn count_and_gather_compacted_lms_suffixes_32s_2k_nofs_omp_wraps_sequential_version() {
-        let t = vec![2, SAINT_MIN | 1, 3, 1, 0];
-        let mut sa = vec![0; t.len()];
-        let mut buckets = vec![0; 2 * 4];
-        let m = count_and_gather_compacted_lms_suffixes_32s_2k_nofs_omp(
-            &t,
-            &mut sa,
-            t.len() as SaSint,
-            4,
-            &mut buckets,
-            2,
-        );
-        assert!(m >= 0);
-        assert_eq!(buckets.iter().sum::<SaSint>(), t.len() as SaSint);
+    fn libsais64_place_lms_suffixes_interval_32s_4k_moves_suffixes_into_bucket_intervals() {
+        let mut sa = vec![10, 11, 12, 13, 14];
+        let k = 3usize;
+        let mut buckets = vec![0; 4 * k];
+        buckets[buckets_index2(0, 1)] = 0;
+        buckets[buckets_index2(1, 1)] = 2;
+        buckets[buckets_index2(2, 1)] = 3;
+        buckets[3 * k] = 2;
+        buckets[3 * k + 1] = 5;
+
+        place_lms_suffixes_interval_32s_4k(&mut sa, 5, k as SaSint, 5, &buckets);
+
+        assert_eq!(sa, vec![0, 0, 0, 0, 14]);
     }
 
     #[test]
-    fn count_and_gather_lms_suffixes_32s_nofs_omp_uses_large_input_paths() {
-        let n = 65_600usize;
-        let k = 257usize;
-        let text: Vec<SaSint> = (0..n)
-            .map(|i| 1 + ((i * 37 + i / 17) % (k - 1)) as SaSint)
-            .collect();
+    fn libsais64_place_lms_suffixes_interval_32s_2k_moves_suffixes_into_bucket_intervals() {
+        let mut sa = vec![10, 11, 12, 13, 14];
+        let mut buckets = vec![0; 2 * 3];
+        buckets[buckets_index2(0, 0)] = 2;
+        buckets[buckets_index2(0, 1)] = 0;
+        buckets[buckets_index2(1, 0)] = 5;
+        buckets[buckets_index2(1, 1)] = 2;
+        buckets[buckets_index2(2, 0)] = 5;
+        buckets[buckets_index2(2, 1)] = 3;
 
-        let mut sa_threaded = vec![-99; n];
-        let mut sa_scalar = vec![-99; n];
-        let mut buckets_threaded = vec![0; 4 * k];
-        let mut buckets_scalar = vec![0; 4 * k];
-        let m_threaded = count_and_gather_lms_suffixes_32s_4k_nofs_omp(
-            &text,
-            &mut sa_threaded,
-            n as SaSint,
-            k as SaSint,
-            &mut buckets_threaded,
-            4,
-        );
-        let m_scalar = count_and_gather_lms_suffixes_32s_4k(
-            &text,
-            &mut sa_scalar,
-            n as SaSint,
-            k as SaSint,
-            &mut buckets_scalar,
-            0,
-            n as FastSint,
-        );
-        assert_eq!(m_threaded, m_scalar);
-        assert_eq!(
-            &sa_threaded[n - m_threaded as usize..],
-            &sa_scalar[n - m_scalar as usize..]
-        );
-        assert_eq!(buckets_threaded, buckets_scalar);
+        place_lms_suffixes_interval_32s_2k(&mut sa, 5, 3, 5, &buckets);
 
-        let mut sa_threaded = vec![-99; n];
-        let mut sa_scalar = vec![-99; n];
-        let mut buckets_threaded = vec![0; 2 * k];
-        let mut buckets_scalar = vec![0; 2 * k];
-        let m_threaded = count_and_gather_lms_suffixes_32s_2k_nofs_omp(
-            &text,
-            &mut sa_threaded,
-            n as SaSint,
-            k as SaSint,
-            &mut buckets_threaded,
-            4,
-        );
-        let m_scalar = count_and_gather_lms_suffixes_32s_2k(
-            &text,
-            &mut sa_scalar,
-            n as SaSint,
-            k as SaSint,
-            &mut buckets_scalar,
-            0,
-            n as FastSint,
-        );
-        assert_eq!(m_threaded, m_scalar);
-        assert_eq!(
-            &sa_threaded[n - m_threaded as usize..],
-            &sa_scalar[n - m_scalar as usize..]
-        );
-        assert_eq!(buckets_threaded, buckets_scalar);
+        assert_eq!(sa, vec![0, 0, 0, 0, 14]);
     }
 
     #[test]
-    fn count_and_gather_lms_suffixes_32s_fs_omp_uses_large_input_paths() {
-        let n = 65_600usize;
-        let k = 257usize;
-        let text: Vec<SaSint> = (0..n)
-            .map(|i| 1 + ((i * 37 + i / 17) % (k - 1)) as SaSint)
-            .collect();
-        let mut thread_state = alloc_thread_state(4).unwrap();
+    fn libsais64_place_lms_suffixes_interval_32s_1k_places_suffixes_by_symbol_bucket() {
+        let t = vec![0, 1, 1, 2, 2];
+        let mut sa = vec![1, 2, 3, 4, 99];
+        let buckets = vec![0, 2, 5];
 
-        let mut sa_threaded = vec![-99; n];
-        let mut sa_scalar = vec![-99; n];
-        let mut buckets_threaded = vec![0; 4 * k];
-        let mut buckets_scalar = vec![0; 4 * k];
-        let m_threaded = count_and_gather_lms_suffixes_32s_4k_fs_omp(
-            &text,
-            &mut sa_threaded,
-            n as SaSint,
-            k as SaSint,
-            &mut buckets_threaded,
-            0,
-            4,
-            &mut thread_state,
-        );
-        let m_scalar = count_and_gather_lms_suffixes_32s_4k(
-            &text,
-            &mut sa_scalar,
-            n as SaSint,
-            k as SaSint,
-            &mut buckets_scalar,
-            0,
-            n as FastSint,
-        );
-        assert_eq!(m_threaded, m_scalar);
-        assert_eq!(
-            &sa_threaded[n - m_threaded as usize..],
-            &sa_scalar[n - m_scalar as usize..]
-        );
-        assert_eq!(buckets_threaded, buckets_scalar);
+        place_lms_suffixes_interval_32s_1k(&t, &mut sa, 3, 4, &buckets);
 
-        let mut sa_threaded = vec![-99; n];
-        let mut sa_scalar = vec![-99; n];
-        let mut buckets_threaded = vec![0; 2 * k];
-        let mut buckets_scalar = vec![0; 2 * k];
-        let m_threaded = count_and_gather_lms_suffixes_32s_2k_fs_omp(
-            &text,
-            &mut sa_threaded,
-            n as SaSint,
-            k as SaSint,
-            &mut buckets_threaded,
-            0,
-            4,
-            &mut thread_state,
-        );
-        let m_scalar = count_and_gather_lms_suffixes_32s_2k(
-            &text,
-            &mut sa_scalar,
-            n as SaSint,
-            k as SaSint,
-            &mut buckets_scalar,
-            0,
-            n as FastSint,
-        );
-        assert_eq!(m_threaded, m_scalar);
-        assert_eq!(
-            &sa_threaded[n - m_threaded as usize..],
-            &sa_scalar[n - m_scalar as usize..]
-        );
-        assert_eq!(buckets_threaded, buckets_scalar);
+        assert_eq!(sa, vec![1, 2, 0, 3, 4]);
     }
 
     #[test]
-    fn count_and_gather_compacted_lms_suffixes_32s_nofs_omp_uses_large_input_path() {
-        let n = 65_600usize;
-        let k = 257usize;
-        let text: Vec<SaSint> = (0..n)
-            .map(|i| {
-                let value = 1 + ((i * 37 + i / 17) % (k - 1)) as SaSint;
-                if i % 19 == 0 {
-                    value | SAINT_MIN
-                } else {
-                    value
-                }
-            })
-            .collect();
-
-        let mut sa_threaded = vec![-99; n];
-        let mut sa_split = vec![-99; n];
-        let mut buckets_threaded = vec![0; 2 * k];
-        let mut buckets_split = vec![0; 2 * k];
-        let m_threaded = count_and_gather_compacted_lms_suffixes_32s_2k_nofs_omp(
-            &text,
-            &mut sa_threaded,
-            n as SaSint,
-            k as SaSint,
-            &mut buckets_threaded,
-            4,
-        );
-        count_compacted_lms_suffixes_32s_2k(&text, n as SaSint, k as SaSint, &mut buckets_split);
-        let m_split = gather_compacted_lms_suffixes_32s(&text, &mut sa_split, n as SaSint);
-
-        assert_eq!(m_threaded, m_split);
-        assert_eq!(
-            &sa_threaded[n - m_threaded as usize..],
-            &sa_split[n - m_split as usize..]
-        );
-        assert_eq!(buckets_threaded, buckets_split);
-    }
-
-    #[test]
-    fn count_and_gather_compacted_lms_suffixes_32s_fs_omp_uses_large_input_path() {
-        let n = 65_600usize;
-        let k = 257usize;
-        let text: Vec<SaSint> = (0..n)
-            .map(|i| {
-                let value = 1 + ((i * 37 + i / 17) % (k - 1)) as SaSint;
-                if i % 19 == 0 {
-                    value | SAINT_MIN
-                } else {
-                    value
-                }
-            })
-            .collect();
-
-        let mut sa_threaded = vec![-99; 2 * n];
-        let mut sa_scalar = vec![-99; n];
-        let mut buckets_threaded = vec![0; 2 * k];
-        let mut buckets_scalar = vec![0; 2 * k];
-        let mut thread_state = alloc_thread_state(4).unwrap();
-        count_and_gather_compacted_lms_suffixes_32s_2k_fs_omp(
-            &text,
-            &mut sa_threaded,
-            n as SaSint,
-            k as SaSint,
-            &mut buckets_threaded,
-            0,
-            4,
-            &mut thread_state,
-        );
-        let m_scalar = count_and_gather_compacted_lms_suffixes_32s_2k(
-            &text,
-            &mut sa_scalar,
-            n as SaSint,
-            k as SaSint,
-            &mut buckets_scalar,
-            0,
-            n as FastSint,
-        );
-
-        assert_eq!(
-            &sa_threaded[n - m_scalar as usize..n],
-            &sa_scalar[n - m_scalar as usize..]
-        );
-        assert_eq!(buckets_threaded, buckets_scalar);
-    }
-
-    #[test]
-    fn accumulate_counts_helpers_match_prefix_bucket_addition() {
+    fn libsais64_accumulate_counts_helpers_match_prefix_bucket_addition() {
         let mut bucket00 = vec![4, 5, 6];
         let bucket01 = vec![1, 2, 3];
         let bucket02 = vec![7, 8, 9];
@@ -18313,14 +16120,14 @@ mod tests {
     }
 
     #[test]
-    fn accumulate_counts_s32_matches_c_dispatch_for_small_bucket_counts() {
+    fn libsais64_accumulate_counts_s32_matches_dispatch_for_small_bucket_counts() {
         let mut buckets = vec![1, 2, 3, 4, 5, 6, 7, 8];
         accumulate_counts_s32(&mut buckets, 2, 2, 4);
         assert_eq!(buckets, vec![1, 2, 3, 4, 5, 6, 16, 20]);
     }
 
     #[test]
-    fn accumulate_counts_s32_matches_c_dispatch_for_nine_buckets() {
+    fn libsais64_accumulate_counts_s32_matches_dispatch_for_nine_buckets() {
         let mut buckets = vec![
             1, 10, 2, 20, 3, 30, 4, 40, 5, 50, 6, 60, 7, 70, 8, 80, 9, 90,
         ];
@@ -18332,9 +16139,3676 @@ mod tests {
     }
 
     #[test]
-    fn accumulate_counts_s32_matches_c_chunked_nine_then_tail_behavior() {
+    fn libsais64_accumulate_counts_s32_matches_chunked_nine_then_tail_behavior() {
         let mut buckets = (1..=11).collect::<Vec<SaSint>>();
         accumulate_counts_s32(&mut buckets, 1, 1, 11);
         assert_eq!(buckets, vec![1, 2, 3, 4, 5, 6, 7, 8, 45, 10, 66]);
+    }
+
+    #[test]
+    fn libsais64_final_sorting_scan_left_to_right_32s_block_omp_places_cached_suffixes() {
+        let t = vec![0, 1, 2, 1, 0];
+        let mut sa = vec![1, 2, 0, 0];
+        let mut induction_bucket = vec![0, 1, 3];
+        let mut cache = vec![ThreadCache::default(); LIBSAIS_PER_THREAD_CACHE_SIZE];
+
+        final_sorting_scan_left_to_right_32s_block_omp(
+            &t,
+            &mut sa,
+            &mut induction_bucket,
+            &mut cache,
+            0,
+            2,
+            2,
+        );
+
+        assert_eq!(sa[0] & SAINT_MAX, 0);
+        assert_eq!(sa[1] & SAINT_MAX, 1);
+        assert_eq!(induction_bucket[0], 1);
+        assert_eq!(induction_bucket[1], 2);
+    }
+
+    #[test]
+    fn libsais64_final_sorting_scan_left_to_right_8u_block_omp_uses_thread_buckets() {
+        let block_start = 20_000usize;
+        let block_size = 16_384usize;
+        let n = block_start + block_size + 8;
+        let t = vec![1_u8; n];
+        let suffixes: Vec<SaSint> = (2..2 + block_size).map(|i| i as SaSint).collect();
+
+        let mut expected_sa = vec![0; n];
+        expected_sa[block_start..block_start + block_size].copy_from_slice(&suffixes);
+        let mut threaded_sa = expected_sa.clone();
+        let mut expected_bucket = vec![0; ALPHABET_SIZE];
+        let mut threaded_bucket = expected_bucket.clone();
+        let mut thread_state = alloc_thread_state(4).unwrap();
+
+        final_sorting_scan_left_to_right_8u(
+            &t,
+            &mut expected_sa,
+            &mut expected_bucket,
+            block_start as FastSint,
+            block_size as FastSint,
+        );
+        final_sorting_scan_left_to_right_8u_block_omp(
+            &t,
+            &mut threaded_sa,
+            ALPHABET_SIZE as SaSint,
+            &mut threaded_bucket,
+            block_start as FastSint,
+            block_size as FastSint,
+            4,
+            &mut thread_state,
+        );
+
+        assert_eq!(threaded_sa, expected_sa);
+        assert_eq!(threaded_bucket, expected_bucket);
+    }
+
+    #[test]
+    fn libsais64_final_sorting_scan_right_to_left_32s_block_omp_runs_block_pipeline() {
+        let t = vec![0, 1, 2, 1, 0];
+        let mut sa = vec![0, 2, 0, 0];
+        let mut induction_bucket = vec![1, 2, 3];
+        let mut expected_sa = sa.clone();
+        let mut expected_bucket = induction_bucket.clone();
+        let mut cache = vec![ThreadCache::default(); LIBSAIS_PER_THREAD_CACHE_SIZE];
+
+        final_sorting_scan_right_to_left_32s(&t, &mut expected_sa, &mut expected_bucket, 0, 2);
+        final_sorting_scan_right_to_left_32s_block_omp(
+            &t,
+            &mut sa,
+            &mut induction_bucket,
+            &mut cache,
+            0,
+            2,
+            2,
+        );
+
+        assert_eq!(sa, expected_sa);
+        assert_eq!(induction_bucket, expected_bucket);
+    }
+
+    #[test]
+    fn libsais64_bwt_copy_8u_copies_low_bytes_from_suffix_array_storage() {
+        let a = vec![65, 255, 256, -1];
+        let mut u = vec![0_u8; 4];
+
+        bwt_copy_8u(&mut u, &a, 4);
+
+        assert_eq!(u, vec![65, 255, 0, 255]);
+    }
+
+    #[test]
+    fn libsais64_bwt_copy_8u_omp_matches_sequential_copy() {
+        let a = vec![1, 2, 3, 4, 5];
+        let mut u = vec![0_u8; 5];
+
+        bwt_copy_8u_omp(&mut u, &a, 5, 4);
+
+        assert_eq!(u, vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn libsais64_conversion_helpers_use_little_endian_word_layout() {
+        let s = vec![11_u32, 22, 33, 44];
+        let mut d = vec![0_u64; 4];
+        convert_32u_to_64u(&s, &mut d, 1, 2);
+        assert_eq!(d, vec![0, 22, 33, 0]);
+
+        let mut words = vec![5_u32, 6, 7, 8, 0, 0, 0, 0];
+        convert_inplace_32u_to_64u(&mut words, 0, 4);
+        assert_eq!(words, vec![5, 0, 6, 0, 7, 0, 8, 0]);
+        convert_inplace_64u_to_32u(&mut words, 0, 4);
+        assert_eq!(&words[..4], &[5, 6, 7, 8]);
+
+        let mut words = vec![9_u32, 10, 11, 12, 0, 0, 0, 0];
+        convert_inplace_32u_to_64u_omp(&mut words, 4, 2);
+        assert_eq!(words, vec![9, 0, 10, 0, 11, 0, 12, 0]);
+    }
+
+    #[test]
+    fn libsais64_32bit_workspace_sizing_matches_upstream_capacity_rules() {
+        assert_eq!(libsais64_new_32bit_fs(10, 4), Some(18));
+        assert_eq!(libsais64_new_32bit_fs(i32::MAX as usize - 4, 100), Some(4));
+        assert_eq!(libsais64_new_32bit_fs(i32::MAX as usize + 1, 0), None);
+    }
+
+    #[test]
+    fn libsais64_32bit_suffix_adapter_widens_suffix_array_and_frequency() {
+        let text = b"banana";
+        let fs = 4;
+        let new_fs = libsais64_new_32bit_fs(text.len(), fs).expect("small workspace");
+        let mut sa64 = vec![-1; text.len() + fs as usize];
+        let mut freq64 = vec![-1; ALPHABET_SIZE];
+        let rc64 = libsais64_run_32bit_omp(text, &mut sa64, fs, Some(&mut freq64), 2, false)
+            .expect("small input uses 32-bit adapter");
+
+        let mut sa32 = vec![-1; text.len() + new_fs as usize];
+        let mut freq32 = vec![-1; ALPHABET_SIZE];
+        let rc32 = crate::libsais_omp(text, &mut sa32, new_fs, Some(&mut freq32), 2);
+
+        assert_eq!(rc64, SaSint::from(rc32));
+        assert_eq!(
+            &sa64[..text.len()],
+            &sa32[..text.len()]
+                .iter()
+                .map(|&value| SaSint::from(value as u32))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(freq64[b'a' as usize], 3);
+        assert_eq!(freq64[b'b' as usize], 1);
+        assert_eq!(freq64[b'n' as usize], 2);
+        assert_eq!(
+            freq64[..ALPHABET_SIZE],
+            freq32
+                .iter()
+                .map(|&value| SaSint::from(value))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn libsais64_32bit_gsa_adapter_widens_suffix_array_and_frequency() {
+        let text = b"ban\0ana\0";
+        let fs = 2;
+        let mut sa64 = vec![-1; text.len() + fs as usize];
+        let mut freq64 = vec![-1; ALPHABET_SIZE];
+
+        let rc = libsais64_run_32bit_omp(text, &mut sa64, fs, Some(&mut freq64), 2, true)
+            .expect("small GSA input uses 32-bit adapter");
+
+        let mut direct_sa = vec![0; text.len()];
+        let mut direct_freq = vec![0; ALPHABET_SIZE];
+        assert_eq!(
+            crate::libsais_gsa(text, &mut direct_sa, 0, Some(&mut direct_freq)),
+            0
+        );
+        assert_eq!(rc, 0);
+        assert_eq!(
+            sa64[..text.len()],
+            direct_sa
+                .iter()
+                .map(|&value| SaSint::from(value as u32))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            freq64[..ALPHABET_SIZE],
+            direct_freq
+                .iter()
+                .map(|&value| SaSint::from(value))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn libsais64_32bit_bwt_adapters_widen_frequency_and_aux_samples() {
+        let text = b"mississippi";
+        let fs = 6;
+        let r = 4;
+
+        let mut bwt64 = vec![0; text.len()];
+        let mut freq64 = vec![-1; ALPHABET_SIZE];
+        let primary64 = libsais64_bwt_run_32bit_omp(text, &mut bwt64, fs, Some(&mut freq64), 2)
+            .expect("small input uses 32-bit BWT adapter");
+
+        let mut bwt32 = vec![0; text.len()];
+        let mut work32 = vec![0; text.len() + fs as usize * 2 + text.len()];
+        let mut freq32 = vec![-1; ALPHABET_SIZE];
+        let primary32 =
+            crate::libsais_bwt_omp(text, &mut bwt32, &mut work32, 23, Some(&mut freq32), 2);
+
+        assert_eq!(primary64, SaSint::from(primary32));
+        assert_eq!(bwt64, bwt32);
+        assert_eq!(
+            freq64[..ALPHABET_SIZE],
+            freq32
+                .iter()
+                .map(|&value| SaSint::from(value))
+                .collect::<Vec<_>>()
+        );
+
+        let mut aux_bwt64 = vec![0; text.len()];
+        let mut aux64 = vec![-1; (text.len() - 1) / r as usize + 1];
+        let mut aux_freq64 = vec![-1; ALPHABET_SIZE];
+        let rc64 = libsais64_bwt_aux_run_32bit_omp(
+            text,
+            &mut aux_bwt64,
+            fs,
+            Some(&mut aux_freq64),
+            r,
+            &mut aux64,
+            2,
+        )
+        .expect("small input uses 32-bit aux BWT adapter");
+
+        let mut aux_bwt32 = vec![0; text.len()];
+        let mut aux_work32 = vec![0; text.len() + fs as usize * 2 + text.len()];
+        let mut aux32 = vec![-1; aux64.len()];
+        let mut aux_freq32 = vec![-1; ALPHABET_SIZE];
+        let rc32 = crate::libsais_bwt_aux_omp(
+            text,
+            &mut aux_bwt32,
+            &mut aux_work32,
+            23,
+            Some(&mut aux_freq32),
+            r as i32,
+            &mut aux32,
+            2,
+        );
+
+        assert_eq!(rc64, SaSint::from(rc32));
+        assert_eq!(aux_bwt64, aux_bwt32);
+        assert_eq!(
+            aux64,
+            aux32
+                .iter()
+                .map(|&value| SaSint::from(value))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            aux_freq64[..ALPHABET_SIZE],
+            aux_freq32
+                .iter()
+                .map(|&value| SaSint::from(value))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn libsais64_bwt_copy_8u_omp_uses_block_partition_for_large_inputs() {
+        let n = 65_600usize;
+        let a: Vec<SaSint> = (0..n).map(|i| (i * 17) as SaSint).collect();
+        let mut threaded = vec![0; n];
+        let mut sequential = vec![0; n];
+
+        bwt_copy_8u_omp(&mut threaded, &a, n as SaSint, 4);
+        bwt_copy_8u(&mut sequential, &a, n as SaSint);
+
+        assert_eq!(threaded, sequential);
+    }
+
+    #[test]
+    fn libsais64_flip_suffix_markers_omp_uses_block_partition_for_large_inputs() {
+        let n = 65_600usize;
+        let mut single: Vec<SaSint> = (0..n).map(|i| (i as SaSint) ^ SAINT_MIN).collect();
+        let mut threaded = single.clone();
+
+        flip_suffix_markers_omp(&mut single, n as SaSint, 1);
+        flip_suffix_markers_omp(&mut threaded, n as SaSint, 4);
+
+        assert_eq!(threaded, single);
+    }
+
+    #[test]
+    fn libsais64_renumber_lms_suffixes_8u_writes_names_into_second_half() {
+        let mut sa = vec![1 | SAINT_MIN, 3, 0, 0];
+
+        let name = renumber_lms_suffixes_8u(&mut sa, 2, 0, 0, 2);
+
+        assert_eq!(name, 1);
+        assert_eq!(sa[2], SAINT_MIN);
+        assert_eq!(sa[3], SAINT_MIN | 1);
+    }
+
+    #[test]
+    fn libsais64_renumber_lms_suffixes_8u_matches_upstream_c_helper() {
+        let mut sa_rust = vec![1 | SAINT_MIN, 3, 0, 0];
+        let mut sa_c = sa_rust.clone();
+
+        let rust_name = renumber_lms_suffixes_8u(&mut sa_rust, 2, 0, 0, 2);
+        let c_name =
+            unsafe { probe_libsais64_renumber_lms_suffixes_8u(sa_c.as_mut_ptr(), 2, 0, 0, 2) };
+
+        assert_eq!(rust_name, c_name);
+        assert_eq!(sa_rust, sa_c);
+    }
+
+    #[test]
+    fn libsais64_gather_marked_lms_suffixes_moves_negative_marked_entries_to_tail() {
+        let mut sa = vec![0, 0, 1 | SAINT_MIN, 3];
+
+        let l = gather_marked_lms_suffixes(&mut sa, 2, 4, 0, 2);
+
+        assert_eq!(l, 3);
+        assert_eq!(sa[3], 1);
+    }
+
+    #[test]
+    fn libsais64_gather_marked_lms_suffixes_matches_upstream_c_helper() {
+        let mut sa_rust = vec![0, 0, 1 | SAINT_MIN, 3];
+        let mut sa_c = sa_rust.clone();
+
+        let rust_l = gather_marked_lms_suffixes(&mut sa_rust, 2, 4, 0, 2);
+        let c_l =
+            unsafe { probe_libsais64_gather_marked_lms_suffixes(sa_c.as_mut_ptr(), 2, 4, 0, 2) };
+
+        assert_eq!(rust_l, c_l);
+        assert_eq!(sa_rust, sa_c);
+    }
+
+    #[test]
+    fn libsais64_renumber_lms_suffixes_8u_omp_wraps_sequential_version() {
+        let mut sa = vec![1 | SAINT_MIN, 3, 0, 0];
+        let mut thread_state = alloc_thread_state(2).unwrap();
+
+        let name = renumber_lms_suffixes_8u_omp(&mut sa, 2, 2, &mut thread_state);
+
+        assert_eq!(name, 1);
+        assert_eq!(sa[2], SAINT_MIN);
+    }
+
+    #[test]
+    fn libsais64_renumber_lms_suffixes_8u_omp_uses_block_partition_for_large_inputs() {
+        let m = 65_600usize;
+        let mut input = vec![0; 2 * m];
+        for (i, slot) in input[..m].iter_mut().enumerate() {
+            let suffix = (2 * i + 1) as SaSint;
+            *slot = if i % 5 == 0 {
+                suffix | SAINT_MIN
+            } else {
+                suffix
+            };
+        }
+
+        let mut single = input.clone();
+        let mut threaded = input;
+        let mut thread_state = alloc_thread_state(4).unwrap();
+        let single_name = renumber_lms_suffixes_8u(&mut single, m as SaSint, 0, 0, m as FastSint);
+        let threaded_name =
+            renumber_lms_suffixes_8u_omp(&mut threaded, m as SaSint, 4, &mut thread_state);
+
+        assert_eq!(threaded_name, single_name);
+        assert_eq!(threaded, single);
+    }
+
+    #[test]
+    fn libsais64_gather_marked_lms_suffixes_omp_uses_block_partition_for_large_inputs() {
+        let n = 131_200usize;
+        let half_n = n >> 1;
+        let mut input = vec![-77; n];
+        for (i, slot) in input[..half_n].iter_mut().enumerate() {
+            let suffix = (3 * i + 1) as SaSint;
+            *slot = if i % 7 == 0 {
+                suffix | SAINT_MIN
+            } else {
+                suffix
+            };
+        }
+        let marked_count = input[..half_n].iter().filter(|&&value| value < 0).count();
+
+        let mut single = input.clone();
+        let mut threaded = input;
+        let mut thread_state = alloc_thread_state(4).unwrap();
+        let _ = gather_marked_lms_suffixes(&mut single, 0, n as FastSint, 0, half_n as FastSint);
+        gather_marked_lms_suffixes_omp(&mut threaded, n as SaSint, 0, 0, 4, &mut thread_state);
+
+        assert_eq!(&threaded[n - marked_count..], &single[n - marked_count..]);
+    }
+
+    #[test]
+    fn libsais64_renumber_and_gather_lms_suffixes_omp_uses_large_input_paths() {
+        let m = 65_600usize;
+        let n = 2 * m;
+        let mut input = vec![0; n];
+        for (i, slot) in input[..m].iter_mut().enumerate() {
+            let suffix = (2 * i + 1) as SaSint;
+            *slot = if i % 5 == 0 {
+                suffix | SAINT_MIN
+            } else {
+                suffix
+            };
+        }
+
+        let mut single = input.clone();
+        let mut threaded = input;
+        let mut single_state = alloc_thread_state(1).unwrap();
+        let mut threaded_state = alloc_thread_state(4).unwrap();
+        let single_name = renumber_and_gather_lms_suffixes_omp(
+            &mut single,
+            n as SaSint,
+            m as SaSint,
+            0,
+            1,
+            &mut single_state,
+        );
+        let threaded_name = renumber_and_gather_lms_suffixes_omp(
+            &mut threaded,
+            n as SaSint,
+            m as SaSint,
+            0,
+            4,
+            &mut threaded_state,
+        );
+
+        assert_eq!(threaded_name, single_name);
+        assert_eq!(threaded, single);
+    }
+
+    #[test]
+    fn libsais64_renumber_and_gather_lms_suffixes_omp_gathers_when_names_are_not_distinct() {
+        let mut sa = vec![1 | SAINT_MIN, 3, 0, 0];
+        let mut thread_state = alloc_thread_state(2).unwrap();
+
+        let name = renumber_and_gather_lms_suffixes_omp(&mut sa, 4, 2, 0, 2, &mut thread_state);
+
+        assert_eq!(name, 1);
+        assert_eq!(sa[3], 1);
+    }
+
+    #[test]
+    fn libsais64_renumber_and_gather_lms_suffixes_omp_matches_upstream_c_helper() {
+        let mut sa_rust = vec![1 | SAINT_MIN, 3, 0, 0];
+        let mut sa_c = sa_rust.clone();
+        let mut thread_state = alloc_thread_state(2).unwrap();
+
+        let rust_name =
+            renumber_and_gather_lms_suffixes_omp(&mut sa_rust, 4, 2, 0, 2, &mut thread_state);
+        let c_name = unsafe {
+            probe_libsais64_renumber_and_gather_lms_suffixes_omp(sa_c.as_mut_ptr(), 4, 2, 0, 2)
+        };
+
+        assert_eq!(rust_name, c_name);
+        assert_eq!(sa_rust, sa_c);
+    }
+
+    #[test]
+    fn libsais64_renumber_distinct_lms_suffixes_32s_4k_masks_sources_and_writes_second_half() {
+        let mut sa = vec![1 | SAINT_MIN, 3 | SAINT_MIN, 0, 0];
+
+        let name = renumber_distinct_lms_suffixes_32s_4k(&mut sa, 2, 1, 0, 2);
+
+        assert_eq!(name, 3);
+        assert_eq!(sa[0], 1);
+        assert_eq!(sa[1], 3);
+        assert_eq!(sa[2], 1);
+        assert_eq!(sa[3], 2 | SAINT_MIN);
+    }
+
+    #[test]
+    fn libsais64_renumber_distinct_lms_suffixes_32s_4k_matches_upstream_c_helper() {
+        let mut sa_rust = vec![1 | SAINT_MIN, 3 | SAINT_MIN, 0, 0];
+        let mut sa_c = sa_rust.clone();
+
+        let rust_name = renumber_distinct_lms_suffixes_32s_4k(&mut sa_rust, 2, 1, 0, 2);
+        let c_name = unsafe {
+            probe_libsais64_renumber_distinct_lms_suffixes_32s_4k(sa_c.as_mut_ptr(), 2, 1, 0, 2)
+        };
+
+        assert_eq!(rust_name, c_name);
+        assert_eq!(sa_rust, sa_c);
+    }
+
+    #[test]
+    fn libsais64_mark_distinct_lms_suffixes_32s_propagates_previous_nonzero_marker() {
+        let mut sa = vec![0, 0, SAINT_MIN | 5, 0, SAINT_MIN | 7];
+
+        mark_distinct_lms_suffixes_32s(&mut sa, 2, 0, 3);
+
+        assert_eq!(sa[2], 5);
+        assert_eq!(sa[3], 0);
+        assert_eq!(sa[4], SAINT_MIN | 7);
+    }
+
+    #[test]
+    fn libsais64_clamp_lms_suffixes_length_32s_keeps_only_negative_lengths() {
+        let mut sa = vec![0, 0, SAINT_MIN | 5, 7, SAINT_MIN | 3];
+
+        clamp_lms_suffixes_length_32s(&mut sa, 2, 0, 3);
+
+        assert_eq!(sa[2], 5);
+        assert_eq!(sa[3], 0);
+        assert_eq!(sa[4], 3);
+    }
+
+    #[test]
+    fn libsais64_renumber_and_mark_distinct_lms_suffixes_32s_4k_omp_marks_second_half_when_names_repeat(
+    ) {
+        let mut sa = vec![1 | SAINT_MIN, 3 | SAINT_MIN, 0, 0];
+        let mut thread_state = alloc_thread_state(2).unwrap();
+
+        let name =
+            renumber_and_mark_distinct_lms_suffixes_32s_4k_omp(&mut sa, 4, 2, 2, &mut thread_state);
+
+        assert_eq!(name, 2);
+        assert_eq!(sa[2], 1);
+        assert_eq!(sa[3], SAINT_MIN | 2);
+    }
+
+    #[test]
+    fn libsais64_renumber_and_mark_distinct_lms_suffixes_32s_4k_omp_matches_upstream_c_helper() {
+        let mut sa_rust = vec![1 | SAINT_MIN, 3 | SAINT_MIN, 0, 0];
+        let mut sa_c = sa_rust.clone();
+        let mut thread_state = alloc_thread_state(2).unwrap();
+
+        let rust_name = renumber_and_mark_distinct_lms_suffixes_32s_4k_omp(
+            &mut sa_rust,
+            4,
+            2,
+            2,
+            &mut thread_state,
+        );
+        let c_name = unsafe {
+            probe_libsais64_renumber_and_mark_distinct_lms_suffixes_32s_4k_omp(
+                sa_c.as_mut_ptr(),
+                4,
+                2,
+                2,
+            )
+        };
+
+        assert_eq!(rust_name, c_name);
+        assert_eq!(sa_rust, sa_c);
+    }
+
+    #[test]
+    fn libsais64_renumber_and_mark_distinct_lms_suffixes_32s_1k_omp_handles_single_lms_suffix() {
+        let t = vec![2, 1, 0];
+        let mut sa = vec![0; t.len()];
+
+        let name = renumber_and_mark_distinct_lms_suffixes_32s_1k_omp(&t, &mut sa, 3, 1, 1);
+
+        assert_eq!(name, 1);
+        assert_eq!(sa[1], SAINT_MIN | 1);
+    }
+
+    #[test]
+    fn libsais64_main_32s_entry_matches_public_c_long_on_6k_branch() {
+        assert_libsais64_main_32s_entry_matches_public_c_long_for_branch(300);
+    }
+
+    #[test]
+    fn libsais64_main_32s_entry_matches_public_c_long_on_4k_branch() {
+        assert_libsais64_main_32s_entry_matches_public_c_long_for_branch(400);
+    }
+
+    #[test]
+    fn libsais64_main_32s_entry_matches_public_c_long_on_2k_branch() {
+        assert_libsais64_main_32s_entry_matches_public_c_long_for_branch(700);
+    }
+
+    #[test]
+    fn libsais64_main_32s_entry_matches_public_c_long_on_1k_branch() {
+        assert_libsais64_main_32s_entry_matches_public_c_long_for_branch(1501);
+    }
+
+    #[test]
+    fn libsais64_main_32s_entry_matches_public_c_long_on_recursive_repetitive_6k_case() {
+        assert_libsais64_main_32s_entry_matches_public_c_long(
+            make_libsais64_recursive_main_32s_text(24),
+            300,
+            0,
+            true,
+        );
+    }
+
+    #[test]
+    fn libsais64_main_32s_entry_matches_public_c_long_on_recursive_repetitive_1k_case() {
+        assert_libsais64_main_32s_entry_matches_public_c_long(
+            make_libsais64_recursive_main_32s_text(24),
+            1501,
+            0,
+            true,
+        );
+    }
+
+    #[test]
+    fn libsais64_main_32s_entry_matches_public_c_long_on_large_generated_6k_case() {
+        assert_libsais64_main_32s_entry_matches_public_c_long(
+            make_libsais64_large_main_32s_stress_text(1024, 300),
+            300,
+            0,
+            true,
+        );
+    }
+
+    #[test]
+    fn libsais64_main_32s_entry_matches_public_c_long_on_large_generated_6k_case_with_fs() {
+        assert_libsais64_main_32s_entry_matches_public_c_long(
+            make_libsais64_large_main_32s_stress_text(1024, 300),
+            300,
+            2048,
+            false,
+        );
+    }
+
+    #[test]
+    fn libsais64_main_32s_entry_matches_public_c_long_on_large_generated_4k_case() {
+        assert_libsais64_main_32s_entry_matches_public_c_long(
+            make_libsais64_large_main_32s_stress_text(1024, 400),
+            400,
+            0,
+            true,
+        );
+    }
+
+    #[test]
+    fn libsais64_main_32s_entry_matches_public_c_long_on_large_generated_4k_case_with_fs() {
+        assert_libsais64_main_32s_entry_matches_public_c_long(
+            make_libsais64_large_main_32s_stress_text(1024, 400),
+            400,
+            2048,
+            false,
+        );
+    }
+
+    #[test]
+    fn libsais64_main_32s_entry_matches_public_c_long_on_large_generated_2k_case() {
+        assert_libsais64_main_32s_entry_matches_public_c_long(
+            make_libsais64_large_main_32s_stress_text(1024, 700),
+            700,
+            0,
+            true,
+        );
+    }
+
+    #[test]
+    fn libsais64_main_32s_entry_matches_public_c_long_on_large_generated_2k_case_with_fs() {
+        assert_libsais64_main_32s_entry_matches_public_c_long(
+            make_libsais64_large_main_32s_stress_text(1024, 700),
+            700,
+            2048,
+            false,
+        );
+    }
+
+    #[test]
+    fn libsais64_main_32s_entry_matches_public_c_long_on_large_generated_1k_case_with_fs() {
+        assert_libsais64_main_32s_entry_matches_public_c_long(
+            make_libsais64_large_main_32s_stress_text(1024, 1501),
+            1501,
+            2048,
+            false,
+        );
+    }
+
+    #[test]
+    fn libsais64_reconstruct_lms_suffixes_maps_indices_from_tail_interval() {
+        let mut sa = vec![0, 1, 2, 7, 11, 13];
+
+        reconstruct_lms_suffixes(&mut sa, 6, 3, 0, 3);
+
+        assert_eq!(&sa[..3], &[7, 11, 13]);
+    }
+
+    #[test]
+    fn libsais64_reconstruct_lms_suffixes_omp_wraps_sequential_version() {
+        let mut sa = vec![0, 1, 2, 7, 11, 13];
+
+        reconstruct_lms_suffixes_omp(&mut sa, 6, 3, 2);
+
+        assert_eq!(&sa[..3], &[7, 11, 13]);
+    }
+
+    #[test]
+    fn libsais64_lms_late_omp_wrappers_use_block_partitions_for_large_inputs() {
+        let m = 65_600usize;
+        let n = 2 * m;
+        let mut input = vec![0; n];
+        for (i, slot) in input[..m].iter_mut().enumerate() {
+            let suffix = (2 * i + 1) as SaSint;
+            *slot = if i % 5 == 0 {
+                suffix | SAINT_MIN
+            } else {
+                suffix
+            };
+        }
+
+        let mut single = input.clone();
+        let mut threaded = input.clone();
+        let mut thread_state = alloc_thread_state(4).unwrap();
+        let single_name = renumber_lms_suffixes_8u(&mut single, m as SaSint, 0, 0, m as FastSint);
+        let threaded_name =
+            renumber_lms_suffixes_8u_omp(&mut threaded, m as SaSint, 4, &mut thread_state);
+        assert_eq!(threaded_name, single_name);
+        assert_eq!(threaded, single);
+
+        let mut single = input.clone();
+        let mut threaded = input.clone();
+        let mut single_state = alloc_thread_state(1).unwrap();
+        let mut threaded_state = alloc_thread_state(4).unwrap();
+        let single_name = renumber_and_gather_lms_suffixes_omp(
+            &mut single,
+            n as SaSint,
+            m as SaSint,
+            0,
+            1,
+            &mut single_state,
+        );
+        let threaded_name = renumber_and_gather_lms_suffixes_omp(
+            &mut threaded,
+            n as SaSint,
+            m as SaSint,
+            0,
+            4,
+            &mut threaded_state,
+        );
+        assert_eq!(threaded_name, single_name);
+        assert_eq!(threaded, single);
+
+        let mut single = input.clone();
+        let mut threaded = input;
+        let marked_count = single[..m].iter().filter(|&&value| value < 0).count();
+        let _ = gather_marked_lms_suffixes(&mut single, 0, n as FastSint, 0, m as FastSint);
+        gather_marked_lms_suffixes_omp(&mut threaded, n as SaSint, 0, 0, 4, &mut thread_state);
+        assert_eq!(&threaded[n - marked_count..], &single[n - marked_count..]);
+    }
+
+    #[test]
+    fn libsais64_reconstruct_lms_suffixes_omp_uses_block_partition_for_large_inputs() {
+        let m = 65_600usize;
+        let n = 2 * m;
+        let mut input = vec![0; n];
+        for (i, slot) in input[..m].iter_mut().enumerate() {
+            *slot = (m - 1 - i) as SaSint;
+        }
+        for (i, slot) in input[m..].iter_mut().enumerate() {
+            *slot = (i * 17 + 3) as SaSint;
+        }
+
+        let mut single = input.clone();
+        let mut threaded = input;
+        reconstruct_lms_suffixes(&mut single, n as SaSint, m as SaSint, 0, m as FastSint);
+        reconstruct_lms_suffixes_omp(&mut threaded, n as SaSint, m as SaSint, 4);
+
+        assert_eq!(threaded, single);
+    }
+
+    #[test]
+    fn libsais64_renumber_unique_and_nonunique_lms_suffixes_32s_marks_new_unique_names() {
+        let mut t = vec![0, 0, 0, 0];
+        let mut sa = vec![0, 2, -1, 5];
+
+        let f = renumber_unique_and_nonunique_lms_suffixes_32s(&mut t, &mut sa, 2, 0, 0, 2);
+
+        assert_eq!(f, 1);
+        assert_eq!(t[0], SAINT_MIN);
+        assert_eq!(sa[2], SAINT_MIN);
+        assert_eq!(sa[3], 4);
+    }
+
+    #[test]
+    fn libsais64_renumber_unique_and_nonunique_lms_suffixes_32s_matches_upstream_c_helper() {
+        let mut t_rust = vec![0, 0, 0, 0];
+        let mut sa_rust = vec![0, 2, -1, 5];
+        let mut t_c = t_rust.clone();
+        let mut sa_c = sa_rust.clone();
+
+        let rust_f =
+            renumber_unique_and_nonunique_lms_suffixes_32s(&mut t_rust, &mut sa_rust, 2, 0, 0, 2);
+        let c_f = unsafe {
+            probe_libsais64_renumber_unique_and_nonunique_lms_suffixes_32s(
+                t_c.as_mut_ptr(),
+                sa_c.as_mut_ptr(),
+                2,
+                0,
+                0,
+                2,
+            )
+        };
+
+        assert_eq!(rust_f, c_f);
+        assert_eq!(t_rust, t_c);
+        assert_eq!(sa_rust, sa_c);
+    }
+
+    #[test]
+    fn libsais64_renumber_unique_and_nonunique_lms_suffixes_32s_omp_matches_upstream_c_helper() {
+        let mut t_rust = vec![0, 0, 0, 0];
+        let mut sa_rust = vec![0, 2, -1, 5];
+        let mut t_c = t_rust.clone();
+        let mut sa_c = sa_rust.clone();
+        let mut thread_state = alloc_thread_state(1).unwrap();
+
+        let rust_f = renumber_unique_and_nonunique_lms_suffixes_32s_omp(
+            &mut t_rust,
+            &mut sa_rust,
+            2,
+            1,
+            &mut thread_state,
+        );
+        let c_f = unsafe {
+            probe_libsais64_renumber_unique_and_nonunique_lms_suffixes_32s_omp(
+                t_c.as_mut_ptr(),
+                sa_c.as_mut_ptr(),
+                2,
+                1,
+            )
+        };
+
+        assert_eq!(rust_f, c_f);
+        assert_eq!(t_rust, t_c);
+        assert_eq!(sa_rust, sa_c);
+    }
+
+    #[test]
+    fn libsais64_renumber_unique_and_nonunique_lms_suffixes_32s_omp_uses_block_partition() {
+        let m = 65_600usize;
+        let n = 2 * m;
+        let t = vec![0; n];
+        let mut sa = vec![0; n];
+        for i in 0..m {
+            sa[i] = (2 * i) as SaSint;
+            sa[m + i] = if i % 5 == 0 {
+                -((i as SaSint) + 1)
+            } else {
+                i as SaSint + 7
+            };
+        }
+
+        let mut single_t = t.clone();
+        let mut single_sa = sa.clone();
+        let mut threaded_t = t;
+        let mut threaded_sa = sa;
+        let mut thread_state = alloc_thread_state(4).unwrap();
+        let single_f = renumber_unique_and_nonunique_lms_suffixes_32s(
+            &mut single_t,
+            &mut single_sa,
+            m as SaSint,
+            0,
+            0,
+            m as FastSint,
+        );
+        let threaded_f = renumber_unique_and_nonunique_lms_suffixes_32s_omp(
+            &mut threaded_t,
+            &mut threaded_sa,
+            m as SaSint,
+            4,
+            &mut thread_state,
+        );
+
+        assert_eq!(threaded_f, single_f);
+        assert_eq!(threaded_t, single_t);
+        assert_eq!(threaded_sa, single_sa);
+    }
+
+    #[test]
+    fn libsais64_compact_unique_and_nonunique_lms_suffixes_32s_splits_unique_and_nonunique_ranges()
+    {
+        let mut sa = vec![0, 0, 0, 0, SAINT_MIN, 4];
+        let mut l = 2;
+        let mut r = 6;
+
+        compact_unique_and_nonunique_lms_suffixes_32s(&mut sa, 2, &mut l, &mut r, 0, 2);
+
+        assert_eq!(l, 2);
+        assert_eq!(r, 6);
+        assert_eq!(sa[2], 0);
+        assert_eq!(sa[3] & SAINT_MAX, 0);
+    }
+
+    #[test]
+    fn libsais64_compact_lms_suffixes_32s_omp_runs_renumber_then_compaction() {
+        let mut t = vec![0, 0, 0, 0];
+        let mut sa = vec![0, 2, -1, 5, 77, 88];
+        let mut thread_state = alloc_thread_state(2).unwrap();
+
+        let f = compact_lms_suffixes_32s_omp(&mut t, &mut sa, 4, 2, 2, 2, &mut thread_state);
+
+        assert_eq!(f, 1);
+        assert_eq!(sa[2] & SAINT_MAX, 0);
+        assert_eq!(sa[5], 3);
+    }
+
+    #[test]
+    fn libsais64_compact_unique_and_nonunique_lms_suffixes_32s_omp_uses_block_partition() {
+        let n = 131_200usize;
+        let m = 65_600usize;
+        let fs = m + 32;
+        let half_n = n >> 1;
+        let f = m / 5;
+        let mut sa = vec![0; n + fs];
+        for i in 0..half_n {
+            sa[m + i] = if i % 5 == 0 {
+                SAINT_MIN | i as SaSint
+            } else {
+                i as SaSint + 1
+            };
+        }
+        for i in 0..f {
+            sa[m - f + i] = (10_000 + i) as SaSint;
+        }
+
+        let mut single = sa.clone();
+        let mut threaded = sa;
+        let mut single_state = alloc_thread_state(1).unwrap();
+        let mut threaded_state = alloc_thread_state(4).unwrap();
+        compact_unique_and_nonunique_lms_suffixes_32s_omp(
+            &mut single,
+            n as SaSint,
+            m as SaSint,
+            fs as SaSint,
+            f as SaSint,
+            1,
+            &mut single_state,
+        );
+        compact_unique_and_nonunique_lms_suffixes_32s_omp(
+            &mut threaded,
+            n as SaSint,
+            m as SaSint,
+            fs as SaSint,
+            f as SaSint,
+            4,
+            &mut threaded_state,
+        );
+
+        let unique_dst = n + fs - m;
+        assert_eq!(
+            &threaded[unique_dst..unique_dst + f],
+            &single[unique_dst..unique_dst + f]
+        );
+    }
+
+    #[test]
+    fn libsais64_compact_lms_suffixes_32s_omp_uses_large_input_paths() {
+        let n = 131_200usize;
+        let m = 65_600usize;
+        let fs = m + 32;
+        let t = vec![0; n];
+        let mut sa = vec![0; n + fs];
+        for i in 0..m {
+            sa[i] = (2 * i) as SaSint;
+            sa[m + i] = if i % 5 == 0 {
+                -((i as SaSint) + 1)
+            } else {
+                i as SaSint + 7
+            };
+        }
+
+        let mut single_t = t.clone();
+        let mut single_sa = sa.clone();
+        let mut threaded_t = t;
+        let mut threaded_sa = sa;
+        let mut single_state = alloc_thread_state(1).unwrap();
+        let mut threaded_state = alloc_thread_state(4).unwrap();
+        let single_f = compact_lms_suffixes_32s_omp(
+            &mut single_t,
+            &mut single_sa,
+            n as SaSint,
+            m as SaSint,
+            fs as SaSint,
+            1,
+            &mut single_state,
+        );
+        let threaded_f = compact_lms_suffixes_32s_omp(
+            &mut threaded_t,
+            &mut threaded_sa,
+            n as SaSint,
+            m as SaSint,
+            fs as SaSint,
+            4,
+            &mut threaded_state,
+        );
+
+        assert_eq!(threaded_f, single_f);
+        assert_eq!(threaded_t, single_t);
+        let unique_dst = n + fs - m;
+        let unique_len = usize::try_from(threaded_f).expect("f must be non-negative");
+        assert_eq!(
+            &threaded_sa[unique_dst..unique_dst + unique_len],
+            &single_sa[unique_dst..unique_dst + unique_len]
+        );
+    }
+
+    #[test]
+    fn libsais64_merge_unique_lms_suffixes_32s_noops_for_empty_block() {
+        let mut t = vec![1, SAINT_MIN, 2, SAINT_MIN];
+        let mut sa = vec![0, 0, 1, 3];
+        let before_t = t.clone();
+        let before_sa = sa.clone();
+
+        merge_unique_lms_suffixes_32s(&mut t, &mut sa, 4, 1, 0, 0, 0);
+
+        assert_eq!(t, before_t);
+        assert_eq!(sa, before_sa);
+    }
+
+    #[test]
+    fn libsais64_merge_unique_lms_suffixes_32s_omp_uses_block_partition_for_large_inputs() {
+        let n = 65_600usize;
+        let m = 1_024usize;
+        let mut t = vec![1; n];
+        for i in (0..n).step_by(257) {
+            t[i] = SAINT_MIN | ((i % 251) as SaSint);
+        }
+        let f = t.iter().filter(|&&value| value < 0).count();
+        let mut sa = vec![-1; n];
+        let src = n - m - 1;
+        for i in 0..f {
+            sa[src + i] = i as SaSint;
+        }
+
+        let mut single_t = t.clone();
+        let mut single_sa = sa.clone();
+        let mut threaded_t = t;
+        let mut threaded_sa = sa;
+        let mut thread_state = alloc_thread_state(4).unwrap();
+        merge_unique_lms_suffixes_32s_omp(
+            &mut single_t,
+            &mut single_sa,
+            n as SaSint,
+            m as SaSint,
+            1,
+            &mut [],
+        );
+        merge_unique_lms_suffixes_32s_omp(
+            &mut threaded_t,
+            &mut threaded_sa,
+            n as SaSint,
+            m as SaSint,
+            4,
+            &mut thread_state,
+        );
+
+        assert_eq!(threaded_t, single_t);
+        assert_eq!(threaded_sa, single_sa);
+    }
+
+    #[test]
+    fn libsais64_merge_nonunique_lms_suffixes_32s_noops_for_empty_block() {
+        let mut sa = vec![0, 7, 0, 13, 11];
+        let before = sa.clone();
+
+        merge_nonunique_lms_suffixes_32s(&mut sa, 4, 1, 0, 0, 0);
+
+        assert_eq!(sa, before);
+    }
+
+    #[test]
+    fn libsais64_merge_compacted_lms_suffixes_32s_omp_preserves_input_text_and_fills_zero_slots() {
+        let mut t = vec![1, 2, 3, 4];
+        let mut sa = vec![0, 1, 2, 3, 4, 5];
+        let before_t = t.clone();
+        let mut thread_state = alloc_thread_state(2).unwrap();
+
+        merge_compacted_lms_suffixes_32s_omp(&mut t, &mut sa, 4, 1, 1, 2, &mut thread_state);
+
+        assert_eq!(t, before_t);
+        assert_eq!(sa[0], 3);
+        assert_eq!(sa[1], 1);
+    }
+
+    #[test]
+    fn libsais64_merge_nonunique_lms_suffixes_32s_omp_uses_block_partition_for_large_inputs() {
+        let n = 131_200usize;
+        let m = 65_600usize;
+        let f = 7usize;
+        let mut sa = vec![1; n];
+        let zero_count = (0..m).filter(|i| i % 17 == 0).count();
+        for i in (0..m).step_by(17) {
+            sa[i] = 0;
+        }
+        let src = n - m - 1 + f;
+        for i in 0..zero_count {
+            sa[src + i] = 10_000 + i as SaSint;
+        }
+
+        let mut single = sa.clone();
+        let mut threaded = sa;
+        let mut thread_state = alloc_thread_state(4).unwrap();
+        merge_nonunique_lms_suffixes_32s_omp(
+            &mut single,
+            n as SaSint,
+            m as SaSint,
+            f as SaSint,
+            1,
+            &mut [],
+        );
+        merge_nonunique_lms_suffixes_32s_omp(
+            &mut threaded,
+            n as SaSint,
+            m as SaSint,
+            f as SaSint,
+            4,
+            &mut thread_state,
+        );
+
+        assert_eq!(threaded, single);
+    }
+
+    #[test]
+    fn libsais64_merge_compacted_lms_suffixes_32s_omp_uses_block_partition_for_large_inputs() {
+        let n = 131_200usize;
+        let m = 65_600usize;
+        let mut t = vec![1; n];
+        for i in (0..n).step_by(257) {
+            t[i] = SAINT_MIN | ((i % 251) as SaSint);
+        }
+        let f = t.iter().filter(|&&value| value < 0).count();
+
+        let mut sa = vec![1; n];
+        let zero_count = (0..m).filter(|i| i % 17 == 0).count();
+        for i in (0..m).step_by(17) {
+            sa[i] = 0;
+        }
+        let unique_src = n - m - 1;
+        for i in 0..f {
+            sa[unique_src + i] = i as SaSint;
+        }
+        for i in 0..zero_count {
+            sa[unique_src + f + i] = 10_000 + i as SaSint;
+        }
+
+        let mut single_t = t.clone();
+        let mut single_sa = sa.clone();
+        let mut threaded_t = t;
+        let mut threaded_sa = sa;
+        let mut single_state = alloc_thread_state(1).unwrap();
+        let mut threaded_state = alloc_thread_state(4).unwrap();
+        merge_compacted_lms_suffixes_32s_omp(
+            &mut single_t,
+            &mut single_sa,
+            n as SaSint,
+            m as SaSint,
+            f as SaSint,
+            1,
+            &mut single_state,
+        );
+        merge_compacted_lms_suffixes_32s_omp(
+            &mut threaded_t,
+            &mut threaded_sa,
+            n as SaSint,
+            m as SaSint,
+            f as SaSint,
+            4,
+            &mut threaded_state,
+        );
+
+        assert_eq!(threaded_t, single_t);
+        assert_eq!(threaded_sa, single_sa);
+    }
+
+    #[test]
+    fn libsais64_final_bwt_left_to_right_8u_block_omp_uses_thread_buckets() {
+        let block_start = 20_000usize;
+        let block_size = 16_384usize;
+        let n = block_start + block_size + 8;
+        let t = vec![1_u8; n];
+        let suffixes: Vec<SaSint> = (2..2 + block_size).map(|i| i as SaSint).collect();
+
+        let mut expected_sa = vec![0; n];
+        expected_sa[block_start..block_start + block_size].copy_from_slice(&suffixes);
+        let mut threaded_sa = expected_sa.clone();
+        let mut expected_bucket = vec![0; ALPHABET_SIZE];
+        let mut threaded_bucket = expected_bucket.clone();
+        let mut thread_state = alloc_thread_state(4).unwrap();
+
+        final_bwt_scan_left_to_right_8u(
+            &t,
+            &mut expected_sa,
+            &mut expected_bucket,
+            block_start as FastSint,
+            block_size as FastSint,
+        );
+        final_bwt_scan_left_to_right_8u_block_omp(
+            &t,
+            &mut threaded_sa,
+            ALPHABET_SIZE as SaSint,
+            &mut threaded_bucket,
+            block_start as FastSint,
+            block_size as FastSint,
+            4,
+            &mut thread_state,
+        );
+
+        assert_eq!(threaded_sa, expected_sa);
+        assert_eq!(threaded_bucket, expected_bucket);
+    }
+
+    #[test]
+    fn libsais64_final_bwt_aux_left_to_right_8u_block_omp_uses_thread_buckets() {
+        let block_start = 20_000usize;
+        let block_size = 16_384usize;
+        let n = block_start + block_size + 8;
+        let t = vec![1_u8; n];
+        let suffixes: Vec<SaSint> = (2..2 + block_size).map(|i| i as SaSint).collect();
+
+        let mut expected_sa = vec![0; n];
+        expected_sa[block_start..block_start + block_size].copy_from_slice(&suffixes);
+        let mut threaded_sa = expected_sa.clone();
+        let mut expected_i = vec![0; n];
+        let mut threaded_i = vec![0; n];
+        let mut expected_bucket = vec![0; ALPHABET_SIZE];
+        let mut threaded_bucket = expected_bucket.clone();
+        let mut thread_state = alloc_thread_state(4).unwrap();
+
+        final_bwt_aux_scan_left_to_right_8u(
+            &t,
+            &mut expected_sa,
+            0,
+            &mut expected_i,
+            &mut expected_bucket,
+            block_start as FastSint,
+            block_size as FastSint,
+        );
+        final_bwt_aux_scan_left_to_right_8u_block_omp(
+            &t,
+            &mut threaded_sa,
+            ALPHABET_SIZE as SaSint,
+            0,
+            &mut threaded_i,
+            &mut threaded_bucket,
+            block_start as FastSint,
+            block_size as FastSint,
+            4,
+            &mut thread_state,
+        );
+
+        assert_eq!(threaded_sa, expected_sa);
+        assert_eq!(threaded_i, expected_i);
+        assert_eq!(threaded_bucket, expected_bucket);
+    }
+
+    #[test]
+    fn libsais64_final_sorting_right_to_left_8u_block_omp_uses_thread_buckets() {
+        let block_start = 20_000usize;
+        let block_size = 16_384usize;
+        let n = block_start + block_size + 8;
+        let t = vec![1_u8; n];
+        let suffixes: Vec<SaSint> = (2..2 + block_size).map(|i| i as SaSint).collect();
+
+        let mut expected_sa = vec![0; n];
+        expected_sa[block_start..block_start + block_size].copy_from_slice(&suffixes);
+        let mut threaded_sa = expected_sa.clone();
+        let mut expected_bucket = vec![0; ALPHABET_SIZE];
+        expected_bucket[1] = n as SaSint;
+        let mut threaded_bucket = expected_bucket.clone();
+        let mut thread_state = alloc_thread_state(4).unwrap();
+
+        final_sorting_scan_right_to_left_8u(
+            &t,
+            &mut expected_sa,
+            &mut expected_bucket,
+            block_start as FastSint,
+            block_size as FastSint,
+        );
+        final_sorting_scan_right_to_left_8u_block_omp(
+            &t,
+            &mut threaded_sa,
+            ALPHABET_SIZE as SaSint,
+            &mut threaded_bucket,
+            block_start as FastSint,
+            block_size as FastSint,
+            4,
+            &mut thread_state,
+        );
+
+        assert_eq!(threaded_sa, expected_sa);
+        assert_eq!(threaded_bucket, expected_bucket);
+    }
+
+    #[test]
+    fn libsais64_final_bwt_right_to_left_8u_block_omp_uses_thread_buckets() {
+        let block_start = 20_000usize;
+        let block_size = 16_384usize;
+        let n = block_start + block_size + 8;
+        let t = vec![1_u8; n];
+        let suffixes: Vec<SaSint> = (2..2 + block_size).map(|i| i as SaSint).collect();
+
+        let mut expected_sa = vec![0; n];
+        expected_sa[block_start..block_start + block_size].copy_from_slice(&suffixes);
+        let mut threaded_sa = expected_sa.clone();
+        let mut expected_bucket = vec![0; ALPHABET_SIZE];
+        expected_bucket[1] = n as SaSint;
+        let mut threaded_bucket = expected_bucket.clone();
+        let mut thread_state = alloc_thread_state(4).unwrap();
+
+        final_bwt_scan_right_to_left_8u(
+            &t,
+            &mut expected_sa,
+            &mut expected_bucket,
+            block_start as FastSint,
+            block_size as FastSint,
+        );
+        final_bwt_scan_right_to_left_8u_block_omp(
+            &t,
+            &mut threaded_sa,
+            ALPHABET_SIZE as SaSint,
+            &mut threaded_bucket,
+            block_start as FastSint,
+            block_size as FastSint,
+            4,
+            &mut thread_state,
+        );
+
+        assert_eq!(threaded_sa, expected_sa);
+        assert_eq!(threaded_bucket, expected_bucket);
+    }
+
+    #[test]
+    fn libsais64_final_bwt_aux_right_to_left_8u_block_omp_uses_thread_buckets() {
+        let block_start = 20_000usize;
+        let block_size = 16_384usize;
+        let n = block_start + block_size + 8;
+        let t = vec![1_u8; n];
+        let suffixes: Vec<SaSint> = (2..2 + block_size).map(|i| i as SaSint).collect();
+
+        let mut expected_sa = vec![0; n];
+        expected_sa[block_start..block_start + block_size].copy_from_slice(&suffixes);
+        let mut threaded_sa = expected_sa.clone();
+        let mut expected_i = vec![0; n];
+        let mut threaded_i = vec![0; n];
+        let mut expected_bucket = vec![0; ALPHABET_SIZE];
+        expected_bucket[1] = n as SaSint;
+        let mut threaded_bucket = expected_bucket.clone();
+        let mut thread_state = alloc_thread_state(4).unwrap();
+
+        final_bwt_aux_scan_right_to_left_8u(
+            &t,
+            &mut expected_sa,
+            0,
+            &mut expected_i,
+            &mut expected_bucket,
+            block_start as FastSint,
+            block_size as FastSint,
+        );
+        final_bwt_aux_scan_right_to_left_8u_block_omp(
+            &t,
+            &mut threaded_sa,
+            ALPHABET_SIZE as SaSint,
+            0,
+            &mut threaded_i,
+            &mut threaded_bucket,
+            block_start as FastSint,
+            block_size as FastSint,
+            4,
+            &mut thread_state,
+        );
+
+        assert_eq!(threaded_sa, expected_sa);
+        assert_eq!(threaded_i, expected_i);
+        assert_eq!(threaded_bucket, expected_bucket);
+    }
+
+    #[test]
+    fn libsais64_final_gsa_right_to_left_8u_block_omp_uses_thread_buckets() {
+        let block_start = 20_000usize;
+        let block_size = 16_384usize;
+        let n = block_start + block_size + 8;
+        let t = vec![1_u8; n];
+        let suffixes: Vec<SaSint> = (2..2 + block_size).map(|i| i as SaSint).collect();
+
+        let mut expected_sa = vec![0; n];
+        expected_sa[block_start..block_start + block_size].copy_from_slice(&suffixes);
+        let mut threaded_sa = expected_sa.clone();
+        let mut expected_bucket = vec![0; ALPHABET_SIZE];
+        expected_bucket[1] = n as SaSint;
+        let mut threaded_bucket = expected_bucket.clone();
+        let mut thread_state = alloc_thread_state(4).unwrap();
+
+        final_gsa_scan_right_to_left_8u(
+            &t,
+            &mut expected_sa,
+            &mut expected_bucket,
+            block_start as FastSint,
+            block_size as FastSint,
+        );
+        final_gsa_scan_right_to_left_8u_block_omp(
+            &t,
+            &mut threaded_sa,
+            ALPHABET_SIZE as SaSint,
+            &mut threaded_bucket,
+            block_start as FastSint,
+            block_size as FastSint,
+            4,
+            &mut thread_state,
+        );
+
+        assert_eq!(threaded_sa, expected_sa);
+        assert_eq!(threaded_bucket, expected_bucket);
+    }
+
+    #[test]
+    fn libsais64_count_and_gather_lms_suffixes_8u_omp_uses_block_partition_for_large_inputs() {
+        let n = 65_600usize;
+        let text: Vec<u8> = (0..n)
+            .map(|i| 1 + ((i * 37 + i / 17) % 251) as u8)
+            .collect();
+
+        let mut sa_threaded = vec![-99; n];
+        let mut sa_scalar = vec![-99; n];
+        let mut buckets_threaded = vec![0; 4 * ALPHABET_SIZE];
+        let mut buckets_scalar = vec![0; 4 * ALPHABET_SIZE];
+        let mut thread_state = alloc_thread_state(4).unwrap();
+
+        let m_threaded = count_and_gather_lms_suffixes_8u_omp(
+            &text,
+            &mut sa_threaded,
+            n as SaSint,
+            &mut buckets_threaded,
+            4,
+            &mut thread_state,
+        );
+        let m_scalar = count_and_gather_lms_suffixes_8u(
+            &text,
+            &mut sa_scalar,
+            n as SaSint,
+            &mut buckets_scalar,
+            0,
+            n as FastSint,
+        );
+
+        assert_eq!(m_threaded, m_scalar);
+        assert_eq!(
+            &sa_threaded[n - m_threaded as usize..],
+            &sa_scalar[n - m_scalar as usize..]
+        );
+        assert_eq!(buckets_threaded, buckets_scalar);
+    }
+
+    #[test]
+    fn libsais64_gather_lms_suffixes_8u_omp_uses_thread_state_for_large_inputs() {
+        let n = 65_600usize;
+        let text: Vec<u8> = (0..n)
+            .map(|i| 1 + ((i * 37 + i / 17) % 251) as u8)
+            .collect();
+        let mut thread_state = alloc_thread_state(4).unwrap();
+        let mut count_sa = vec![-99; n];
+        let mut buckets = vec![0; 4 * ALPHABET_SIZE];
+        let m = count_and_gather_lms_suffixes_8u_omp(
+            &text,
+            &mut count_sa,
+            n as SaSint,
+            &mut buckets,
+            4,
+            &mut thread_state,
+        );
+
+        let mut threaded = vec![-99; n];
+        let mut scalar = vec![-99; n];
+        gather_lms_suffixes_8u_omp(&text, &mut threaded, n as SaSint, 4, &mut thread_state);
+        gather_lms_suffixes_8u(
+            &text,
+            &mut scalar,
+            n as SaSint,
+            n as FastSint - 1,
+            0,
+            n as FastSint,
+        );
+
+        assert_eq!(&threaded[n - m as usize..], &scalar[n - m as usize..]);
+    }
+
+    #[test]
+    fn libsais64_count_and_gather_lms_suffixes_32s_4k_updates_counts_and_suffixes() {
+        let t = vec![2, 1, 3, 1, 0];
+        let mut sa = vec![0; t.len()];
+        let mut buckets = vec![0; 4 * 4];
+        let m = count_and_gather_lms_suffixes_32s_4k(
+            &t,
+            &mut sa,
+            t.len() as SaSint,
+            4,
+            &mut buckets,
+            0,
+            t.len() as FastSint,
+        );
+        assert!(m >= 0);
+        assert_eq!(buckets.iter().sum::<SaSint>(), t.len() as SaSint);
+    }
+
+    #[test]
+    fn libsais64_count_and_gather_lms_suffixes_32s_2k_updates_counts_and_suffixes() {
+        let t = vec![2, 1, 3, 1, 0];
+        let mut sa = vec![0; t.len()];
+        let mut buckets = vec![0; 2 * 4];
+        let m = count_and_gather_lms_suffixes_32s_2k(
+            &t,
+            &mut sa,
+            t.len() as SaSint,
+            4,
+            &mut buckets,
+            0,
+            t.len() as FastSint,
+        );
+        assert!(m >= 0);
+        assert_eq!(buckets.iter().sum::<SaSint>(), t.len() as SaSint);
+    }
+
+    #[test]
+    fn libsais64_count_and_gather_compacted_lms_suffixes_32s_2k_updates_counts_and_suffixes() {
+        let t = vec![2, SAINT_MIN | 1, 3, 1, 0];
+        let mut sa = vec![0; t.len()];
+        let mut buckets = vec![0; 2 * 4];
+        let m = count_and_gather_compacted_lms_suffixes_32s_2k(
+            &t,
+            &mut sa,
+            t.len() as SaSint,
+            4,
+            &mut buckets,
+            0,
+            t.len() as FastSint,
+        );
+        assert!(m >= 0);
+        assert_eq!(buckets.iter().sum::<SaSint>(), t.len() as SaSint);
+    }
+
+    #[test]
+    fn libsais64_count_and_gather_lms_suffixes_32s_4k_nofs_omp_wraps_sequential_version() {
+        let t = vec![2, 1, 3, 1, 0];
+        let mut sa = vec![0; t.len()];
+        let mut buckets = vec![0; 4 * 4];
+        let m = count_and_gather_lms_suffixes_32s_4k_nofs_omp(
+            &t,
+            &mut sa,
+            t.len() as SaSint,
+            4,
+            &mut buckets,
+            2,
+        );
+        assert!(m >= 0);
+        assert_eq!(buckets.iter().sum::<SaSint>(), t.len() as SaSint);
+    }
+
+    #[test]
+    fn libsais64_count_and_gather_lms_suffixes_32s_2k_nofs_omp_wraps_sequential_version() {
+        let t = vec![2, 1, 3, 1, 0];
+        let mut sa = vec![0; t.len()];
+        let mut buckets = vec![0; 2 * 4];
+        let m = count_and_gather_lms_suffixes_32s_2k_nofs_omp(
+            &t,
+            &mut sa,
+            t.len() as SaSint,
+            4,
+            &mut buckets,
+            2,
+        );
+        assert!(m >= 0);
+        assert_eq!(buckets.iter().sum::<SaSint>(), t.len() as SaSint);
+    }
+
+    #[test]
+    fn libsais64_count_and_gather_compacted_lms_suffixes_32s_2k_nofs_omp_wraps_sequential_version()
+    {
+        let t = vec![2, SAINT_MIN | 1, 3, 1, 0];
+        let mut sa = vec![0; t.len()];
+        let mut buckets = vec![0; 2 * 4];
+        let m = count_and_gather_compacted_lms_suffixes_32s_2k_nofs_omp(
+            &t,
+            &mut sa,
+            t.len() as SaSint,
+            4,
+            &mut buckets,
+            2,
+        );
+        assert!(m >= 0);
+        assert_eq!(buckets.iter().sum::<SaSint>(), t.len() as SaSint);
+    }
+
+    #[test]
+    fn libsais64_count_and_gather_lms_suffixes_32s_nofs_omp_uses_large_input_paths() {
+        let n = 65_600usize;
+        let k = 257usize;
+        let text: Vec<SaSint> = (0..n)
+            .map(|i| 1 + ((i * 37 + i / 17) % (k - 1)) as SaSint)
+            .collect();
+
+        let mut sa_threaded = vec![-99; n];
+        let mut sa_scalar = vec![-99; n];
+        let mut buckets_threaded = vec![0; 4 * k];
+        let mut buckets_scalar = vec![0; 4 * k];
+        let m_threaded = count_and_gather_lms_suffixes_32s_4k_nofs_omp(
+            &text,
+            &mut sa_threaded,
+            n as SaSint,
+            k as SaSint,
+            &mut buckets_threaded,
+            4,
+        );
+        let m_scalar = count_and_gather_lms_suffixes_32s_4k(
+            &text,
+            &mut sa_scalar,
+            n as SaSint,
+            k as SaSint,
+            &mut buckets_scalar,
+            0,
+            n as FastSint,
+        );
+        assert_eq!(m_threaded, m_scalar);
+        assert_eq!(
+            &sa_threaded[n - m_threaded as usize..],
+            &sa_scalar[n - m_scalar as usize..]
+        );
+        assert_eq!(buckets_threaded, buckets_scalar);
+
+        let mut sa_threaded = vec![-99; n];
+        let mut sa_scalar = vec![-99; n];
+        let mut buckets_threaded = vec![0; 2 * k];
+        let mut buckets_scalar = vec![0; 2 * k];
+        let m_threaded = count_and_gather_lms_suffixes_32s_2k_nofs_omp(
+            &text,
+            &mut sa_threaded,
+            n as SaSint,
+            k as SaSint,
+            &mut buckets_threaded,
+            4,
+        );
+        let m_scalar = count_and_gather_lms_suffixes_32s_2k(
+            &text,
+            &mut sa_scalar,
+            n as SaSint,
+            k as SaSint,
+            &mut buckets_scalar,
+            0,
+            n as FastSint,
+        );
+        assert_eq!(m_threaded, m_scalar);
+        assert_eq!(
+            &sa_threaded[n - m_threaded as usize..],
+            &sa_scalar[n - m_scalar as usize..]
+        );
+        assert_eq!(buckets_threaded, buckets_scalar);
+    }
+
+    #[test]
+    fn libsais64_count_and_gather_lms_suffixes_32s_fs_omp_uses_large_input_paths() {
+        let n = 65_600usize;
+        let k = 257usize;
+        let text: Vec<SaSint> = (0..n)
+            .map(|i| 1 + ((i * 37 + i / 17) % (k - 1)) as SaSint)
+            .collect();
+        let mut thread_state = alloc_thread_state(4).unwrap();
+
+        let mut sa_threaded = vec![-99; n];
+        let mut sa_scalar = vec![-99; n];
+        let mut buckets_threaded = vec![0; 4 * k];
+        let mut buckets_scalar = vec![0; 4 * k];
+        let m_threaded = count_and_gather_lms_suffixes_32s_4k_fs_omp(
+            &text,
+            &mut sa_threaded,
+            n as SaSint,
+            k as SaSint,
+            &mut buckets_threaded,
+            0,
+            4,
+            &mut thread_state,
+        );
+        let m_scalar = count_and_gather_lms_suffixes_32s_4k(
+            &text,
+            &mut sa_scalar,
+            n as SaSint,
+            k as SaSint,
+            &mut buckets_scalar,
+            0,
+            n as FastSint,
+        );
+        assert_eq!(m_threaded, m_scalar);
+        assert_eq!(
+            &sa_threaded[n - m_threaded as usize..],
+            &sa_scalar[n - m_scalar as usize..]
+        );
+        assert_eq!(buckets_threaded, buckets_scalar);
+
+        let mut sa_threaded = vec![-99; n];
+        let mut sa_scalar = vec![-99; n];
+        let mut buckets_threaded = vec![0; 2 * k];
+        let mut buckets_scalar = vec![0; 2 * k];
+        let m_threaded = count_and_gather_lms_suffixes_32s_2k_fs_omp(
+            &text,
+            &mut sa_threaded,
+            n as SaSint,
+            k as SaSint,
+            &mut buckets_threaded,
+            0,
+            4,
+            &mut thread_state,
+        );
+        let m_scalar = count_and_gather_lms_suffixes_32s_2k(
+            &text,
+            &mut sa_scalar,
+            n as SaSint,
+            k as SaSint,
+            &mut buckets_scalar,
+            0,
+            n as FastSint,
+        );
+        assert_eq!(m_threaded, m_scalar);
+        assert_eq!(
+            &sa_threaded[n - m_threaded as usize..],
+            &sa_scalar[n - m_scalar as usize..]
+        );
+        assert_eq!(buckets_threaded, buckets_scalar);
+    }
+
+    #[test]
+    fn libsais64_count_and_gather_compacted_lms_suffixes_32s_nofs_omp_uses_large_input_path() {
+        let n = 65_600usize;
+        let k = 257usize;
+        let text: Vec<SaSint> = (0..n)
+            .map(|i| {
+                let value = 1 + ((i * 37 + i / 17) % (k - 1)) as SaSint;
+                if i % 19 == 0 {
+                    value | SAINT_MIN
+                } else {
+                    value
+                }
+            })
+            .collect();
+
+        let mut sa_threaded = vec![-99; n];
+        let mut sa_split = vec![-99; n];
+        let mut buckets_threaded = vec![0; 2 * k];
+        let mut buckets_split = vec![0; 2 * k];
+        let m_threaded = count_and_gather_compacted_lms_suffixes_32s_2k_nofs_omp(
+            &text,
+            &mut sa_threaded,
+            n as SaSint,
+            k as SaSint,
+            &mut buckets_threaded,
+            4,
+        );
+        count_compacted_lms_suffixes_32s_2k(&text, n as SaSint, k as SaSint, &mut buckets_split);
+        let m_split = gather_compacted_lms_suffixes_32s(&text, &mut sa_split, n as SaSint);
+
+        assert_eq!(m_threaded, m_split);
+        assert_eq!(
+            &sa_threaded[n - m_threaded as usize..],
+            &sa_split[n - m_split as usize..]
+        );
+        assert_eq!(buckets_threaded, buckets_split);
+    }
+
+    #[test]
+    fn libsais64_count_and_gather_compacted_lms_suffixes_32s_fs_omp_uses_large_input_path() {
+        let n = 65_600usize;
+        let k = 257usize;
+        let text: Vec<SaSint> = (0..n)
+            .map(|i| {
+                let value = 1 + ((i * 37 + i / 17) % (k - 1)) as SaSint;
+                if i % 19 == 0 {
+                    value | SAINT_MIN
+                } else {
+                    value
+                }
+            })
+            .collect();
+
+        let mut sa_threaded = vec![-99; 2 * n];
+        let mut sa_scalar = vec![-99; n];
+        let mut buckets_threaded = vec![0; 2 * k];
+        let mut buckets_scalar = vec![0; 2 * k];
+        let mut thread_state = alloc_thread_state(4).unwrap();
+        count_and_gather_compacted_lms_suffixes_32s_2k_fs_omp(
+            &text,
+            &mut sa_threaded,
+            n as SaSint,
+            k as SaSint,
+            &mut buckets_threaded,
+            0,
+            4,
+            &mut thread_state,
+        );
+        let m_scalar = count_and_gather_compacted_lms_suffixes_32s_2k(
+            &text,
+            &mut sa_scalar,
+            n as SaSint,
+            k as SaSint,
+            &mut buckets_scalar,
+            0,
+            n as FastSint,
+        );
+
+        assert_eq!(
+            &sa_threaded[n - m_scalar as usize..n],
+            &sa_scalar[n - m_scalar as usize..]
+        );
+        assert_eq!(buckets_threaded, buckets_scalar);
+    }
+
+    #[test]
+    fn libsais64_plcp_lcp_omp_wrappers_match_single_thread_on_large_inputs() {
+        let n = 65_600usize;
+        let text: Vec<u8> = (0..n).map(|i| (1 + (i % 251)) as u8).collect();
+        let sa: Vec<SaSint> = (0..n as SaSint).collect();
+
+        let mut plcp_single = vec![0; n];
+        let mut plcp_threaded = vec![0; n];
+        compute_phi_omp(&sa, &mut plcp_single, n as SaSint, 1);
+        compute_phi_omp(&sa, &mut plcp_threaded, n as SaSint, 4);
+        assert_eq!(plcp_threaded, plcp_single);
+
+        compute_plcp_omp(&text, &mut plcp_single, n as SaSint, 1);
+        compute_plcp_omp(&text, &mut plcp_threaded, n as SaSint, 4);
+        assert_eq!(plcp_threaded, plcp_single);
+
+        let mut lcp_single = vec![0; n];
+        let mut lcp_threaded = vec![0; n];
+        compute_lcp_omp(&plcp_single, &sa, &mut lcp_single, n as SaSint, 1);
+        compute_lcp_omp(&plcp_threaded, &sa, &mut lcp_threaded, n as SaSint, 4);
+        assert_eq!(lcp_threaded, lcp_single);
+    }
+
+    fn assert_libsais64_matches_c(text: &[u8]) {
+        let mut rust_sa = vec![0; text.len()];
+        let mut c_sa = vec![0; text.len()];
+
+        let rust_rc = libsais64(text, &mut rust_sa, 0, None);
+        let c_rc = unsafe {
+            probe_public_libsais64(text.as_ptr(), c_sa.as_mut_ptr(), text.len() as SaSint, 0)
+        };
+
+        assert_eq!(rust_rc, c_rc);
+        assert_eq!(rust_sa, c_sa);
+    }
+
+    fn assert_libsais64_gsa_matches_c(text: &[u8]) {
+        let mut rust_sa = vec![0; text.len()];
+        let mut c_sa = vec![0; text.len()];
+
+        let rust_rc = libsais64_gsa(text, &mut rust_sa, 0, None);
+        let c_rc = unsafe {
+            probe_public_libsais64_gsa(text.as_ptr(), c_sa.as_mut_ptr(), text.len() as SaSint, 0)
+        };
+
+        assert_eq!(rust_rc, c_rc);
+        assert_eq!(rust_sa, c_sa);
+    }
+
+    fn assert_libsais64_long_matches_c(text: &[SaSint], k: SaSint) {
+        let mut rust_t = text.to_vec();
+        let mut c_t = text.to_vec();
+        let mut rust_sa = vec![0; text.len()];
+        let mut c_sa = vec![0; text.len()];
+
+        let rust_rc = libsais64_long(&mut rust_t, &mut rust_sa, k, 0);
+        let c_rc = unsafe {
+            probe_public_libsais64_long(
+                c_t.as_mut_ptr(),
+                c_sa.as_mut_ptr(),
+                c_t.len() as SaSint,
+                k,
+                0,
+            )
+        };
+
+        assert_eq!(rust_rc, c_rc);
+        assert_eq!(rust_t, c_t);
+        assert_eq!(rust_sa, c_sa);
+    }
+
+    fn assert_libsais64_bwt_matches_c(text: &[u8]) {
+        let mut rust_u = vec![0; text.len()];
+        let mut rust_a = vec![0; text.len()];
+        let mut c_u = vec![0; text.len()];
+        let mut c_a = vec![0; text.len()];
+
+        let rust_rc = libsais64_bwt(text, &mut rust_u, &mut rust_a, 0, None);
+        let c_rc = unsafe {
+            probe_public_libsais64_bwt(
+                text.as_ptr(),
+                c_u.as_mut_ptr(),
+                c_a.as_mut_ptr(),
+                text.len() as SaSint,
+                0,
+            )
+        };
+
+        assert_eq!(rust_rc, c_rc);
+        assert_eq!(rust_u, c_u);
+    }
+
+    fn assert_libsais64_bwt_aux_matches_c(text: &[u8], r: SaSint) {
+        let aux_len = if text.is_empty() {
+            0
+        } else {
+            (text.len() - 1) / r as usize + 1
+        };
+        let mut rust_u = vec![0; text.len()];
+        let mut rust_a = vec![0; text.len()];
+        let mut rust_i = vec![0; aux_len];
+        let mut c_u = vec![0; text.len()];
+        let mut c_a = vec![0; text.len()];
+        let mut c_i = vec![0; aux_len];
+
+        let rust_rc = libsais64_bwt_aux(text, &mut rust_u, &mut rust_a, 0, None, r, &mut rust_i);
+        let c_rc = unsafe {
+            probe_public_libsais64_bwt_aux(
+                text.as_ptr(),
+                c_u.as_mut_ptr(),
+                c_a.as_mut_ptr(),
+                text.len() as SaSint,
+                0,
+                r,
+                c_i.as_mut_ptr(),
+            )
+        };
+
+        assert_eq!(rust_rc, c_rc);
+        assert_eq!(rust_u, c_u);
+        assert_eq!(rust_i, c_i);
+    }
+
+    fn assert_libsais64_freq_outputs_match_c(text: &[u8], gsa_text: &[u8]) {
+        let mut rust_sa = vec![0; text.len()];
+        let mut c_sa = vec![0; text.len()];
+        let mut rust_freq = vec![-1; ALPHABET_SIZE];
+        let mut c_freq = vec![-1; ALPHABET_SIZE];
+
+        let rust_rc = libsais64(text, &mut rust_sa, 0, Some(&mut rust_freq));
+        let c_rc = unsafe {
+            probe_public_libsais64_freq(
+                text.as_ptr(),
+                c_sa.as_mut_ptr(),
+                text.len() as SaSint,
+                0,
+                c_freq.as_mut_ptr(),
+            )
+        };
+        assert_eq!(rust_rc, c_rc);
+        assert_eq!(rust_sa, c_sa);
+        assert_eq!(rust_freq, c_freq);
+
+        let mut rust_gsa = vec![0; gsa_text.len()];
+        let mut c_gsa = vec![0; gsa_text.len()];
+        rust_freq.fill(-1);
+        c_freq.fill(-1);
+        let rust_rc = libsais64_gsa(gsa_text, &mut rust_gsa, 0, Some(&mut rust_freq));
+        let c_rc = unsafe {
+            probe_public_libsais64_gsa_freq(
+                gsa_text.as_ptr(),
+                c_gsa.as_mut_ptr(),
+                gsa_text.len() as SaSint,
+                0,
+                c_freq.as_mut_ptr(),
+            )
+        };
+        assert_eq!(rust_rc, c_rc);
+        assert_eq!(rust_gsa, c_gsa);
+        assert_eq!(rust_freq, c_freq);
+
+        let mut rust_u = vec![0; text.len()];
+        let mut rust_a = vec![0; text.len()];
+        let mut c_u = vec![0; text.len()];
+        let mut c_a = vec![0; text.len()];
+        rust_freq.fill(-1);
+        c_freq.fill(-1);
+        let rust_rc = libsais64_bwt(text, &mut rust_u, &mut rust_a, 0, Some(&mut rust_freq));
+        let c_rc = unsafe {
+            probe_public_libsais64_bwt_freq(
+                text.as_ptr(),
+                c_u.as_mut_ptr(),
+                c_a.as_mut_ptr(),
+                text.len() as SaSint,
+                0,
+                c_freq.as_mut_ptr(),
+            )
+        };
+        assert_eq!(rust_rc, c_rc);
+        assert_eq!(rust_u, c_u);
+        assert_eq!(rust_freq, c_freq);
+
+        let r = 4;
+        let aux_len = (text.len() - 1) / r as usize + 1;
+        let mut rust_i = vec![0; aux_len];
+        let mut c_i = vec![0; aux_len];
+        rust_freq.fill(-1);
+        c_freq.fill(-1);
+        let rust_rc = libsais64_bwt_aux(
+            text,
+            &mut rust_u,
+            &mut rust_a,
+            0,
+            Some(&mut rust_freq),
+            r,
+            &mut rust_i,
+        );
+        let c_rc = unsafe {
+            probe_public_libsais64_bwt_aux_freq(
+                text.as_ptr(),
+                c_u.as_mut_ptr(),
+                c_a.as_mut_ptr(),
+                text.len() as SaSint,
+                0,
+                c_freq.as_mut_ptr(),
+                r,
+                c_i.as_mut_ptr(),
+            )
+        };
+        assert_eq!(rust_rc, c_rc);
+        assert_eq!(rust_u, c_u);
+        assert_eq!(rust_i, c_i);
+        assert_eq!(rust_freq, c_freq);
+    }
+
+    fn assert_libsais64_unbwt_matches_c(text: &[u8]) {
+        let mut bwt = vec![0; text.len()];
+        let mut work = vec![0; text.len()];
+        let primary = libsais64_bwt(text, &mut bwt, &mut work, 0, None);
+        assert!(primary >= 0);
+
+        let mut rust_u = vec![0; text.len()];
+        let mut rust_a = vec![0; text.len() + 1];
+        let mut c_u = vec![0; text.len()];
+        let mut c_a = vec![0; text.len() + 1];
+
+        let rust_rc = libsais64_unbwt(&bwt, &mut rust_u, &mut rust_a, None, primary);
+        let c_rc = unsafe {
+            probe_public_libsais64_unbwt(
+                bwt.as_ptr(),
+                c_u.as_mut_ptr(),
+                c_a.as_mut_ptr(),
+                bwt.len() as SaSint,
+                primary,
+            )
+        };
+
+        assert_eq!(rust_rc, c_rc);
+        assert_eq!(rust_u, c_u);
+        assert_eq!(rust_u, text);
+    }
+
+    fn assert_libsais64_unbwt_aux_matches_c(text: &[u8], r: SaSint) {
+        let mut bwt = vec![0; text.len()];
+        let mut work = vec![0; text.len()];
+        let mut aux = vec![0; (text.len() - 1) / r as usize + 1];
+        let bwt_rc = libsais64_bwt_aux(text, &mut bwt, &mut work, 0, None, r, &mut aux);
+        assert_eq!(bwt_rc, 0);
+
+        let mut rust_u = vec![0; text.len()];
+        let mut rust_a = vec![0; text.len() + 1];
+        let mut c_u = vec![0; text.len()];
+        let mut c_a = vec![0; text.len() + 1];
+
+        let rust_rc = libsais64_unbwt_aux(&bwt, &mut rust_u, &mut rust_a, None, r, &aux);
+        let c_rc = unsafe {
+            probe_public_libsais64_unbwt_aux(
+                bwt.as_ptr(),
+                c_u.as_mut_ptr(),
+                c_a.as_mut_ptr(),
+                bwt.len() as SaSint,
+                r,
+                aux.as_ptr(),
+            )
+        };
+
+        assert_eq!(rust_rc, c_rc);
+        assert_eq!(rust_u, c_u);
+        assert_eq!(rust_u, text);
+    }
+
+    fn assert_libsais64_unbwt_freq_matches_c(text: &[u8]) {
+        let mut freq = vec![0; ALPHABET_SIZE];
+        let mut bwt = vec![0; text.len()];
+        let mut work = vec![0; text.len()];
+        let primary = libsais64_bwt(text, &mut bwt, &mut work, 0, Some(&mut freq));
+        assert!(primary >= 0);
+
+        let mut rust_u = vec![0; text.len()];
+        let mut rust_a = vec![0; text.len() + 1];
+        let mut c_u = vec![0; text.len()];
+        let mut c_a = vec![0; text.len() + 1];
+
+        let rust_rc = libsais64_unbwt(&bwt, &mut rust_u, &mut rust_a, Some(&freq), primary);
+        let c_rc = unsafe {
+            probe_public_libsais64_unbwt_freq(
+                bwt.as_ptr(),
+                c_u.as_mut_ptr(),
+                c_a.as_mut_ptr(),
+                bwt.len() as SaSint,
+                freq.as_ptr(),
+                primary,
+            )
+        };
+        assert_eq!(rust_rc, c_rc);
+        assert_eq!(rust_u, c_u);
+        assert_eq!(rust_u, text);
+
+        let r = 4;
+        let mut aux = vec![0; (text.len() - 1) / r as usize + 1];
+        let bwt_rc = libsais64_bwt_aux(text, &mut bwt, &mut work, 0, Some(&mut freq), r, &mut aux);
+        assert_eq!(bwt_rc, 0);
+
+        rust_u.fill(0);
+        rust_a.fill(0);
+        c_u.fill(0);
+        c_a.fill(0);
+        let rust_rc = libsais64_unbwt_aux(&bwt, &mut rust_u, &mut rust_a, Some(&freq), r, &aux);
+        let c_rc = unsafe {
+            probe_public_libsais64_unbwt_aux_freq(
+                bwt.as_ptr(),
+                c_u.as_mut_ptr(),
+                c_a.as_mut_ptr(),
+                bwt.len() as SaSint,
+                freq.as_ptr(),
+                r,
+                aux.as_ptr(),
+            )
+        };
+        assert_eq!(rust_rc, c_rc);
+        assert_eq!(rust_u, c_u);
+        assert_eq!(rust_u, text);
+    }
+
+    fn assert_libsais64_plcp_lcp_matches_c(text: &[u8]) {
+        let mut sa = vec![0; text.len()];
+        let sa_rc = libsais64(text, &mut sa, 0, None);
+        assert_eq!(sa_rc, 0);
+
+        let mut rust_plcp = vec![0; text.len()];
+        let mut c_plcp = vec![0; text.len()];
+        let rust_plcp_rc = libsais64_plcp(text, &sa, &mut rust_plcp);
+        let c_plcp_rc = unsafe {
+            probe_public_libsais64_plcp(
+                text.as_ptr(),
+                sa.as_ptr(),
+                c_plcp.as_mut_ptr(),
+                text.len() as SaSint,
+            )
+        };
+        assert_eq!(rust_plcp_rc, c_plcp_rc);
+        assert_eq!(rust_plcp, c_plcp);
+
+        let mut rust_lcp = vec![0; text.len()];
+        let mut c_lcp = vec![0; text.len()];
+        let rust_lcp_rc = libsais64_lcp(&rust_plcp, &sa, &mut rust_lcp);
+        let c_lcp_rc = unsafe {
+            probe_public_libsais64_lcp(
+                c_plcp.as_ptr(),
+                sa.as_ptr(),
+                c_lcp.as_mut_ptr(),
+                text.len() as SaSint,
+            )
+        };
+        assert_eq!(rust_lcp_rc, c_lcp_rc);
+        assert_eq!(rust_lcp, c_lcp);
+    }
+
+    fn assert_libsais64_plcp_gsa_matches_c(text: &[u8]) {
+        let mut sa = vec![0; text.len()];
+        assert_eq!(libsais64_gsa(text, &mut sa, 0, None), 0);
+
+        let mut rust_plcp = vec![0; text.len()];
+        let mut c_plcp = vec![0; text.len()];
+        let rust_rc = libsais64_plcp_gsa(text, &sa, &mut rust_plcp);
+        let c_rc = unsafe {
+            probe_public_libsais64_plcp_gsa(
+                text.as_ptr(),
+                sa.as_ptr(),
+                c_plcp.as_mut_ptr(),
+                text.len() as SaSint,
+            )
+        };
+
+        assert_eq!(rust_rc, c_rc);
+        assert_eq!(rust_plcp, c_plcp);
+    }
+
+    fn assert_libsais64_bwt_aux_round_trips(text: &[u8], r: SaSint) {
+        let mut bwt = vec![0; text.len()];
+        let mut work = vec![0; text.len()];
+        let mut restored = vec![0; text.len()];
+        let mut aux = vec![0; (text.len() - 1) / r as usize + 1];
+
+        let bwt_rc = libsais64_bwt_aux(text, &mut bwt, &mut work, 0, None, r, &mut aux);
+        assert_eq!(bwt_rc, 0);
+
+        let unbwt_rc = libsais64_unbwt_aux(&bwt, &mut restored, &mut work, None, r, &aux);
+        assert_eq!(unbwt_rc, 0);
+        assert_eq!(restored, text);
+    }
+
+    #[test]
+    fn public_libsais64_matches_upstream_c() {
+        for text in [
+            b"".as_slice(),
+            b"a",
+            b"banana",
+            b"mississippi",
+            b"abracadabra",
+            b"AAAAAAAAAAAAAAAA",
+            b"zyxwvutsrqponmlk",
+        ] {
+            assert_libsais64_matches_c(text);
+        }
+    }
+
+    #[test]
+    fn public_libsais64_bwt_matches_upstream_c() {
+        for text in [
+            b"".as_slice(),
+            b"a",
+            b"banana",
+            b"mississippi",
+            b"abracadabra",
+            b"AAAAAAAAAAAAAAAA",
+            b"zyxwvutsrqponmlk",
+        ] {
+            assert_libsais64_bwt_matches_c(text);
+        }
+    }
+
+    #[test]
+    fn public_libsais64_gsa_matches_upstream_c() {
+        for text in [
+            b"\0".as_slice(),
+            b"banana\0",
+            b"ban\0ana\0",
+            b"miss\0issippi\0",
+            b"a\0a\0a\0",
+        ] {
+            assert_libsais64_gsa_matches_c(text);
+        }
+    }
+
+    #[test]
+    fn public_libsais64_long_matches_upstream_c() {
+        for (text, k) in [
+            (&[][..], 0),
+            (&[0][..], 1),
+            (&[1, 2, 1, 0][..], 3),
+            (&[2, 1, 2, 1, 0][..], 3),
+            (&[3, 3, 3, 2, 1, 0][..], 4),
+        ] {
+            assert_libsais64_long_matches_c(text, k);
+        }
+    }
+
+    #[test]
+    fn public_libsais64_plcp_lcp_matches_upstream_c() {
+        for text in [
+            b"".as_slice(),
+            b"a",
+            b"banana",
+            b"mississippi",
+            b"abracadabra",
+            b"AAAAAAAAAAAAAAAA",
+            b"zyxwvutsrqponmlk",
+        ] {
+            assert_libsais64_plcp_lcp_matches_c(text);
+        }
+    }
+
+    #[test]
+    fn public_libsais64_plcp_gsa_matches_upstream_c() {
+        for text in [
+            b"\0".as_slice(),
+            b"banana\0",
+            b"ban\0ana\0",
+            b"miss\0issippi\0",
+            b"a\0a\0a\0",
+        ] {
+            assert_libsais64_plcp_gsa_matches_c(text);
+        }
+    }
+
+    #[test]
+    fn libsais64_bwt_and_unbwt_round_trip_small_text() {
+        let t = b"banana";
+        let mut bwt = vec![0u8; t.len()];
+        let mut a = vec![0; t.len()];
+
+        let primary = libsais64_bwt(t, &mut bwt, &mut a, 0, None);
+        assert!(primary > 0);
+
+        let mut restored = vec![0u8; t.len()];
+        let result = libsais64_unbwt(&bwt, &mut restored, &mut a, None, primary);
+
+        assert_eq!(result, 0);
+        assert_eq!(restored, t);
+    }
+
+    #[test]
+    fn libsais64_bwt_aux_and_unbwt_aux_round_trip_small_text() {
+        let t = b"mississippi";
+        let mut bwt = vec![0u8; t.len()];
+        let mut a = vec![0; t.len()];
+        let mut samples = vec![0; 4];
+
+        let result = libsais64_bwt_aux(t, &mut bwt, &mut a, 0, None, 4, &mut samples);
+        assert_eq!(result, 0);
+
+        let mut restored = vec![0u8; t.len()];
+        let result = libsais64_unbwt_aux(&bwt, &mut restored, &mut a, None, 4, &samples);
+
+        assert_eq!(result, 0);
+        assert_eq!(restored, t);
+    }
+
+    #[test]
+    fn libsais64_bwt_aux_and_unbwt_aux_omp_round_trip_small_text() {
+        let t = b"mississippi";
+        let mut bwt = vec![0u8; t.len()];
+        let mut a = vec![0; t.len()];
+        let mut samples = vec![0; 4];
+
+        let result = libsais64_bwt_aux(t, &mut bwt, &mut a, 0, None, 4, &mut samples);
+        assert_eq!(result, 0);
+
+        let mut restored = vec![0u8; t.len()];
+        let result = libsais64_unbwt_aux_omp(&bwt, &mut restored, &mut a, None, 4, &samples, 2);
+
+        assert_eq!(result, 0);
+        assert_eq!(restored, t);
+    }
+
+    #[test]
+    fn libsais64_real_world_round_trip_on_upstream_readme() {
+        let t = include_bytes!("../libsais/README.md");
+        let mut bwt = vec![0u8; t.len()];
+        let mut a = vec![0; t.len()];
+
+        let primary = libsais64_bwt(t, &mut bwt, &mut a, 0, None);
+        assert!(primary > 0);
+
+        let mut restored = vec![0u8; t.len()];
+        let result = libsais64_unbwt(&bwt, &mut restored, &mut a, None, primary);
+
+        assert_eq!(result, 0);
+        assert_eq!(restored, t);
+    }
+
+    #[test]
+    fn libsais64_real_world_aux_omp_round_trip_on_upstream_c_source() {
+        let t = include_bytes!("../libsais/src/libsais.c");
+        let mut bwt = vec![0u8; t.len()];
+        let mut a = vec![0; t.len()];
+        let r = 128;
+        let mut samples = vec![0; (t.len() - 1) / usize::try_from(r).expect("fits") + 1];
+
+        let result = libsais64_bwt_aux(t, &mut bwt, &mut a, 0, None, r, &mut samples);
+        assert_eq!(result, 0);
+
+        let mut restored = vec![0u8; t.len()];
+        let result = libsais64_unbwt_aux_omp(&bwt, &mut restored, &mut a, None, r, &samples, 2);
+
+        assert_eq!(result, 0);
+        assert_eq!(restored, t);
+    }
+
+    #[test]
+    fn libsais64_bwt_aux_rejects_undersized_sampling_array() {
+        let t = b"upstream source text";
+        let mut bwt = vec![0u8; t.len()];
+        let mut a = vec![0; t.len()];
+        let mut samples = vec![0; 1];
+
+        let result = libsais64_bwt_aux(t, &mut bwt, &mut a, 0, None, 2, &mut samples);
+
+        assert_eq!(result, -1);
+
+        let result = libsais64_bwt_aux(t, &mut bwt, &mut a, 0, None, 0, &mut samples);
+
+        assert_eq!(result, -1);
+    }
+
+    #[test]
+    fn libsais64_bwt_aux_omp_rejects_invalid_sampling_rate_without_panicking() {
+        let t = b"upstream source text";
+        let mut bwt = vec![0u8; t.len()];
+        let mut a = vec![0; t.len()];
+        let mut samples = vec![0; 4];
+
+        let result = libsais64_bwt_aux_omp(t, &mut bwt, &mut a, 0, None, 0, &mut samples, 2);
+
+        assert_eq!(result, -1);
+    }
+
+    #[test]
+    fn public_libsais64_empty_and_singleton_inputs_follow_public_contract() {
+        let mut empty_sa = Vec::new();
+        let mut empty_freq = vec![-1; ALPHABET_SIZE];
+        assert_eq!(libsais64(b"", &mut empty_sa, 0, Some(&mut empty_freq)), 0);
+        assert!(empty_freq.iter().all(|&value| value == 0));
+
+        empty_freq.fill(-1);
+        assert_eq!(
+            libsais64_omp(b"", &mut empty_sa, 0, Some(&mut empty_freq), 2),
+            0
+        );
+        assert!(empty_freq.iter().all(|&value| value == 0));
+
+        empty_freq.fill(-1);
+        assert_eq!(
+            libsais64_gsa(b"", &mut empty_sa, 0, Some(&mut empty_freq)),
+            0
+        );
+        assert!(empty_freq.iter().all(|&value| value == 0));
+
+        let mut empty_bwt = Vec::new();
+        let mut empty_work = Vec::new();
+        empty_freq.fill(-1);
+        assert_eq!(
+            libsais64_bwt(
+                b"",
+                &mut empty_bwt,
+                &mut empty_work,
+                0,
+                Some(&mut empty_freq)
+            ),
+            0
+        );
+        assert!(empty_freq.iter().all(|&value| value == 0));
+
+        let mut empty_aux = vec![-1];
+        empty_freq.fill(-1);
+        assert_eq!(
+            libsais64_bwt_aux(
+                b"",
+                &mut empty_bwt,
+                &mut empty_work,
+                0,
+                Some(&mut empty_freq),
+                2,
+                &mut empty_aux
+            ),
+            0
+        );
+        assert_eq!(empty_aux[0], 0);
+        assert!(empty_freq.iter().all(|&value| value == 0));
+
+        let text = b"z";
+        let mut sa = vec![-1; 1];
+        let mut freq = vec![-1; ALPHABET_SIZE];
+        assert_eq!(libsais64(text, &mut sa, 0, Some(&mut freq)), 0);
+        assert_eq!(sa, vec![0]);
+        assert_eq!(freq[b'z' as usize], 1);
+        assert_eq!(freq.iter().sum::<SaSint>(), 1);
+
+        sa.fill(-1);
+        freq.fill(-1);
+        let mut ctx = create_ctx().expect("context");
+        assert_eq!(
+            libsais64_ctx(&mut ctx, text, &mut sa, 0, Some(&mut freq)),
+            0
+        );
+        assert_eq!(sa, vec![0]);
+        assert_eq!(freq[b'z' as usize], 1);
+        assert_eq!(freq.iter().sum::<SaSint>(), 1);
+
+        sa.fill(-1);
+        freq.fill(-1);
+        assert_eq!(libsais64_omp(text, &mut sa, 0, Some(&mut freq), 2), 0);
+        assert_eq!(sa, vec![0]);
+        assert_eq!(freq[b'z' as usize], 1);
+        assert_eq!(freq.iter().sum::<SaSint>(), 1);
+
+        let mut gsa_sa = vec![-1; 1];
+        let mut gsa_freq = vec![-1; ALPHABET_SIZE];
+        assert_eq!(libsais64_gsa(b"\0", &mut gsa_sa, 0, Some(&mut gsa_freq)), 0);
+        assert_eq!(gsa_sa, vec![0]);
+        assert_eq!(gsa_freq[0], 1);
+        assert_eq!(gsa_freq.iter().sum::<SaSint>(), 1);
+
+        let mut bwt = vec![0; 1];
+        let mut work = vec![0; 1];
+        freq.fill(-1);
+        assert_eq!(
+            libsais64_bwt(text, &mut bwt, &mut work, 0, Some(&mut freq)),
+            1
+        );
+        assert_eq!(bwt, text);
+        assert_eq!(freq[b'z' as usize], 1);
+        assert_eq!(freq.iter().sum::<SaSint>(), 1);
+
+        let mut aux = vec![-1];
+        bwt.fill(0);
+        work.fill(0);
+        freq.fill(-1);
+        assert_eq!(
+            libsais64_bwt_aux(text, &mut bwt, &mut work, 0, Some(&mut freq), 2, &mut aux),
+            0
+        );
+        assert_eq!(bwt, text);
+        assert_eq!(aux[0], 1);
+        assert_eq!(freq[b'z' as usize], 1);
+        assert_eq!(freq.iter().sum::<SaSint>(), 1);
+    }
+
+    #[test]
+    fn public_libsais64_rejects_invalid_aux_sampling_without_panicking() {
+        let text = b"banana";
+        let mut u = vec![0; text.len()];
+        let mut a = vec![0; text.len() + 1];
+        let mut aux = vec![0; 2];
+
+        assert_eq!(
+            libsais64_bwt_aux(text, &mut u, &mut a, 0, None, 0, &mut aux),
+            -1
+        );
+        assert_eq!(
+            libsais64_bwt_aux(text, &mut u, &mut a, 0, None, 3, &mut aux),
+            -1
+        );
+        assert_eq!(libsais64_unbwt_aux(text, &mut u, &mut a, None, 0, &aux), -1);
+        assert_eq!(
+            libsais64_unbwt_aux_omp(text, &mut u, &mut a, None, 0, &aux, 1),
+            -1
+        );
+    }
+
+    #[test]
+    fn libsais64_unbwt_aux_rejects_invalid_sampling_range() {
+        let t = b"abc";
+        let mut u = vec![0u8; t.len()];
+        let mut a = vec![0; t.len()];
+
+        let result = libsais64_unbwt_aux(t, &mut u, &mut a, None, 2, &[0, 4]);
+
+        assert_eq!(result, -1);
+
+        assert_eq!(libsais64_unbwt_aux(t, &mut u, &mut a, None, 0, &[1]), -1);
+
+        let mut ctx = unbwt_create_ctx().expect("context");
+        assert_eq!(
+            libsais64_unbwt_aux_ctx(&mut ctx, t, &mut u, &mut a, None, 0, &[1]),
+            -1
+        );
+        assert_eq!(
+            libsais64_unbwt_aux_omp(t, &mut u, &mut a, None, 0, &[1], 2),
+            -1
+        );
+    }
+
+    #[test]
+    fn public_libsais64_omp_rejects_undersized_suffix_arrays() {
+        let text = b"banana";
+        let mut short_sa = vec![0; text.len() - 1];
+        let mut int_text = vec![1, 2, 1, 0];
+        let mut short_int_sa = vec![0; int_text.len() - 1];
+
+        assert_eq!(libsais64_omp(text, &mut short_sa, 0, None, 1), -1);
+        assert_eq!(
+            libsais64_gsa_omp(b"banana\0", &mut short_sa, 0, None, 1),
+            -1
+        );
+        assert_eq!(
+            libsais64_int_omp(&mut int_text, &mut short_int_sa, 3, 0, 1),
+            -1
+        );
+    }
+
+    #[test]
+    #[ignore = "large real-data regression; requires local yeast FASTA fixture"]
+    fn public_libsais64_omp_handles_minibwa_yeast_two_strand_index_input() {
+        let path = "/data/henriksson/github/claude/star/.tmp/yeast_conformance/Saccharomyces_cerevisiae.R64-1-1.dna.toplevel.fa";
+        let Ok(fasta) = std::fs::read_to_string(path) else {
+            eprintln!("skipping missing fixture: {path}");
+            return;
+        };
+        let mut forward = Vec::new();
+        for line in fasta.lines() {
+            if line.starts_with('>') {
+                continue;
+            }
+            forward.extend(line.as_bytes().iter().filter_map(|&c| match c {
+                b'A' | b'a' => Some(0),
+                b'C' | b'c' => Some(1),
+                b'G' | b'g' => Some(2),
+                b'T' | b't' => Some(3),
+                _ => None,
+            }));
+        }
+        assert!(
+            forward.len() > 12_000_000,
+            "fixture should exercise the large-input 64-bit path"
+        );
+
+        let mut text = Vec::with_capacity(forward.len() * 2);
+        text.extend_from_slice(&forward);
+        text.extend(forward.iter().rev().map(|&c| 3 - c));
+
+        const FS: SaSint = 10_000;
+        let mut sa = vec![0; text.len() + FS as usize];
+        assert_eq!(libsais64_omp(&text, &mut sa, FS, None, 4), 0);
+    }
+
+    #[test]
+    #[ignore = "large real-data regression; requires local minibwa yeast fixture"]
+    fn public_libsais64_omp_matches_plain_on_minibwa_yeast_two_strand_index_input() {
+        let l2b_path =
+            "/data/henriksson/github/claude/minibwa/.tmp/compare-yeast-now/ref.split.rust.l2b";
+        let fasta_path =
+            "/data/henriksson/github/claude/minibwa/.tmp/large-real/yeast/ref.sanitized.fa";
+        let forward = if let Ok(bytes) = std::fs::read(l2b_path) {
+            assert!(bytes.len() >= 64, "short l2b fixture: {l2b_path}");
+            assert_eq!(&bytes[..4], b"L2B\x01", "bad l2b magic in {l2b_path}");
+            let n_ctg = u64::from_le_bytes(bytes[8..16].try_into().unwrap()) as usize;
+            let tot_len = u64::from_le_bytes(bytes[16..24].try_into().unwrap()) as usize;
+            let n_ambi = u64::from_le_bytes(bytes[24..32].try_into().unwrap()) as usize;
+            let n_mask = u64::from_le_bytes(bytes[32..40].try_into().unwrap()) as usize;
+            let n_pac = u64::from_le_bytes(bytes[56..64].try_into().unwrap()) as usize;
+            let pac_start = 64 + 8 * n_ctg + 16 * n_ambi + 16 * n_mask;
+            assert!(
+                bytes.len() >= pac_start + 8 * n_pac,
+                "truncated l2b pac in {l2b_path}"
+            );
+            let mut pac = Vec::with_capacity(n_pac);
+            for chunk in bytes[pac_start..pac_start + 8 * n_pac].chunks_exact(8) {
+                pac.push(u64::from_le_bytes(chunk.try_into().unwrap()));
+            }
+            (0..tot_len)
+                .map(|i| ((pac[i >> 5] >> ((i & 31) << 1)) & 3) as u8)
+                .collect::<Vec<_>>()
+        } else if let Ok(fasta) = std::fs::read_to_string(fasta_path) {
+            let mut rng = 11u64;
+            let mut forward = Vec::new();
+            for line in fasta.lines() {
+                if line.starts_with('>') {
+                    continue;
+                }
+                forward.extend(line.bytes().map(|b| {
+                    let mut c = match b {
+                        b'A' | b'a' => 0,
+                        b'C' | b'c' => 1,
+                        b'G' | b'g' => 2,
+                        b'T' | b't' | b'U' | b'u' => 3,
+                        _ => {
+                            rng = rng.wrapping_add(0x9e3779b97f4a7c15);
+                            let mut z = rng;
+                            z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+                            z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
+                            4 | ((z ^ (z >> 31)) & 3) as u8
+                        }
+                    };
+                    if b < b'A' || b > b'Z' {
+                        c |= 1 << 3;
+                    }
+                    c & 3
+                }));
+            }
+            forward
+        } else {
+            eprintln!("skipping missing fixtures: {l2b_path} and {fasta_path}");
+            return;
+        };
+        assert!(
+            forward.len() > 12_000_000,
+            "fixture should exercise the minibwa yeast index workload"
+        );
+
+        let mut text = Vec::with_capacity(forward.len() * 2);
+        text.extend_from_slice(&forward);
+        text.extend(forward.iter().rev().map(|&c| 3 - c));
+
+        const FS: SaSint = 10_000;
+        let mut plain_sa = vec![0; text.len() + FS as usize + 1];
+        let mut omp_sa = vec![0; text.len() + FS as usize + 1];
+        assert_eq!(libsais64(&text, &mut plain_sa[1..], FS, None), 0);
+        assert_eq!(libsais64_omp(&text, &mut omp_sa[1..], FS, None, 4), 0);
+        plain_sa[0] = text.len() as SaSint;
+        omp_sa[0] = text.len() as SaSint;
+        if let Some(i) = plain_sa[..=text.len()]
+            .iter()
+            .zip(&omp_sa[..=text.len()])
+            .position(|(plain, omp)| plain != omp)
+        {
+            panic!(
+                "first suffix-array diff at {i}: plain={} omp={}",
+                plain_sa[i], omp_sa[i]
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "large real-data regression; requires local minibwa or STAR yeast FASTA fixture"]
+    fn direct_libsais64_main_handles_minibwa_yeast_two_strand_index_input() {
+        let minibwa_path =
+            "/data/henriksson/github/claude/minibwa/.tmp/large-real/yeast/ref.sanitized.fa";
+        let star_path = "/data/henriksson/github/claude/star/.tmp/yeast_conformance/Saccharomyces_cerevisiae.R64-1-1.dna.toplevel.fa";
+        let (path, fasta) = if let Ok(fasta) = std::fs::read_to_string(minibwa_path) {
+            (minibwa_path, fasta)
+        } else if let Ok(fasta) = std::fs::read_to_string(star_path) {
+            (star_path, fasta)
+        } else {
+            eprintln!("skipping missing fixtures: {minibwa_path} and {star_path}");
+            return;
+        };
+        let mut forward = Vec::new();
+        for line in fasta.lines() {
+            if line.starts_with('>') {
+                continue;
+            }
+            forward.extend(line.as_bytes().iter().filter_map(|&c| match c {
+                b'A' | b'a' => Some(0),
+                b'C' | b'c' => Some(1),
+                b'G' | b'g' => Some(2),
+                b'T' | b't' => Some(3),
+                _ => None,
+            }));
+        }
+        assert!(
+            forward.len() > 12_000_000,
+            "fixture {path} should exercise the minibwa yeast index workload"
+        );
+
+        let mut text = Vec::with_capacity(forward.len() * 2);
+        text.extend_from_slice(&forward);
+        text.extend(forward.iter().rev().map(|&c| 3 - c));
+
+        const FS: SaSint = 10_000;
+        let mut sa = vec![0; text.len() + FS as usize];
+        assert_eq!(
+            libsais64_main(&text, &mut sa, LIBSAIS_FLAGS_NONE, 0, None, FS, None, 1),
+            0
+        );
+    }
+
+    #[test]
+    #[ignore = "large real-data regression; requires local yeast FASTA fixture"]
+    fn public_libsais64_matches_c_on_minibwa_yeast_two_strand_index_input() {
+        let path = "/data/henriksson/github/claude/star/.tmp/yeast_conformance/Saccharomyces_cerevisiae.R64-1-1.dna.toplevel.fa";
+        let Ok(fasta) = std::fs::read_to_string(path) else {
+            eprintln!("skipping missing fixture: {path}");
+            return;
+        };
+        let mut forward = Vec::new();
+        for line in fasta.lines() {
+            if line.starts_with('>') {
+                continue;
+            }
+            forward.extend(line.as_bytes().iter().filter_map(|&c| match c {
+                b'A' | b'a' => Some(0),
+                b'C' | b'c' => Some(1),
+                b'G' | b'g' => Some(2),
+                b'T' | b't' => Some(3),
+                _ => None,
+            }));
+        }
+        let mut text = Vec::with_capacity(forward.len() * 2);
+        text.extend_from_slice(&forward);
+        text.extend(forward.iter().rev().map(|&c| 3 - c));
+
+        const FS: SaSint = 10_000;
+        let mut rust_sa = vec![0; text.len() + FS as usize];
+        let mut c_sa = vec![0; text.len() + FS as usize];
+        let rust_rc = libsais64(&text, &mut rust_sa, FS, None);
+        let c_rc = unsafe {
+            probe_public_libsais64(text.as_ptr(), c_sa.as_mut_ptr(), text.len() as SaSint, FS)
+        };
+        assert_eq!(rust_rc, c_rc);
+        if let Some(i) = rust_sa[..text.len()]
+            .iter()
+            .zip(&c_sa[..text.len()])
+            .position(|(r, c)| r != c)
+        {
+            panic!(
+                "first suffix-array diff at {i}: rust={} c={}",
+                rust_sa[i], c_sa[i]
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "large real-data regression; requires local yeast FASTA fixture"]
+    fn public_libsais64_omp_matches_c_on_minibwa_yeast_two_strand_index_input() {
+        let path = "/data/henriksson/github/claude/star/.tmp/yeast_conformance/Saccharomyces_cerevisiae.R64-1-1.dna.toplevel.fa";
+        let Ok(fasta) = std::fs::read_to_string(path) else {
+            eprintln!("skipping missing fixture: {path}");
+            return;
+        };
+        let mut forward = Vec::new();
+        for line in fasta.lines() {
+            if line.starts_with('>') {
+                continue;
+            }
+            forward.extend(line.as_bytes().iter().filter_map(|&c| match c {
+                b'A' | b'a' => Some(0),
+                b'C' | b'c' => Some(1),
+                b'G' | b'g' => Some(2),
+                b'T' | b't' => Some(3),
+                _ => None,
+            }));
+        }
+        let mut text = Vec::with_capacity(forward.len() * 2);
+        text.extend_from_slice(&forward);
+        text.extend(forward.iter().rev().map(|&c| 3 - c));
+
+        const FS: SaSint = 10_000;
+        let mut rust_sa = vec![0; text.len() + FS as usize];
+        let mut c_sa = vec![0; text.len() + FS as usize];
+        let rust_rc = libsais64_omp(&text, &mut rust_sa, FS, None, 4);
+        let c_rc = unsafe {
+            probe_public_libsais64(text.as_ptr(), c_sa.as_mut_ptr(), text.len() as SaSint, FS)
+        };
+        assert_eq!(rust_rc, c_rc);
+        if let Some(i) = rust_sa[..text.len()]
+            .iter()
+            .zip(&c_sa[..text.len()])
+            .position(|(r, c)| r != c)
+        {
+            panic!(
+                "first omp suffix-array diff at {i}: rust={} c={}",
+                rust_sa[i], c_sa[i]
+            );
+        }
+    }
+
+    #[test]
+    fn public_libsais64_ctx_rejects_invalid_public_arguments() {
+        let text = b"banana";
+        let mut ctx = create_ctx().unwrap();
+        let mut short_sa = vec![0; text.len() - 1];
+        let mut full_sa = vec![0; text.len()];
+        let mut short_freq = vec![0; ALPHABET_SIZE - 1];
+        let mut short_u = vec![0; text.len() - 1];
+        let mut full_u = vec![0; text.len()];
+        let mut short_a = vec![0; text.len() - 1];
+        let mut full_a = vec![0; text.len()];
+        let mut aux = vec![0; 2];
+
+        assert_eq!(libsais64_ctx(&mut ctx, text, &mut short_sa, 0, None), -1);
+        assert_eq!(
+            libsais64_ctx(&mut ctx, text, &mut full_sa, 0, Some(&mut short_freq)),
+            -1
+        );
+        assert_eq!(
+            libsais64_gsa_ctx(&mut ctx, b"banana", &mut full_sa, 0, None),
+            -1
+        );
+        assert_eq!(
+            libsais64_gsa_ctx(&mut ctx, b"banana\0", &mut short_sa, 0, None),
+            -1
+        );
+        assert_eq!(
+            libsais64_bwt_ctx(&mut ctx, text, &mut short_u, &mut full_a, 0, None),
+            -1
+        );
+        assert_eq!(
+            libsais64_bwt_ctx(&mut ctx, text, &mut full_u, &mut short_a, 0, None),
+            -1
+        );
+        assert_eq!(
+            libsais64_bwt_ctx(
+                &mut ctx,
+                text,
+                &mut full_u,
+                &mut full_a,
+                0,
+                Some(&mut short_freq)
+            ),
+            -1
+        );
+        assert_eq!(
+            libsais64_bwt_aux_ctx(
+                &mut ctx,
+                text,
+                &mut full_u,
+                &mut full_a,
+                0,
+                None,
+                0,
+                &mut aux
+            ),
+            -1
+        );
+        assert_eq!(
+            libsais64_bwt_aux_ctx(
+                &mut ctx,
+                text,
+                &mut full_u,
+                &mut full_a,
+                0,
+                None,
+                3,
+                &mut aux
+            ),
+            -1
+        );
+        assert_eq!(
+            libsais64_bwt_aux_ctx(
+                &mut ctx,
+                text,
+                &mut full_u,
+                &mut full_a,
+                0,
+                None,
+                4,
+                &mut []
+            ),
+            -1
+        );
+
+        let mut missing_thread_state_ctx = Context {
+            buckets: vec![0; 8 * ALPHABET_SIZE],
+            thread_state: None,
+            threads: 2,
+        };
+        assert_eq!(
+            libsais64_ctx(&mut missing_thread_state_ctx, text, &mut full_sa, 0, None),
+            -2
+        );
+
+        let mut zero_thread_ctx = Context {
+            buckets: vec![0; 8 * ALPHABET_SIZE],
+            thread_state: None,
+            threads: 0,
+        };
+        assert_eq!(
+            libsais64_ctx(&mut zero_thread_ctx, text, &mut full_sa, 0, None),
+            -2
+        );
+
+        let mut short_thread_state_ctx = create_ctx_main(2).expect("context");
+        short_thread_state_ctx
+            .thread_state
+            .as_mut()
+            .expect("thread state")
+            .truncate(1);
+        assert_eq!(
+            libsais64_ctx(&mut short_thread_state_ctx, text, &mut full_sa, 0, None),
+            -2
+        );
+    }
+
+    #[test]
+    fn public_libsais64_unbwt_ctx_rejects_invalid_public_arguments() {
+        let text = b"banana";
+        let mut bwt = vec![0; text.len()];
+        let mut work = vec![0; text.len()];
+        let primary = libsais64_bwt(text, &mut bwt, &mut work, 0, None);
+        let mut ctx = unbwt_create_ctx().unwrap();
+
+        let mut short_u = vec![0; text.len() - 1];
+        let mut full_u = vec![0; text.len()];
+        let mut short_a = vec![0; text.len() - 1];
+        let mut full_a = vec![0; text.len()];
+        let short_freq = vec![0; ALPHABET_SIZE - 1];
+        let good_aux = vec![primary, 4];
+
+        assert_eq!(
+            libsais64_unbwt_ctx(&mut ctx, &bwt, &mut short_u, &mut full_a, None, primary),
+            -1
+        );
+        assert_eq!(
+            libsais64_unbwt_ctx(&mut ctx, &bwt, &mut full_u, &mut short_a, None, primary),
+            -1
+        );
+        assert_eq!(
+            libsais64_unbwt_ctx(
+                &mut ctx,
+                &bwt,
+                &mut full_u,
+                &mut full_a,
+                Some(&short_freq),
+                primary
+            ),
+            -1
+        );
+        assert_eq!(
+            libsais64_unbwt_ctx(&mut ctx, &bwt, &mut full_u, &mut full_a, None, 0),
+            -1
+        );
+        assert_eq!(
+            libsais64_unbwt_aux_ctx(&mut ctx, &bwt, &mut full_u, &mut full_a, None, 3, &good_aux),
+            -1
+        );
+        assert_eq!(
+            libsais64_unbwt_aux_ctx(
+                &mut ctx,
+                &bwt,
+                &mut full_u,
+                &mut full_a,
+                None,
+                4,
+                &[primary]
+            ),
+            -1
+        );
+
+        let mut malformed_ctx = UnbwtContext {
+            bucket2: Vec::new(),
+            fastbits: Vec::new(),
+            buckets: None,
+            threads: 1,
+        };
+        assert_eq!(
+            libsais64_unbwt_ctx(
+                &mut malformed_ctx,
+                &bwt,
+                &mut full_u,
+                &mut full_a,
+                None,
+                primary
+            ),
+            -2
+        );
+
+        let mut missing_parallel_buckets_ctx = UnbwtContext {
+            bucket2: vec![0; ALPHABET_SIZE * ALPHABET_SIZE],
+            fastbits: vec![0; 1 + (1 << UNBWT_FASTBITS)],
+            buckets: None,
+            threads: 2,
+        };
+        assert_eq!(
+            libsais64_unbwt_ctx(
+                &mut missing_parallel_buckets_ctx,
+                &bwt,
+                &mut full_u,
+                &mut full_a,
+                None,
+                primary
+            ),
+            -2
+        );
+    }
+
+    #[test]
+    fn public_libsais64_lcp_helpers_reject_invalid_suffix_entries() {
+        let text = b"banana";
+        let mut plcp = vec![0; text.len()];
+        let mut lcp = vec![0; text.len()];
+        let int_text = vec![1, 2, 1, 0];
+        let mut int_plcp = vec![0; int_text.len()];
+
+        assert_eq!(libsais64_plcp(text, &[0, 1, -1, 3, 4, 5], &mut plcp), -1);
+        assert_eq!(libsais64_plcp(text, &[0, 1, 2, 3, 4, 6], &mut plcp), -1);
+        assert_eq!(libsais64_lcp(&plcp, &[0, 1, -1, 3, 4, 5], &mut lcp), -1);
+        assert_eq!(libsais64_lcp(&plcp, &[0, 1, 2, 3, 4, 6], &mut lcp), -1);
+        assert_eq!(
+            libsais64_plcp_int(&int_text, &[0, 1, -1, 3], &mut int_plcp),
+            -1
+        );
+        assert_eq!(
+            libsais64_plcp_int_omp(&int_text, &[0, 1, 2, 4], &mut int_plcp, 1),
+            -1
+        );
+    }
+
+    #[test]
+    fn public_libsais64_context_wrappers_match_direct_calls() {
+        let text = b"banana";
+        let gsa_text = b"ban\0ana\0";
+        let mut ctx = create_ctx().unwrap();
+
+        let mut direct_sa = vec![0; text.len()];
+        let mut ctx_sa = vec![0; text.len()];
+        assert_eq!(libsais64(text, &mut direct_sa, 0, None), 0);
+        assert_eq!(libsais64_ctx(&mut ctx, text, &mut ctx_sa, 0, None), 0);
+        assert_eq!(ctx_sa, direct_sa);
+
+        let mut direct_gsa = vec![0; gsa_text.len()];
+        let mut ctx_gsa = vec![0; gsa_text.len()];
+        assert_eq!(libsais64_gsa(gsa_text, &mut direct_gsa, 0, None), 0);
+        assert_eq!(
+            libsais64_gsa_ctx(&mut ctx, gsa_text, &mut ctx_gsa, 0, None),
+            0
+        );
+        assert_eq!(ctx_gsa, direct_gsa);
+
+        let mut direct_bwt = vec![0; text.len()];
+        let mut direct_work = vec![0; text.len()];
+        let mut ctx_bwt = vec![0; text.len()];
+        let mut ctx_work = vec![0; text.len()];
+        assert_eq!(
+            libsais64_bwt(text, &mut direct_bwt, &mut direct_work, 0, None),
+            libsais64_bwt_ctx(&mut ctx, text, &mut ctx_bwt, &mut ctx_work, 0, None)
+        );
+        assert_eq!(ctx_bwt, direct_bwt);
+
+        let mut direct_aux = vec![0; 2];
+        let mut ctx_aux = vec![0; 2];
+        assert_eq!(
+            libsais64_bwt_aux(
+                text,
+                &mut direct_bwt,
+                &mut direct_work,
+                0,
+                None,
+                4,
+                &mut direct_aux
+            ),
+            libsais64_bwt_aux_ctx(
+                &mut ctx,
+                text,
+                &mut ctx_bwt,
+                &mut ctx_work,
+                0,
+                None,
+                4,
+                &mut ctx_aux
+            )
+        );
+        assert_eq!(ctx_bwt, direct_bwt);
+        assert_eq!(ctx_aux, direct_aux);
+    }
+
+    #[test]
+    fn libsais64_ctx_matches_plain_entry_point_for_small_text() {
+        let t = b"mississippi";
+        let mut sa_plain = vec![0; t.len()];
+        let mut sa_ctx = vec![0; t.len()];
+        let plain = libsais64(t, &mut sa_plain, 0, None);
+
+        let mut ctx = create_ctx().expect("context");
+        let with_ctx = libsais64_ctx(&mut ctx, t, &mut sa_ctx, 0, None);
+
+        assert_eq!(plain, 0);
+        assert_eq!(with_ctx, 0);
+        assert_eq!(sa_ctx, sa_plain);
+    }
+
+    #[test]
+    fn public_libsais64_unbwt_context_wrappers_match_direct_calls() {
+        let text = b"banana";
+        let mut bwt = vec![0; text.len()];
+        let mut work = vec![0; text.len()];
+        let primary = libsais64_bwt(text, &mut bwt, &mut work, 0, None);
+        let mut ctx = unbwt_create_ctx().unwrap();
+
+        let mut direct = vec![0; text.len()];
+        let mut direct_work = vec![0; text.len() + 1];
+        let mut via_ctx = vec![0; text.len()];
+        let mut ctx_work = vec![0; text.len() + 1];
+        assert_eq!(
+            libsais64_unbwt(&bwt, &mut direct, &mut direct_work, None, primary),
+            0
+        );
+        assert_eq!(
+            libsais64_unbwt_ctx(&mut ctx, &bwt, &mut via_ctx, &mut ctx_work, None, primary),
+            0
+        );
+        assert_eq!(via_ctx, direct);
+
+        let mut aux = vec![0; 2];
+        assert_eq!(
+            libsais64_bwt_aux(text, &mut bwt, &mut work, 0, None, 4, &mut aux),
+            0
+        );
+        assert_eq!(
+            libsais64_unbwt_aux(&bwt, &mut direct, &mut direct_work, None, 4, &aux),
+            0
+        );
+        assert_eq!(
+            libsais64_unbwt_aux_ctx(&mut ctx, &bwt, &mut via_ctx, &mut ctx_work, None, 4, &aux),
+            0
+        );
+        assert_eq!(via_ctx, direct);
+    }
+
+    #[test]
+    fn public_libsais64_ctx_frequency_wrappers_match_direct_calls() {
+        let text = b"banana";
+        let gsa_text = b"ban\0ana\0";
+        let mut ctx = create_ctx().unwrap();
+
+        let mut direct_sa = vec![0; text.len()];
+        let mut ctx_sa = vec![0; text.len()];
+        let mut direct_freq = vec![-1; ALPHABET_SIZE];
+        let mut ctx_freq = vec![-1; ALPHABET_SIZE];
+        assert_eq!(
+            libsais64(text, &mut direct_sa, 0, Some(&mut direct_freq)),
+            0
+        );
+        assert_eq!(
+            libsais64_ctx(&mut ctx, text, &mut ctx_sa, 0, Some(&mut ctx_freq)),
+            0
+        );
+        assert_eq!(ctx_sa, direct_sa);
+        assert_eq!(ctx_freq, direct_freq);
+
+        let mut direct_gsa = vec![0; gsa_text.len()];
+        let mut ctx_gsa = vec![0; gsa_text.len()];
+        direct_freq.fill(-1);
+        ctx_freq.fill(-1);
+        assert_eq!(
+            libsais64_gsa(gsa_text, &mut direct_gsa, 0, Some(&mut direct_freq)),
+            0
+        );
+        assert_eq!(
+            libsais64_gsa_ctx(&mut ctx, gsa_text, &mut ctx_gsa, 0, Some(&mut ctx_freq)),
+            0
+        );
+        assert_eq!(ctx_gsa, direct_gsa);
+        assert_eq!(ctx_freq, direct_freq);
+
+        let mut direct_bwt = vec![0; text.len()];
+        let mut direct_work = vec![0; text.len()];
+        let mut ctx_bwt = vec![0; text.len()];
+        let mut ctx_work = vec![0; text.len()];
+        direct_freq.fill(-1);
+        ctx_freq.fill(-1);
+        assert_eq!(
+            libsais64_bwt(
+                text,
+                &mut direct_bwt,
+                &mut direct_work,
+                0,
+                Some(&mut direct_freq)
+            ),
+            libsais64_bwt_ctx(
+                &mut ctx,
+                text,
+                &mut ctx_bwt,
+                &mut ctx_work,
+                0,
+                Some(&mut ctx_freq)
+            )
+        );
+        assert_eq!(ctx_bwt, direct_bwt);
+        assert_eq!(ctx_freq, direct_freq);
+
+        let mut direct_aux = vec![0; 2];
+        let mut ctx_aux = vec![0; 2];
+        direct_freq.fill(-1);
+        ctx_freq.fill(-1);
+        assert_eq!(
+            libsais64_bwt_aux(
+                text,
+                &mut direct_bwt,
+                &mut direct_work,
+                0,
+                Some(&mut direct_freq),
+                4,
+                &mut direct_aux
+            ),
+            libsais64_bwt_aux_ctx(
+                &mut ctx,
+                text,
+                &mut ctx_bwt,
+                &mut ctx_work,
+                0,
+                Some(&mut ctx_freq),
+                4,
+                &mut ctx_aux
+            )
+        );
+        assert_eq!(ctx_bwt, direct_bwt);
+        assert_eq!(ctx_aux, direct_aux);
+        assert_eq!(ctx_freq, direct_freq);
+    }
+
+    #[test]
+    fn public_libsais64_unbwt_ctx_frequency_wrappers_match_direct_calls() {
+        let text = b"abracadabra";
+        let mut freq = vec![0; ALPHABET_SIZE];
+        let mut bwt = vec![0; text.len()];
+        let mut work = vec![0; text.len()];
+        let primary = libsais64_bwt(text, &mut bwt, &mut work, 0, Some(&mut freq));
+        assert!(primary >= 0);
+
+        let mut ctx = unbwt_create_ctx().unwrap();
+        let mut direct = vec![0; text.len()];
+        let mut direct_work = vec![0; text.len() + 1];
+        let mut via_ctx = vec![0; text.len()];
+        let mut ctx_work = vec![0; text.len() + 1];
+        assert_eq!(
+            libsais64_unbwt(&bwt, &mut direct, &mut direct_work, Some(&freq), primary),
+            libsais64_unbwt_ctx(
+                &mut ctx,
+                &bwt,
+                &mut via_ctx,
+                &mut ctx_work,
+                Some(&freq),
+                primary
+            )
+        );
+        assert_eq!(via_ctx, direct);
+        assert_eq!(via_ctx, text);
+
+        let mut aux = vec![0; (text.len() - 1) / 4 + 1];
+        assert_eq!(
+            libsais64_bwt_aux(text, &mut bwt, &mut work, 0, Some(&mut freq), 4, &mut aux),
+            0
+        );
+        direct.fill(0);
+        direct_work.fill(0);
+        via_ctx.fill(0);
+        ctx_work.fill(0);
+        assert_eq!(
+            libsais64_unbwt_aux(&bwt, &mut direct, &mut direct_work, Some(&freq), 4, &aux),
+            libsais64_unbwt_aux_ctx(
+                &mut ctx,
+                &bwt,
+                &mut via_ctx,
+                &mut ctx_work,
+                Some(&freq),
+                4,
+                &aux
+            )
+        );
+        assert_eq!(via_ctx, direct);
+        assert_eq!(via_ctx, text);
+    }
+
+    #[test]
+    fn public_libsais64_omp_wrappers_match_direct_calls() {
+        let text = b"banana";
+        let gsa_text = b"ban\0ana\0";
+
+        let mut direct_sa = vec![0; text.len()];
+        let mut omp_sa = vec![0; text.len()];
+        assert_eq!(libsais64(text, &mut direct_sa, 0, None), 0);
+        assert_eq!(libsais64_omp(text, &mut omp_sa, 0, None, 2), 0);
+        assert_eq!(omp_sa, direct_sa);
+        assert_eq!(libsais64_omp(text, &mut omp_sa, 0, None, -1), -1);
+
+        let mut direct_gsa = vec![0; gsa_text.len()];
+        let mut omp_gsa = vec![0; gsa_text.len()];
+        assert_eq!(libsais64_gsa(gsa_text, &mut direct_gsa, 0, None), 0);
+        assert_eq!(libsais64_gsa_omp(gsa_text, &mut omp_gsa, 0, None, 2), 0);
+        assert_eq!(omp_gsa, direct_gsa);
+        assert_eq!(libsais64_gsa_omp(gsa_text, &mut omp_gsa, 0, None, -1), -1);
+
+        let int_text = vec![2, 1, 3, 1, 0];
+        let mut direct_int_text = int_text.clone();
+        let mut omp_int_text = int_text.clone();
+        let mut direct_int_sa = vec![0; int_text.len()];
+        let mut omp_int_sa = vec![0; int_text.len()];
+        assert_eq!(
+            libsais64_int(&mut direct_int_text, &mut direct_int_sa, 4, 0),
+            0
+        );
+        assert_eq!(
+            libsais64_int_omp(&mut omp_int_text, &mut omp_int_sa, 4, 0, 2),
+            0
+        );
+        assert_eq!(omp_int_sa, direct_int_sa);
+        assert_eq!(
+            libsais64_int_omp(&mut omp_int_text, &mut omp_int_sa, 4, 0, -1),
+            -1
+        );
+
+        let long_text = vec![3, 1, 4, 1, 5, 0];
+        let mut direct_long_text = long_text.clone();
+        let mut omp_long_text = long_text.clone();
+        let mut direct_long_sa = vec![0; long_text.len()];
+        let mut omp_long_sa = vec![0; long_text.len()];
+        assert_eq!(
+            libsais64_long(&mut direct_long_text, &mut direct_long_sa, 6, 0),
+            0
+        );
+        assert_eq!(
+            libsais64_long_omp(&mut omp_long_text, &mut omp_long_sa, 6, 0, 2),
+            0
+        );
+        assert_eq!(omp_long_sa, direct_long_sa);
+        assert_eq!(
+            libsais64_long_omp(&mut omp_long_text, &mut omp_long_sa, 6, 0, -1),
+            -1
+        );
+
+        let mut direct_bwt = vec![0; text.len()];
+        let mut direct_work = vec![0; text.len()];
+        let mut omp_bwt = vec![0; text.len()];
+        let mut omp_work = vec![0; text.len()];
+        assert_eq!(
+            libsais64_bwt(text, &mut direct_bwt, &mut direct_work, 0, None),
+            libsais64_bwt_omp(text, &mut omp_bwt, &mut omp_work, 0, None, 2)
+        );
+        assert_eq!(omp_bwt, direct_bwt);
+        assert_eq!(
+            libsais64_bwt_omp(text, &mut omp_bwt, &mut omp_work, 0, None, -1),
+            -1
+        );
+
+        let mut direct_aux = vec![0; 2];
+        let mut omp_aux = vec![0; 2];
+        assert_eq!(
+            libsais64_bwt_aux(
+                text,
+                &mut direct_bwt,
+                &mut direct_work,
+                0,
+                None,
+                4,
+                &mut direct_aux
+            ),
+            libsais64_bwt_aux_omp(
+                text,
+                &mut omp_bwt,
+                &mut omp_work,
+                0,
+                None,
+                4,
+                &mut omp_aux,
+                2
+            )
+        );
+        assert_eq!(omp_bwt, direct_bwt);
+        assert_eq!(omp_aux, direct_aux);
+        assert_eq!(
+            libsais64_bwt_aux_omp(
+                text,
+                &mut omp_bwt,
+                &mut omp_work,
+                0,
+                None,
+                4,
+                &mut omp_aux,
+                -1
+            ),
+            -1
+        );
+    }
+
+    #[test]
+    fn public_libsais64_plcp_omp_wrappers_match_direct_calls() {
+        let text = b"banana";
+        let mut sa = vec![0; text.len()];
+        assert_eq!(libsais64(text, &mut sa, 0, None), 0);
+
+        let mut direct_plcp = vec![0; text.len()];
+        let mut omp_plcp = vec![0; text.len()];
+        assert_eq!(libsais64_plcp(text, &sa, &mut direct_plcp), 0);
+        assert_eq!(libsais64_plcp_omp(text, &sa, &mut omp_plcp, 2), 0);
+        assert_eq!(omp_plcp, direct_plcp);
+        assert_eq!(libsais64_plcp_omp(text, &sa, &mut omp_plcp, -1), -1);
+
+        let mut direct_lcp = vec![0; text.len()];
+        let mut omp_lcp = vec![0; text.len()];
+        assert_eq!(libsais64_lcp(&direct_plcp, &sa, &mut direct_lcp), 0);
+        assert_eq!(libsais64_lcp_omp(&direct_plcp, &sa, &mut omp_lcp, 2), 0);
+        assert_eq!(omp_lcp, direct_lcp);
+        assert_eq!(libsais64_lcp_omp(&direct_plcp, &sa, &mut omp_lcp, -1), -1);
+
+        let gsa_text = b"ban\0ana\0";
+        let mut gsa = vec![0; gsa_text.len()];
+        assert_eq!(libsais64_gsa(gsa_text, &mut gsa, 0, None), 0);
+        let mut direct_gsa_plcp = vec![0; gsa_text.len()];
+        let mut omp_gsa_plcp = vec![0; gsa_text.len()];
+        assert_eq!(libsais64_plcp_gsa(gsa_text, &gsa, &mut direct_gsa_plcp), 0);
+        assert_eq!(
+            libsais64_plcp_gsa_omp(gsa_text, &gsa, &mut omp_gsa_plcp, 2),
+            0
+        );
+        assert_eq!(omp_gsa_plcp, direct_gsa_plcp);
+        assert_eq!(
+            libsais64_plcp_gsa_omp(gsa_text, &gsa, &mut omp_gsa_plcp, -1),
+            -1
+        );
+
+        let int_text = vec![2, 1, 3, 1, 0];
+        let mut int_text_for_sa = int_text.clone();
+        let mut int_sa = vec![0; int_text.len()];
+        assert_eq!(libsais64_int(&mut int_text_for_sa, &mut int_sa, 4, 0), 0);
+        let mut direct_int_plcp = vec![0; int_text.len()];
+        let mut omp_int_plcp = vec![0; int_text.len()];
+        assert_eq!(
+            libsais64_plcp_int(&int_text, &int_sa, &mut direct_int_plcp),
+            0
+        );
+        assert_eq!(
+            libsais64_plcp_int_omp(&int_text, &int_sa, &mut omp_int_plcp, 2),
+            0
+        );
+        assert_eq!(omp_int_plcp, direct_int_plcp);
+        assert_eq!(
+            libsais64_plcp_int_omp(&int_text, &int_sa, &mut omp_int_plcp, -1),
+            -1
+        );
+    }
+
+    #[test]
+    fn public_libsais64_omp_frequency_wrappers_match_direct_calls() {
+        let text = b"banana";
+        let gsa_text = b"ban\0ana\0";
+
+        let mut direct_sa = vec![0; text.len()];
+        let mut omp_sa = vec![0; text.len()];
+        let mut direct_freq = vec![-1; ALPHABET_SIZE];
+        let mut omp_freq = vec![-1; ALPHABET_SIZE];
+        assert_eq!(
+            libsais64(text, &mut direct_sa, 0, Some(&mut direct_freq)),
+            0
+        );
+        assert_eq!(
+            libsais64_omp(text, &mut omp_sa, 0, Some(&mut omp_freq), 2),
+            0
+        );
+        assert_eq!(omp_sa, direct_sa);
+        assert_eq!(omp_freq, direct_freq);
+
+        let mut direct_gsa = vec![0; gsa_text.len()];
+        let mut omp_gsa = vec![0; gsa_text.len()];
+        direct_freq.fill(-1);
+        omp_freq.fill(-1);
+        assert_eq!(
+            libsais64_gsa(gsa_text, &mut direct_gsa, 0, Some(&mut direct_freq)),
+            0
+        );
+        assert_eq!(
+            libsais64_gsa_omp(gsa_text, &mut omp_gsa, 0, Some(&mut omp_freq), 2),
+            0
+        );
+        assert_eq!(omp_gsa, direct_gsa);
+        assert_eq!(omp_freq, direct_freq);
+
+        let mut direct_bwt = vec![0; text.len()];
+        let mut direct_work = vec![0; text.len()];
+        let mut omp_bwt = vec![0; text.len()];
+        let mut omp_work = vec![0; text.len()];
+        direct_freq.fill(-1);
+        omp_freq.fill(-1);
+        assert_eq!(
+            libsais64_bwt(
+                text,
+                &mut direct_bwt,
+                &mut direct_work,
+                0,
+                Some(&mut direct_freq)
+            ),
+            libsais64_bwt_omp(text, &mut omp_bwt, &mut omp_work, 0, Some(&mut omp_freq), 2)
+        );
+        assert_eq!(omp_bwt, direct_bwt);
+        assert_eq!(omp_freq, direct_freq);
+
+        let mut direct_aux = vec![0; 2];
+        let mut omp_aux = vec![0; 2];
+        direct_freq.fill(-1);
+        omp_freq.fill(-1);
+        assert_eq!(
+            libsais64_bwt_aux(
+                text,
+                &mut direct_bwt,
+                &mut direct_work,
+                0,
+                Some(&mut direct_freq),
+                4,
+                &mut direct_aux
+            ),
+            libsais64_bwt_aux_omp(
+                text,
+                &mut omp_bwt,
+                &mut omp_work,
+                0,
+                Some(&mut omp_freq),
+                4,
+                &mut omp_aux,
+                2
+            )
+        );
+        assert_eq!(omp_bwt, direct_bwt);
+        assert_eq!(omp_aux, direct_aux);
+        assert_eq!(omp_freq, direct_freq);
+    }
+
+    #[test]
+    fn public_libsais64_unbwt_omp_frequency_wrappers_match_direct_calls() {
+        let text = b"abracadabra";
+        let mut freq = vec![0; ALPHABET_SIZE];
+        let mut bwt = vec![0; text.len()];
+        let mut work = vec![0; text.len()];
+        let primary = libsais64_bwt(text, &mut bwt, &mut work, 0, Some(&mut freq));
+        assert!(primary >= 0);
+
+        let mut direct = vec![0; text.len()];
+        let mut direct_work = vec![0; text.len() + 1];
+        let mut omp = vec![0; text.len()];
+        let mut omp_work = vec![0; text.len() + 1];
+        assert_eq!(
+            libsais64_unbwt(&bwt, &mut direct, &mut direct_work, Some(&freq), primary),
+            libsais64_unbwt_omp(&bwt, &mut omp, &mut omp_work, Some(&freq), primary, 2)
+        );
+        assert_eq!(omp, direct);
+        assert_eq!(omp, text);
+
+        let mut aux = vec![0; (text.len() - 1) / 4 + 1];
+        assert_eq!(
+            libsais64_bwt_aux(text, &mut bwt, &mut work, 0, Some(&mut freq), 4, &mut aux),
+            0
+        );
+        direct.fill(0);
+        direct_work.fill(0);
+        omp.fill(0);
+        omp_work.fill(0);
+        assert_eq!(
+            libsais64_unbwt_aux(&bwt, &mut direct, &mut direct_work, Some(&freq), 4, &aux),
+            libsais64_unbwt_aux_omp(&bwt, &mut omp, &mut omp_work, Some(&freq), 4, &aux, 2)
+        );
+        assert_eq!(omp, direct);
+        assert_eq!(omp, text);
+    }
+
+    #[test]
+    fn public_libsais64_bwt_aux_matches_upstream_c() {
+        for text in [
+            b"banana".as_slice(),
+            b"mississippi",
+            b"abracadabra",
+            b"AAAAAAAAAAAAAAAA",
+            b"zyxwvutsrqponmlk",
+        ] {
+            assert_libsais64_bwt_aux_matches_c(text, 4);
+        }
+    }
+
+    #[test]
+    fn public_libsais64_frequency_outputs_match_upstream_c() {
+        assert_libsais64_freq_outputs_match_c(b"banana", b"ban\0ana\0");
+    }
+
+    #[test]
+    fn public_libsais64_unbwt_with_frequency_matches_upstream_c() {
+        assert_libsais64_unbwt_freq_matches_c(b"abracadabra");
+    }
+
+    #[test]
+    fn public_libsais64_unbwt_matches_upstream_c() {
+        for text in [
+            b"a".as_slice(),
+            b"banana",
+            b"mississippi",
+            b"abracadabra",
+            b"AAAAAAAAAAAAAAAA",
+            b"zyxwvutsrqponmlk",
+        ] {
+            assert_libsais64_unbwt_matches_c(text);
+        }
+    }
+
+    #[test]
+    fn public_libsais64_unbwt_aux_matches_upstream_c() {
+        for text in [
+            b"banana".as_slice(),
+            b"mississippi",
+            b"abracadabra",
+            b"AAAAAAAAAAAAAAAA",
+            b"zyxwvutsrqponmlk",
+        ] {
+            assert_libsais64_unbwt_aux_matches_c(text, 4);
+        }
+    }
+
+    #[test]
+    fn public_libsais64_bwt_aux_round_trips() {
+        for text in [
+            b"banana".as_slice(),
+            b"mississippi",
+            b"abracadabra",
+            b"AAAAAAAAAAAAAAAA",
+            b"zyxwvutsrqponmlk",
+        ] {
+            assert_libsais64_bwt_aux_round_trips(text, 4);
+        }
     }
 }

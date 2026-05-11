@@ -77,8 +77,18 @@ fn verify_outputs(bytes: &[u8]) {
     let rust_result = libsais(bytes, &mut sa_rust, 0, None);
     let c_result = unsafe { probe_public_libsais(bytes.as_ptr(), sa_c.as_mut_ptr(), n, 0) };
 
-    assert_eq!(rust_result, c_result, "result mismatch for input length {}", bytes.len());
-    assert_eq!(sa_rust, sa_c, "suffix array mismatch for input length {}", bytes.len());
+    assert_eq!(
+        rust_result,
+        c_result,
+        "result mismatch for input length {}",
+        bytes.len()
+    );
+    assert_eq!(
+        sa_rust,
+        sa_c,
+        "suffix array mismatch for input length {}",
+        bytes.len()
+    );
 }
 
 fn benchmark_workload(workload: &Workload) {
@@ -96,7 +106,8 @@ fn benchmark_workload(workload: &Workload) {
 
     let mut sa_c = vec![0; workload.bytes.len()];
     let c_total = bench_one(iterations, || {
-        let result = unsafe { probe_public_libsais(workload.bytes.as_ptr(), sa_c.as_mut_ptr(), n, 0) };
+        let result =
+            unsafe { probe_public_libsais(workload.bytes.as_ptr(), sa_c.as_mut_ptr(), n, 0) };
         black_box(result);
         black_box(&sa_c);
     });

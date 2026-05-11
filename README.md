@@ -59,6 +59,8 @@ Notes:
 - `sa.len()` must be at least `text.len() + fs`
 - `fs` is extra scratch space made available at the tail of `sa`
 - `freq`, when used, must have length at least `256`
+- The 64-bit API is available as `libsais_rs::libsais64::libsais64` and uses `libsais_rs::SaSint64`.
+- 16-bit input APIs are available under `libsais_rs::libsais16` and `libsais_rs::libsais16x64`.
 
 ## Development
 

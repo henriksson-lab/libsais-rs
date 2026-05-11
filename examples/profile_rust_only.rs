@@ -43,11 +43,17 @@ fn iterations_for_len(len: usize) -> usize {
 
 fn workload_from_args(args: &[String]) -> (String, Vec<u8>) {
     if args.is_empty() {
-        return ("libsais/src/libsais.c".to_string(), read_workload("libsais/src/libsais.c"));
+        return (
+            "libsais/src/libsais.c".to_string(),
+            read_workload("libsais/src/libsais.c"),
+        );
     }
 
     if args[0] == "--generated-1m" {
-        return ("generated/mixed-1MiB".to_string(), generated_workload(1 << 20));
+        return (
+            "generated/mixed-1MiB".to_string(),
+            generated_workload(1 << 20),
+        );
     }
 
     let path = &args[0];
