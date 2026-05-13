@@ -30,6 +30,9 @@ include = [
 name = "libsais_rs"
 path = "src/lib.rs"
 
+[dependencies]
+rayon = "1.10"
+
 [build-dependencies]
 cc = "1"
 

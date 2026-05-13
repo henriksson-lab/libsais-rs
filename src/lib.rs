@@ -1,6 +1,8 @@
 use std::marker::PhantomData;
 use std::mem;
 
+use rayon::prelude::*;
+
 pub mod libsais16;
 pub mod libsais16x64;
 pub mod libsais64;
@@ -29,6 +31,10 @@ pub const LIBSAIS_PER_THREAD_CACHE_SIZE: usize = 24_576;
 pub const LIBSAIS_FLAGS_NONE: SaSint = 0;
 pub const LIBSAIS_FLAGS_BWT: SaSint = 1;
 pub const LIBSAIS_FLAGS_GSA: SaSint = 2;
+
+pub(crate) fn run_rayon_with_threads<R: Send>(_threads: usize, f: impl FnOnce() -> R + Send) -> R {
+    f()
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ThreadCache {
@@ -220,6 +226,18 @@ pub fn flip_suffix_markers_omp(sa: &mut [SaSint], l: SaSint, threads: SaSint) {
     } else {
         1
     };
+    if omp_num_threads > 1 {
+        let chunk_size = ((len / omp_num_threads) & !15usize).max(16);
+        run_rayon_with_threads(omp_num_threads, || {
+            sa[..len].par_chunks_mut(chunk_size).for_each(|chunk| {
+                for value in chunk {
+                    *value ^= SAINT_MIN;
+                }
+            });
+        });
+        return;
+    }
+
     let omp_block_stride = (len / omp_num_threads) & !15usize;
     for omp_thread_num in 0..omp_num_threads {
         let omp_block_start = omp_thread_num * omp_block_stride;
@@ -11546,16 +11564,62 @@ pub fn compute_phi_omp(sa: &[SaSint], plcp: &mut [SaSint], n: SaSint, threads: S
         return;
     }
 
+    let threads_usize = usize::try_from(threads).expect("threads must be non-negative");
     let block_stride = ((n as FastSint) / (threads as FastSint)) & !15;
-    for thread in 0..threads {
-        let block_start = thread as FastSint * block_stride;
-        let block_size = if thread < threads - 1 {
-            block_stride
-        } else {
-            n as FastSint - block_start
-        };
-        compute_phi(sa, plcp, n, block_start, block_size);
-    }
+    let plcp_addr = plcp.as_mut_ptr() as usize;
+    let n_usize = usize::try_from(n).expect("n must be non-negative");
+
+    run_rayon_with_threads(threads_usize, || {
+        (0..threads_usize).into_par_iter().for_each(|thread| {
+            let block_start = thread as FastSint * block_stride;
+            let block_size = if thread + 1 < threads_usize {
+                block_stride
+            } else {
+                n as FastSint - block_start
+            };
+            let start = usize::try_from(block_start).expect("omp_block_start must be non-negative");
+            let size = usize::try_from(block_size).expect("omp_block_size must be non-negative");
+            let end = start + size;
+            let mut i = start;
+            let mut k = if block_start > 0 { sa[start - 1] } else { n };
+            let plcp_ptr = plcp_addr as *mut SaSint;
+
+            let fast_end = block_start + block_size - 64 - 3;
+            while (i as FastSint) < fast_end {
+                unsafe {
+                    // SA is a suffix-array permutation, so each thread writes a disjoint PLCP slot.
+                    *plcp_ptr
+                        .add(usize::try_from(sa[i]).expect("suffix index must be non-negative")) =
+                        k;
+                    k = sa[i];
+                    *plcp_ptr.add(
+                        usize::try_from(sa[i + 1]).expect("suffix index must be non-negative"),
+                    ) = k;
+                    k = sa[i + 1];
+                    *plcp_ptr.add(
+                        usize::try_from(sa[i + 2]).expect("suffix index must be non-negative"),
+                    ) = k;
+                    k = sa[i + 2];
+                    *plcp_ptr.add(
+                        usize::try_from(sa[i + 3]).expect("suffix index must be non-negative"),
+                    ) = k;
+                    k = sa[i + 3];
+                }
+                i += 4;
+            }
+
+            while i < end.min(n_usize) {
+                unsafe {
+                    // SA is a suffix-array permutation, so each thread writes a disjoint PLCP slot.
+                    *plcp_ptr
+                        .add(usize::try_from(sa[i]).expect("suffix index must be non-negative")) =
+                        k;
+                }
+                k = sa[i];
+                i += 1;
+            }
+        });
+    });
 }
 
 pub fn compute_plcp(
@@ -11588,16 +11652,28 @@ pub fn compute_plcp_omp(t: &[u8], plcp: &mut [SaSint], n: SaSint, threads: SaSin
         return;
     }
 
-    let block_stride = ((n as FastSint) / (threads as FastSint)) & !15;
-    for thread in 0..threads {
-        let block_start = thread as FastSint * block_stride;
-        let block_size = if thread < threads - 1 {
-            block_stride
-        } else {
-            n as FastSint - block_start
-        };
-        compute_plcp(t, plcp, n as FastSint, block_start, block_size);
-    }
+    let n_usize = usize::try_from(n).expect("n must be non-negative");
+    let threads_usize = usize::try_from(threads).expect("threads must be non-negative");
+    let chunk_size = ((n_usize / threads_usize) & !15usize).max(16);
+    run_rayon_with_threads(threads_usize, || {
+        plcp[..n_usize]
+            .par_chunks_mut(chunk_size)
+            .enumerate()
+            .for_each(|(chunk_index, chunk)| {
+                let start = chunk_index * chunk_size;
+                let mut l = 0usize;
+                for (offset, value) in chunk.iter_mut().enumerate() {
+                    let i = start + offset;
+                    let k = usize::try_from(*value).expect("phi entry must be non-negative");
+                    let m = n_usize - i.max(k);
+                    while l < m && t[i + l] == t[k + l] {
+                        l += 1;
+                    }
+                    *value = SaSint::try_from(l).expect("LCP length must fit SaSint");
+                    l = l.saturating_sub(1);
+                }
+            });
+    });
 }
 
 pub fn compute_plcp_gsa(
@@ -11627,16 +11703,27 @@ pub fn compute_plcp_gsa_omp(t: &[u8], plcp: &mut [SaSint], n: SaSint, threads: S
         return;
     }
 
-    let block_stride = ((n as FastSint) / (threads as FastSint)) & !15;
-    for thread in 0..threads {
-        let block_start = thread as FastSint * block_stride;
-        let block_size = if thread < threads - 1 {
-            block_stride
-        } else {
-            n as FastSint - block_start
-        };
-        compute_plcp_gsa(t, plcp, block_start, block_size);
-    }
+    let n_usize = usize::try_from(n).expect("n must be non-negative");
+    let threads_usize = usize::try_from(threads).expect("threads must be non-negative");
+    let chunk_size = ((n_usize / threads_usize) & !15usize).max(16);
+    run_rayon_with_threads(threads_usize, || {
+        plcp[..n_usize]
+            .par_chunks_mut(chunk_size)
+            .enumerate()
+            .for_each(|(chunk_index, chunk)| {
+                let start = chunk_index * chunk_size;
+                let mut l = 0usize;
+                for (offset, value) in chunk.iter_mut().enumerate() {
+                    let i = start + offset;
+                    let k = usize::try_from(*value).expect("phi entry must be non-negative");
+                    while t[i + l] > 0 && t[i + l] == t[k + l] {
+                        l += 1;
+                    }
+                    *value = SaSint::try_from(l).expect("LCP length must fit SaSint");
+                    l = l.saturating_sub(1);
+                }
+            });
+    });
 }
 
 pub fn compute_plcp_int(
@@ -11669,16 +11756,28 @@ pub fn compute_plcp_int_omp(t: &[SaSint], plcp: &mut [SaSint], n: SaSint, thread
         return;
     }
 
-    let block_stride = ((n as FastSint) / (threads as FastSint)) & !15;
-    for thread in 0..threads {
-        let block_start = thread as FastSint * block_stride;
-        let block_size = if thread < threads - 1 {
-            block_stride
-        } else {
-            n as FastSint - block_start
-        };
-        compute_plcp_int(t, plcp, n as FastSint, block_start, block_size);
-    }
+    let n_usize = usize::try_from(n).expect("n must be non-negative");
+    let threads_usize = usize::try_from(threads).expect("threads must be non-negative");
+    let chunk_size = ((n_usize / threads_usize) & !15usize).max(16);
+    run_rayon_with_threads(threads_usize, || {
+        plcp[..n_usize]
+            .par_chunks_mut(chunk_size)
+            .enumerate()
+            .for_each(|(chunk_index, chunk)| {
+                let start = chunk_index * chunk_size;
+                let mut l = 0usize;
+                for (offset, value) in chunk.iter_mut().enumerate() {
+                    let i = start + offset;
+                    let k = usize::try_from(*value).expect("phi entry must be non-negative");
+                    let m = n_usize - i.max(k);
+                    while l < m && t[i + l] == t[k + l] {
+                        l += 1;
+                    }
+                    *value = SaSint::try_from(l).expect("LCP length must fit SaSint");
+                    l = l.saturating_sub(1);
+                }
+            });
+    });
 }
 
 pub fn compute_lcp(
@@ -11709,16 +11808,35 @@ pub fn compute_lcp_omp(
         return;
     }
 
-    let block_stride = ((n as FastSint) / (threads as FastSint)) & !15;
-    for thread in 0..threads {
-        let block_start = thread as FastSint * block_stride;
-        let block_size = if thread < threads - 1 {
-            block_stride
-        } else {
-            n as FastSint - block_start
-        };
-        compute_lcp(plcp, sa, lcp, block_start, block_size);
-    }
+    let n_usize = usize::try_from(n).expect("n must be non-negative");
+    assert!(plcp.len() >= n_usize);
+    assert!(sa.len() >= n_usize);
+    assert!(lcp.len() >= n_usize);
+    let threads_usize = usize::try_from(threads).expect("threads must be non-negative");
+    let chunk_size = ((n_usize / threads_usize) & !15usize).max(16);
+    let plcp_ptr = plcp.as_ptr() as usize;
+    let sa_ptr = sa.as_ptr() as usize;
+    run_rayon_with_threads(threads_usize, || {
+        lcp[..n_usize]
+            .par_chunks_mut(chunk_size)
+            .enumerate()
+            .for_each(|(chunk_index, chunk)| {
+                let start = chunk_index * chunk_size;
+                let dst_ptr = chunk.as_mut_ptr();
+                let sa_ptr = sa_ptr as *const SaSint;
+                let plcp_ptr = plcp_ptr as *const SaSint;
+                for offset in 0..chunk.len() {
+                    let i = start + offset;
+                    let suffix = unsafe { *sa_ptr.add(i) };
+                    let suffix =
+                        usize::try_from(suffix).expect("suffix index must be non-negative");
+                    assert!(suffix < plcp.len());
+                    unsafe {
+                        *dst_ptr.add(offset) = *plcp_ptr.add(suffix);
+                    }
+                }
+            });
+    });
 }
 
 pub fn libsais_plcp(t: &[u8], sa: &[SaSint], plcp: &mut [SaSint]) -> SaSint {
@@ -13322,18 +13440,27 @@ pub fn bwt_copy_8u_omp(u: &mut [u8], a: &[SaSint], n: SaSint, threads: SaSint) {
         return;
     }
 
-    let block_stride = ((n as FastSint) / (threads as FastSint)) & !15;
-    for thread in 0..threads {
-        let block_start = thread as FastSint * block_stride;
-        let block_size = if thread < threads - 1 {
-            block_stride
-        } else {
-            n as FastSint - block_start
-        };
-        let start = usize::try_from(block_start).expect("block start must be non-negative");
-        let size = usize::try_from(block_size).expect("block size must be non-negative");
-        bwt_copy_8u(&mut u[start..], &a[start..], size as SaSint);
-    }
+    let n_usize = usize::try_from(n).expect("n must be non-negative");
+    assert!(u.len() >= n_usize);
+    assert!(a.len() >= n_usize);
+    let threads_usize = usize::try_from(threads).expect("threads must be non-negative");
+    let chunk_size = ((n_usize / threads_usize) & !15usize).max(16);
+    let a_ptr = a.as_ptr() as usize;
+    run_rayon_with_threads(threads_usize, || {
+        u[..n_usize]
+            .par_chunks_mut(chunk_size)
+            .enumerate()
+            .for_each(|(chunk_index, chunk)| {
+                let start = chunk_index * chunk_size;
+                let dst_ptr = chunk.as_mut_ptr();
+                let src_ptr = unsafe { (a_ptr as *const SaSint).add(start) };
+                for offset in 0..chunk.len() {
+                    unsafe {
+                        *dst_ptr.add(offset) = *src_ptr.add(offset) as u8;
+                    }
+                }
+            });
+    });
 }
 
 pub fn accumulate_counts_s32_2(bucket00: &mut [SaSint], bucket01: &[SaSint]) {
