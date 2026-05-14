@@ -1,5 +1,5 @@
 use std::marker::PhantomData;
-use std::mem;
+use std::mem::{self, MaybeUninit};
 
 use crate::run_rayon_with_threads;
 use rayon::prelude::*;
@@ -10983,6 +10983,93 @@ pub fn libsais64(t: &[u8], sa: &mut [SaSint], fs: SaSint, freq: Option<&mut [SaS
     }
 
     libsais64_main(t, sa, LIBSAIS_FLAGS_NONE, 0, None, fs, freq, 1)
+}
+
+unsafe extern "C" {
+    fn probe_public_libsais64_omp_freq(
+        t: *const u8,
+        sa: *mut SaSint,
+        n: SaSint,
+        fs: SaSint,
+        freq: *mut SaSint,
+        threads: SaSint,
+    ) -> SaSint;
+}
+
+pub fn libsais64_upstream_c_omp(
+    t: &[u8],
+    sa: &mut [SaSint],
+    fs: SaSint,
+    freq: Option<&mut [SaSint]>,
+    threads: SaSint,
+) -> SaSint {
+    if threads < 0 {
+        return -1;
+    }
+    if fs < 0
+        || t.len() > SaSint::MAX as usize
+        || sa.len()
+            < t.len()
+                .saturating_add(usize::try_from(fs).unwrap_or(usize::MAX))
+    {
+        return -1;
+    }
+    if let Some(freq) = freq.as_ref() {
+        if freq.len() < ALPHABET_SIZE {
+            return -1;
+        }
+    }
+
+    let n = t.len() as SaSint;
+    let freq_ptr = freq.map_or(std::ptr::null_mut(), |freq| freq.as_mut_ptr());
+    unsafe {
+        probe_public_libsais64_omp_freq(
+            t.as_ptr(),
+            sa.as_mut_ptr(),
+            n,
+            fs,
+            freq_ptr,
+            threads.max(1),
+        )
+    }
+}
+
+pub fn libsais64_upstream_c_omp_uninit(
+    t: &[u8],
+    sa: &mut [MaybeUninit<SaSint>],
+    fs: SaSint,
+    freq: Option<&mut [SaSint]>,
+    threads: SaSint,
+) -> SaSint {
+    if threads < 0 {
+        return -1;
+    }
+    if fs < 0
+        || t.len() > SaSint::MAX as usize
+        || sa.len()
+            < t.len()
+                .saturating_add(usize::try_from(fs).unwrap_or(usize::MAX))
+    {
+        return -1;
+    }
+    if let Some(freq) = freq.as_ref() {
+        if freq.len() < ALPHABET_SIZE {
+            return -1;
+        }
+    }
+
+    let n = t.len() as SaSint;
+    let freq_ptr = freq.map_or(std::ptr::null_mut(), |freq| freq.as_mut_ptr());
+    unsafe {
+        probe_public_libsais64_omp_freq(
+            t.as_ptr(),
+            sa.as_mut_ptr().cast::<SaSint>(),
+            n,
+            fs,
+            freq_ptr,
+            threads.max(1),
+        )
+    }
 }
 
 pub fn libsais64_gsa(

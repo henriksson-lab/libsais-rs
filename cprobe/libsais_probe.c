@@ -111,6 +111,17 @@ sa_sint_t probe_public_libsais_freq(
     return libsais(T, SA, n, fs, freq);
 }
 
+sa_sint_t probe_public_libsais_omp_freq(
+    const uint8_t * T,
+    sa_sint_t * SA,
+    sa_sint_t n,
+    sa_sint_t fs,
+    sa_sint_t * freq,
+    sa_sint_t threads
+) {
+    return libsais_omp(T, SA, n, fs, freq, threads);
+}
+
 sa_sint_t probe_public_libsais_gsa_freq(
     const uint8_t * T,
     sa_sint_t * SA,

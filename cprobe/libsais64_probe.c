@@ -19,6 +19,17 @@ int64_t probe_public_libsais64_freq(
     return libsais64(T, SA, n, fs, freq);
 }
 
+int64_t probe_public_libsais64_omp_freq(
+    const uint8_t * T,
+    int64_t * SA,
+    int64_t n,
+    int64_t fs,
+    int64_t * freq,
+    int64_t threads
+) {
+    return libsais64_omp(T, SA, n, fs, freq, threads);
+}
+
 int64_t probe_public_libsais64_gsa(
     const uint8_t * T,
     int64_t * SA,
