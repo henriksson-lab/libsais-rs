@@ -4,7 +4,7 @@
 
 This crate currently tracks upstream `libsais` version `2.10.4`. 
 
-
+* 2026-05-15: Feature complete and seemingly tested
 * 2026-04-24: Appears to be a functional translation on par with speed. More testing needed, compare with original version before you consider swapping it out
 
 
@@ -37,7 +37,7 @@ This blurb might be out of date. Go to [this page](https://github.com/henriksson
 
 ```toml
 [dependencies]
-libsais-rs = "0.1.1"
+libsais-rs = "0.2"
 ```
 
 ```rust
@@ -64,21 +64,39 @@ Notes:
 
 ## Development
 
-Run tests with:
+The test suite is *differential*: every Rust function is checked against the original C implementation. See [Using the `upstream-c` feature](#using-the-upstream-c-feature) below for the prerequisites, then:
 
 ```bash
-cargo test
+cargo test --features upstream-c
 ```
 
 Run the local Rust-vs-C benchmark example with:
 
 ```bash
-cargo run --release --example bench_vs_c
+cargo run --release --features upstream-c --example bench_vs_c
 ```
+
+## Using the `upstream-c` developer feature
+
+The `upstream-c` Cargo feature builds the original C `libsais` alongside the Rust translation and exposes `libsais*_upstream_c*` wrappers around it. It is also what gates the differential test suite. **The upstream C source is not bundled in the crate**, so anyone — contributor or downstream user — who wants this feature must fetch it themselves.
+
+Requirements:
+
+1. The upstream C source at `./libsais/` next to `Cargo.toml`:
+
+   ```bash
+   git clone --depth 1 --branch v2.10.4 https://github.com/IlyaGrebnov/libsais.git libsais
+   ```
+
+2. GCC with OpenMP (`libgomp`). Other compilers/runtimes (clang/`libomp`, MSVC/`vcomp`) are not supported (let us know if this is a problem).
+
+Practical consequence: the feature only works from a source checkout of this crate that has `./libsais/` populated. It is **not** usable as a regular opt-in feature from a `crates.io` dependency, because Cargo unpacks dependency crates into a location where you cannot inject the C tree. If you need the original C from a downstream project, depend on the upstream C library directly instead.
+
+Default (no `upstream-c`) end users do not need GCC, OpenMP, or any C source — the default build is pure Rust + rayon.
 
 ## Performance
 
-The repository includes [`examples/bench_vs_c.rs`](examples/bench_vs_c.rs), which compares the current Rust translation against the vendored upstream C implementation in a single-threaded suffix-array-construction configuration.
+The repository includes [`examples/bench_vs_c.rs`](examples/bench_vs_c.rs), which compares the current Rust translation against the upstream C implementation in a single-threaded suffix-array-construction configuration. Requires the `upstream-c` feature (see prerequisites above).
 
 Latest local snapshot:
 
@@ -98,7 +116,7 @@ These numbers are a local snapshot, not a stability guarantee. Repeated runs can
 
 ## Upstream Sources
 
-The repository vendors the upstream C sources under [`libsais/`](libsais/) for reference and parity testing.
+This crate is a translation of [`IlyaGrebnov/libsais`](https://github.com/IlyaGrebnov/libsais) 2.10.4. The upstream C source is intentionally **not** bundled in this repository or the published crate; fetch it yourself if you need it (see [Using the `upstream-c` feature](#using-the-upstream-c-feature)).
 
 Upstream project:
 

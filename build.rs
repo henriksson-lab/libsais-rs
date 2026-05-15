@@ -1,5 +1,12 @@
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+
+    #[cfg(feature = "upstream-c")]
+    build_upstream_c();
+}
+
+#[cfg(feature = "upstream-c")]
+fn build_upstream_c() {
     println!("cargo:rerun-if-changed=cprobe/libsais_probe.c");
     println!("cargo:rerun-if-changed=cprobe/libsais64_probe.c");
     println!("cargo:rerun-if-changed=cprobe/libsais16_probe.c");

@@ -1,5 +1,13 @@
+//! Rust translation of upstream [libsais](https://github.com/IlyaGrebnov/libsais)
+//! 2.10.4 by Ilya Grebnov.
+//!
+//! This module exposes the 64-bit suffix array, BWT, unBWT, PLCP and LCP entry
+//! points (mirroring `libsais64.h`).
+
 use std::marker::PhantomData;
-use std::mem::{self, MaybeUninit};
+use std::mem;
+#[cfg(feature = "upstream-c")]
+use std::mem::MaybeUninit;
 
 use crate::run_rayon_with_threads;
 use rayon::prelude::*;
@@ -70,19 +78,27 @@ pub struct UnbwtContext {
     pub threads: FastSint,
 }
 
+/// Internal helper: buckets index2.
+#[doc(hidden)]
 pub fn buckets_index2(c: FastUint, s: FastUint) -> FastUint {
     (c << 1) + s
 }
 
+/// Internal helper: buckets index4.
+#[doc(hidden)]
 pub fn buckets_index4(c: FastUint, s: FastUint) -> FastUint {
     (c << 2) + s
 }
 
+/// Internal helper: align up.
+#[doc(hidden)]
 pub fn align_up(value: usize, alignment: usize) -> usize {
     debug_assert!(alignment.is_power_of_two());
     (value + alignment - 1) & !(alignment - 1)
 }
 
+/// Internal helper: alloc thread state.
+#[doc(hidden)]
 pub fn alloc_thread_state(threads: SaSint) -> Option<Vec<ThreadState>> {
     if threads <= 0 {
         return None;
@@ -92,6 +108,8 @@ pub fn alloc_thread_state(threads: SaSint) -> Option<Vec<ThreadState>> {
     Some((0..len).map(|_| ThreadState::new()).collect())
 }
 
+/// Internal helper: create ctx main.
+#[doc(hidden)]
 pub fn create_ctx_main(threads: SaSint) -> Option<Context> {
     if threads <= 0 {
         return None;
@@ -110,12 +128,20 @@ pub fn create_ctx_main(threads: SaSint) -> Option<Context> {
     })
 }
 
+/// Creates the libsais64 context that allows reusing allocated memory with each libsais64 operation.
+///
+/// In multi-threaded environments, use one context per thread for parallel executions.
+///
+/// Returns the context, or `None` on allocation failure.
 pub fn create_ctx() -> Option<Context> {
     create_ctx_main(1)
 }
 
+/// Destroys the libsais64 context and frees previously allocated memory.
 pub fn free_ctx(_ctx: Context) {}
 
+/// Internal helper: unbwt create ctx main.
+#[doc(hidden)]
 pub fn unbwt_create_ctx_main(threads: SaSint) -> Option<UnbwtContext> {
     if threads <= 0 {
         return None;
@@ -136,14 +162,24 @@ pub fn unbwt_create_ctx_main(threads: SaSint) -> Option<UnbwtContext> {
     })
 }
 
+/// Internal helper: unbwt free ctx main.
+#[doc(hidden)]
 pub fn unbwt_free_ctx_main(_ctx: UnbwtContext) {}
 
+/// Creates the libsais64 reverse-BWT context that allows reusing allocated memory with each `libsais64_unbwt_*` operation.
+///
+/// In multi-threaded environments, use one context per thread for parallel executions.
+///
+/// Returns the context, or `None` on allocation failure.
 pub fn unbwt_create_ctx() -> Option<UnbwtContext> {
     unbwt_create_ctx_main(1)
 }
 
+/// Destroys the libsais64 reverse-BWT context and frees previously allocated memory.
 pub fn unbwt_free_ctx(_ctx: UnbwtContext) {}
 
+/// Internal helper: count negative marked suffixes.
+#[doc(hidden)]
 pub fn count_negative_marked_suffixes(
     sa: &[SaSint],
     block_start: FastSint,
@@ -155,6 +191,8 @@ pub fn count_negative_marked_suffixes(
         .sum()
 }
 
+/// Internal helper: count zero marked suffixes.
+#[doc(hidden)]
 pub fn count_zero_marked_suffixes(
     sa: &[SaSint],
     block_start: FastSint,
@@ -166,6 +204,8 @@ pub fn count_zero_marked_suffixes(
         .sum()
 }
 
+/// Internal helper: place cached suffixes.
+#[doc(hidden)]
 pub fn place_cached_suffixes(
     sa: &mut [SaSint],
     cache: &[ThreadCache],
@@ -186,6 +226,8 @@ pub fn place_cached_suffixes(
     }
 }
 
+/// Internal helper: compact and place cached suffixes.
+#[doc(hidden)]
 pub fn compact_and_place_cached_suffixes(
     sa: &mut [SaSint],
     cache: &mut [ThreadCache],
@@ -209,6 +251,8 @@ pub fn compact_and_place_cached_suffixes(
     place_cached_suffixes(sa, cache, block_start, (write - read_start) as FastSint);
 }
 
+/// Internal helper: flip suffix markers (OpenMP variant).
+#[doc(hidden)]
 pub fn flip_suffix_markers_omp(sa: &mut [SaSint], l: SaSint, threads: SaSint) {
     let len = usize::try_from(l).expect("l must be non-negative");
     let omp_num_threads = if threads > 1 && l >= 65_536 {
@@ -242,6 +286,8 @@ pub fn flip_suffix_markers_omp(sa: &mut [SaSint], l: SaSint, threads: SaSint) {
     }
 }
 
+/// Internal helper: gather lms suffixes 8u.
+#[doc(hidden)]
 pub fn gather_lms_suffixes_8u(
     t: &[u8],
     sa: &mut [SaSint],
@@ -319,6 +365,8 @@ pub fn gather_lms_suffixes_8u(
     sa[usize::try_from(m).expect("m must be non-negative")] = (i + 1) as SaSint;
 }
 
+/// Internal helper: gather lms suffixes 8u (OpenMP variant).
+#[doc(hidden)]
 pub fn gather_lms_suffixes_8u_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -374,6 +422,8 @@ pub fn gather_lms_suffixes_8u_omp(
     }
 }
 
+/// Internal helper: gather lms suffixes 32s.
+#[doc(hidden)]
 pub fn gather_lms_suffixes_32s(t: &[SaSint], sa: &mut [SaSint], n: SaSint) -> SaSint {
     let n_usize = usize::try_from(n).expect("n must be non-negative");
     let mut i = n as FastSint - 2;
@@ -420,6 +470,8 @@ pub fn gather_lms_suffixes_32s(t: &[SaSint], sa: &mut [SaSint], n: SaSint) -> Sa
     (n_usize - 1 - m) as SaSint
 }
 
+/// Internal helper: gather compacted lms suffixes 32s.
+#[doc(hidden)]
 pub fn gather_compacted_lms_suffixes_32s(t: &[SaSint], sa: &mut [SaSint], n: SaSint) -> SaSint {
     let n_usize = usize::try_from(n).expect("n must be non-negative");
     let mut i = n as FastSint - 2;
@@ -466,6 +518,8 @@ pub fn gather_compacted_lms_suffixes_32s(t: &[SaSint], sa: &mut [SaSint], n: SaS
     (n_usize - 1 - m) as SaSint
 }
 
+/// Internal helper: count lms suffixes 32s 4k.
+#[doc(hidden)]
 pub fn count_lms_suffixes_32s_4k(t: &[SaSint], n: SaSint, k: SaSint, buckets: &mut [SaSint]) {
     buckets.fill(0);
     let n_usize = usize::try_from(n).expect("n must be non-negative");
@@ -508,6 +562,8 @@ pub fn count_lms_suffixes_32s_4k(t: &[SaSint], n: SaSint, k: SaSint, buckets: &m
     buckets[buckets_index4(c0 as usize, f0 + f0)] += 1;
 }
 
+/// Internal helper: count lms suffixes 32s 2k.
+#[doc(hidden)]
 pub fn count_lms_suffixes_32s_2k(t: &[SaSint], n: SaSint, k: SaSint, buckets: &mut [SaSint]) {
     buckets.fill(0);
     let n_usize = usize::try_from(n).expect("n must be non-negative");
@@ -550,6 +606,8 @@ pub fn count_lms_suffixes_32s_2k(t: &[SaSint], n: SaSint, k: SaSint, buckets: &m
     buckets[buckets_index2(c0 as usize, 0)] += 1;
 }
 
+/// Internal helper: count compacted lms suffixes 32s 2k.
+#[doc(hidden)]
 pub fn count_compacted_lms_suffixes_32s_2k(
     t: &[SaSint],
     n: SaSint,
@@ -597,6 +655,8 @@ pub fn count_compacted_lms_suffixes_32s_2k(
     buckets[buckets_index2((c0 as SaSint & SAINT_MAX) as usize, 0)] += 1;
 }
 
+/// Internal helper: count and gather lms suffixes 8u.
+#[doc(hidden)]
 pub fn count_and_gather_lms_suffixes_8u(
     t: &[u8],
     sa: &mut [SaSint],
@@ -682,6 +742,8 @@ pub fn count_and_gather_lms_suffixes_8u(
     (omp_block_start + omp_block_size - 1 - m) as SaSint
 }
 
+/// Internal helper: count and gather lms suffixes 8u (OpenMP variant).
+#[doc(hidden)]
 pub fn count_and_gather_lms_suffixes_8u_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -758,6 +820,8 @@ pub fn count_and_gather_lms_suffixes_8u_omp(
     m
 }
 
+/// Internal helper: count and gather lms suffixes 32s 4k.
+#[doc(hidden)]
 pub fn count_and_gather_lms_suffixes_32s_4k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -846,6 +910,8 @@ pub fn count_and_gather_lms_suffixes_32s_4k(
     (omp_block_start + omp_block_size - 1 - m) as SaSint
 }
 
+/// Internal helper: count and gather lms suffixes 32s 2k.
+#[doc(hidden)]
 pub fn count_and_gather_lms_suffixes_32s_2k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -934,6 +1000,8 @@ pub fn count_and_gather_lms_suffixes_32s_2k(
     (omp_block_start + omp_block_size - 1 - m) as SaSint
 }
 
+/// Internal helper: count and gather compacted lms suffixes 32s 2k.
+#[doc(hidden)]
 pub fn count_and_gather_compacted_lms_suffixes_32s_2k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -1023,6 +1091,8 @@ pub fn count_and_gather_compacted_lms_suffixes_32s_2k(
     (block_start + block_size - 1 - m) as SaSint
 }
 
+/// Internal helper: get bucket stride.
+#[doc(hidden)]
 pub fn get_bucket_stride(
     free_space: FastSint,
     bucket_size: FastSint,
@@ -1039,6 +1109,8 @@ pub fn get_bucket_stride(
     bucket_size
 }
 
+/// Internal helper: count and gather lms suffixes 32s 4k nofs (OpenMP variant).
+#[doc(hidden)]
 pub fn count_and_gather_lms_suffixes_32s_4k_nofs_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -1060,6 +1132,8 @@ pub fn count_and_gather_lms_suffixes_32s_4k_nofs_omp(
     m
 }
 
+/// Internal helper: count and gather lms suffixes 32s 2k nofs (OpenMP variant).
+#[doc(hidden)]
 pub fn count_and_gather_lms_suffixes_32s_2k_nofs_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -1081,6 +1155,8 @@ pub fn count_and_gather_lms_suffixes_32s_2k_nofs_omp(
     m
 }
 
+/// Internal helper: count and gather compacted lms suffixes 32s 2k nofs (OpenMP variant).
+#[doc(hidden)]
 pub fn count_and_gather_compacted_lms_suffixes_32s_2k_nofs_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -1102,6 +1178,8 @@ pub fn count_and_gather_compacted_lms_suffixes_32s_2k_nofs_omp(
     m
 }
 
+/// Internal helper: count and gather lms suffixes 32s 4k fs (OpenMP variant).
+#[doc(hidden)]
 pub fn count_and_gather_lms_suffixes_32s_4k_fs_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -1201,6 +1279,8 @@ pub fn count_and_gather_lms_suffixes_32s_4k_fs_omp(
     m
 }
 
+/// Internal helper: count and gather lms suffixes 32s 2k fs (OpenMP variant).
+#[doc(hidden)]
 pub fn count_and_gather_lms_suffixes_32s_2k_fs_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -1299,6 +1379,8 @@ pub fn count_and_gather_lms_suffixes_32s_2k_fs_omp(
     m
 }
 
+/// Internal helper: count and gather compacted lms suffixes 32s 2k fs (OpenMP variant).
+#[doc(hidden)]
 pub fn count_and_gather_compacted_lms_suffixes_32s_2k_fs_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -1405,6 +1487,8 @@ pub fn count_and_gather_compacted_lms_suffixes_32s_2k_fs_omp(
         .copy_from_slice(&workspace[accumulated_start..accumulated_start + bucket_size]);
 }
 
+/// Internal helper: count and gather lms suffixes 32s 4k (OpenMP variant).
+#[doc(hidden)]
 pub fn count_and_gather_lms_suffixes_32s_4k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -1448,6 +1532,8 @@ pub fn count_and_gather_lms_suffixes_32s_4k_omp(
     }
 }
 
+/// Internal helper: count and gather lms suffixes 32s 2k (OpenMP variant).
+#[doc(hidden)]
 pub fn count_and_gather_lms_suffixes_32s_2k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -1491,6 +1577,8 @@ pub fn count_and_gather_lms_suffixes_32s_2k_omp(
     }
 }
 
+/// Internal helper: count and gather compacted lms suffixes 32s 2k (OpenMP variant).
+#[doc(hidden)]
 pub fn count_and_gather_compacted_lms_suffixes_32s_2k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -1530,6 +1618,8 @@ pub fn count_and_gather_compacted_lms_suffixes_32s_2k_omp(
     let _ = count_and_gather_compacted_lms_suffixes_32s_2k_nofs_omp(t, sa, n, k, buckets, threads);
 }
 
+/// Internal helper: count suffixes 32s.
+#[doc(hidden)]
 pub fn count_suffixes_32s(t: &[SaSint], n: SaSint, k: SaSint, buckets: &mut [SaSint]) {
     let n_usize = usize::try_from(n).expect("n must be non-negative");
     let k_usize = usize::try_from(k).expect("k must be non-negative");
@@ -1556,6 +1646,8 @@ pub fn count_suffixes_32s(t: &[SaSint], n: SaSint, k: SaSint, buckets: &mut [SaS
     }
 }
 
+/// Internal helper: initialize buckets start and end 8u.
+#[doc(hidden)]
 pub fn initialize_buckets_start_and_end_8u(
     buckets: &mut [SaSint],
     freq: Option<&mut [SaSint]>,
@@ -1596,6 +1688,8 @@ pub fn initialize_buckets_start_and_end_8u(
     (k + 1) as SaSint
 }
 
+/// Internal helper: initialize buckets start and end 32s 6k.
+#[doc(hidden)]
 pub fn initialize_buckets_start_and_end_32s_6k(k: SaSint, buckets: &mut [SaSint]) {
     let k_usize = usize::try_from(k).expect("k must be non-negative");
     let start_offset = 4 * k_usize;
@@ -1609,6 +1703,8 @@ pub fn initialize_buckets_start_and_end_32s_6k(k: SaSint, buckets: &mut [SaSint]
     }
 }
 
+/// Internal helper: initialize buckets start and end 32s 4k.
+#[doc(hidden)]
 pub fn initialize_buckets_start_and_end_32s_4k(k: SaSint, buckets: &mut [SaSint]) {
     let k_usize = usize::try_from(k).expect("k must be non-negative");
     let start_offset = 2 * k_usize;
@@ -1622,6 +1718,8 @@ pub fn initialize_buckets_start_and_end_32s_4k(k: SaSint, buckets: &mut [SaSint]
     }
 }
 
+/// Internal helper: initialize buckets end 32s 2k.
+#[doc(hidden)]
 pub fn initialize_buckets_end_32s_2k(k: SaSint, buckets: &mut [SaSint]) {
     let k_usize = usize::try_from(k).expect("k must be non-negative");
     let mut sum0 = 0;
@@ -1632,6 +1730,8 @@ pub fn initialize_buckets_end_32s_2k(k: SaSint, buckets: &mut [SaSint]) {
     }
 }
 
+/// Internal helper: initialize buckets start and end 32s 2k.
+#[doc(hidden)]
 pub fn initialize_buckets_start_and_end_32s_2k(k: SaSint, buckets: &mut [SaSint]) {
     let k_usize = usize::try_from(k).expect("k must be non-negative");
     for j in 0..k_usize {
@@ -1644,6 +1744,8 @@ pub fn initialize_buckets_start_and_end_32s_2k(k: SaSint, buckets: &mut [SaSint]
     }
 }
 
+/// Internal helper: initialize buckets start 32s 1k.
+#[doc(hidden)]
 pub fn initialize_buckets_start_32s_1k(k: SaSint, buckets: &mut [SaSint]) {
     let k_usize = usize::try_from(k).expect("k must be non-negative");
     let mut sum = 0;
@@ -1654,6 +1756,8 @@ pub fn initialize_buckets_start_32s_1k(k: SaSint, buckets: &mut [SaSint]) {
     }
 }
 
+/// Internal helper: initialize buckets end 32s 1k.
+#[doc(hidden)]
 pub fn initialize_buckets_end_32s_1k(k: SaSint, buckets: &mut [SaSint]) {
     let k_usize = usize::try_from(k).expect("k must be non-negative");
     let mut sum = 0;
@@ -1663,6 +1767,8 @@ pub fn initialize_buckets_end_32s_1k(k: SaSint, buckets: &mut [SaSint]) {
     }
 }
 
+/// Internal helper: initialize buckets for lms suffixes radix sort 8u.
+#[doc(hidden)]
 pub fn initialize_buckets_for_lms_suffixes_radix_sort_8u(
     t: &[u8],
     buckets: &mut [SaSint],
@@ -1698,6 +1804,8 @@ pub fn initialize_buckets_for_lms_suffixes_radix_sort_8u(
     sum
 }
 
+/// Internal helper: initialize buckets for lms suffixes radix sort 32s 2k.
+#[doc(hidden)]
 pub fn initialize_buckets_for_lms_suffixes_radix_sort_32s_2k(
     t: &[SaSint],
     k: SaSint,
@@ -1719,6 +1827,8 @@ pub fn initialize_buckets_for_lms_suffixes_radix_sort_32s_2k(
     }
 }
 
+/// Internal helper: initialize buckets for lms suffixes radix sort 32s 6k.
+#[doc(hidden)]
 pub fn initialize_buckets_for_lms_suffixes_radix_sort_32s_6k(
     t: &[SaSint],
     k: SaSint,
@@ -1752,6 +1862,8 @@ pub fn initialize_buckets_for_lms_suffixes_radix_sort_32s_6k(
     sum
 }
 
+/// Internal helper: initialize buckets for radix and partial sorting 32s 4k.
+#[doc(hidden)]
 pub fn initialize_buckets_for_radix_and_partial_sorting_32s_4k(
     t: &[SaSint],
     k: SaSint,
@@ -1777,6 +1889,8 @@ pub fn initialize_buckets_for_radix_and_partial_sorting_32s_4k(
     }
 }
 
+/// Internal helper: radix sort lms suffixes 8u.
+#[doc(hidden)]
 pub fn radix_sort_lms_suffixes_8u(
     t: &[u8],
     sa: &mut [SaSint],
@@ -1822,6 +1936,8 @@ pub fn radix_sort_lms_suffixes_8u(
     }
 }
 
+/// Internal helper: radix sort lms suffixes 8u (OpenMP variant).
+#[doc(hidden)]
 pub fn radix_sort_lms_suffixes_8u_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -1894,6 +2010,8 @@ pub fn radix_sort_lms_suffixes_8u_omp(
     }
 }
 
+/// Internal helper: radix sort lms suffixes 32s 6k.
+#[doc(hidden)]
 pub fn radix_sort_lms_suffixes_32s_6k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -1939,6 +2057,8 @@ pub fn radix_sort_lms_suffixes_32s_6k(
     }
 }
 
+/// Internal helper: radix sort lms suffixes 32s 2k.
+#[doc(hidden)]
 pub fn radix_sort_lms_suffixes_32s_2k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -1984,6 +2104,8 @@ pub fn radix_sort_lms_suffixes_32s_2k(
     }
 }
 
+/// Internal helper: radix sort lms suffixes 32s block gather.
+#[doc(hidden)]
 pub fn radix_sort_lms_suffixes_32s_block_gather(
     t: &[SaSint],
     sa: &[SaSint],
@@ -2020,6 +2142,8 @@ pub fn radix_sort_lms_suffixes_32s_block_gather(
     }
 }
 
+/// Internal helper: radix sort lms suffixes 32s 6k block sort.
+#[doc(hidden)]
 pub fn radix_sort_lms_suffixes_32s_6k_block_sort(
     induction_bucket: &mut [SaSint],
     cache: &mut [ThreadCache],
@@ -2058,6 +2182,8 @@ pub fn radix_sort_lms_suffixes_32s_6k_block_sort(
     }
 }
 
+/// Internal helper: radix sort lms suffixes 32s 2k block sort.
+#[doc(hidden)]
 pub fn radix_sort_lms_suffixes_32s_2k_block_sort(
     induction_bucket: &mut [SaSint],
     cache: &mut [ThreadCache],
@@ -2096,6 +2222,8 @@ pub fn radix_sort_lms_suffixes_32s_2k_block_sort(
     }
 }
 
+/// Internal helper: radix sort lms suffixes 32s 6k block (OpenMP variant).
+#[doc(hidden)]
 pub fn radix_sort_lms_suffixes_32s_6k_block_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -2149,6 +2277,8 @@ pub fn radix_sort_lms_suffixes_32s_6k_block_omp(
     }
 }
 
+/// Internal helper: radix sort lms suffixes 32s 2k block (OpenMP variant).
+#[doc(hidden)]
 pub fn radix_sort_lms_suffixes_32s_2k_block_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -2202,6 +2332,8 @@ pub fn radix_sort_lms_suffixes_32s_2k_block_omp(
     }
 }
 
+/// Internal helper: radix sort lms suffixes 32s 6k (OpenMP variant).
+#[doc(hidden)]
 pub fn radix_sort_lms_suffixes_32s_6k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -2244,6 +2376,8 @@ pub fn radix_sort_lms_suffixes_32s_6k_omp(
     }
 }
 
+/// Internal helper: radix sort lms suffixes 32s 2k (OpenMP variant).
+#[doc(hidden)]
 pub fn radix_sort_lms_suffixes_32s_2k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -2286,6 +2420,8 @@ pub fn radix_sort_lms_suffixes_32s_2k_omp(
     }
 }
 
+/// Internal helper: radix sort lms suffixes 32s 1k.
+#[doc(hidden)]
 pub fn radix_sort_lms_suffixes_32s_1k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -2362,6 +2498,8 @@ pub fn radix_sort_lms_suffixes_32s_1k(
     m
 }
 
+/// Internal helper: radix sort set markers 32s 6k.
+#[doc(hidden)]
 pub fn radix_sort_set_markers_32s_6k(
     sa: &mut [SaSint],
     induction_bucket: &[SaSint],
@@ -2386,6 +2524,8 @@ pub fn radix_sort_set_markers_32s_6k(
     }
 }
 
+/// Internal helper: radix sort set markers 32s 4k.
+#[doc(hidden)]
 pub fn radix_sort_set_markers_32s_4k(
     sa: &mut [SaSint],
     induction_bucket: &[SaSint],
@@ -2410,6 +2550,8 @@ pub fn radix_sort_set_markers_32s_4k(
     }
 }
 
+/// Internal helper: radix sort set markers 32s 6k (OpenMP variant).
+#[doc(hidden)]
 pub fn radix_sort_set_markers_32s_6k_omp(
     sa: &mut [SaSint],
     k: SaSint,
@@ -2448,6 +2590,8 @@ pub fn radix_sort_set_markers_32s_6k_omp(
     }
 }
 
+/// Internal helper: radix sort set markers 32s 4k (OpenMP variant).
+#[doc(hidden)]
 pub fn radix_sort_set_markers_32s_4k_omp(
     sa: &mut [SaSint],
     k: SaSint,
@@ -2486,6 +2630,8 @@ pub fn radix_sort_set_markers_32s_4k_omp(
     }
 }
 
+/// Internal helper: initialize buckets for partial sorting 8u.
+#[doc(hidden)]
 pub fn initialize_buckets_for_partial_sorting_8u(
     t: &[u8],
     buckets: &mut [SaSint],
@@ -2508,6 +2654,8 @@ pub fn initialize_buckets_for_partial_sorting_8u(
     }
 }
 
+/// Internal helper: initialize buckets for partial sorting 32s 6k.
+#[doc(hidden)]
 pub fn initialize_buckets_for_partial_sorting_32s_6k(
     t: &[SaSint],
     k: SaSint,
@@ -2566,6 +2714,8 @@ pub fn initialize_buckets_for_partial_sorting_32s_6k(
     }
 }
 
+/// Internal helper: partial sorting scan left to right 8u.
+#[doc(hidden)]
 pub fn partial_sorting_scan_left_to_right_8u(
     t: &[u8],
     sa: &mut [SaSint],
@@ -2631,6 +2781,8 @@ pub fn partial_sorting_scan_left_to_right_8u(
     d
 }
 
+/// Internal helper: partial sorting scan left to right 8u (OpenMP variant).
+#[doc(hidden)]
 pub fn partial_sorting_scan_left_to_right_8u_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -2723,6 +2875,8 @@ pub fn partial_sorting_scan_left_to_right_8u_omp(
     d
 }
 
+/// Internal helper: partial sorting scan left to right 32s 6k.
+#[doc(hidden)]
 pub fn partial_sorting_scan_left_to_right_32s_6k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -2776,6 +2930,8 @@ pub fn partial_sorting_scan_left_to_right_32s_6k(
     d
 }
 
+/// Internal helper: partial sorting scan left to right 32s 4k.
+#[doc(hidden)]
 pub fn partial_sorting_scan_left_to_right_32s_4k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -2862,6 +3018,8 @@ pub fn partial_sorting_scan_left_to_right_32s_4k(
     d
 }
 
+/// Internal helper: partial sorting scan left to right 32s 1k.
+#[doc(hidden)]
 pub fn partial_sorting_scan_left_to_right_32s_1k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -2918,6 +3076,8 @@ pub fn partial_sorting_scan_left_to_right_32s_1k(
     }
 }
 
+/// Internal helper: partial sorting scan left to right 32s 6k (OpenMP variant).
+#[doc(hidden)]
 pub fn partial_sorting_scan_left_to_right_32s_6k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -2989,6 +3149,8 @@ pub fn partial_sorting_scan_left_to_right_32s_6k_omp(
     d
 }
 
+/// Internal helper: partial sorting scan left to right 32s 4k (OpenMP variant).
+#[doc(hidden)]
 pub fn partial_sorting_scan_left_to_right_32s_4k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -3057,6 +3219,8 @@ pub fn partial_sorting_scan_left_to_right_32s_4k_omp(
     d
 }
 
+/// Internal helper: partial sorting scan left to right 32s 1k (OpenMP variant).
+#[doc(hidden)]
 pub fn partial_sorting_scan_left_to_right_32s_1k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -3106,6 +3270,8 @@ pub fn partial_sorting_scan_left_to_right_32s_1k_omp(
     }
 }
 
+/// Internal helper: partial sorting scan left to right 8u block prepare.
+#[doc(hidden)]
 pub fn partial_sorting_scan_left_to_right_8u_block_prepare(
     t: &[u8],
     sa: &[SaSint],
@@ -3174,6 +3340,8 @@ pub fn partial_sorting_scan_left_to_right_8u_block_prepare(
     (d as FastSint - 1, count as FastSint)
 }
 
+/// Internal helper: partial sorting scan left to right 8u block place.
+#[doc(hidden)]
 pub fn partial_sorting_scan_left_to_right_8u_block_place(
     sa: &mut [SaSint],
     buckets: &mut [SaSint],
@@ -3222,6 +3390,8 @@ pub fn partial_sorting_scan_left_to_right_8u_block_place(
     }
 }
 
+/// Internal helper: partial sorting scan left to right 8u block (OpenMP variant).
+#[doc(hidden)]
 pub fn partial_sorting_scan_left_to_right_8u_block_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -3318,6 +3488,8 @@ pub fn partial_sorting_scan_left_to_right_8u_block_omp(
     d
 }
 
+/// Internal helper: partial sorting shift markers 8u (OpenMP variant).
+#[doc(hidden)]
 pub fn partial_sorting_shift_markers_8u_omp(
     sa: &mut [SaSint],
     n: SaSint,
@@ -3379,6 +3551,8 @@ pub fn partial_sorting_shift_markers_8u_omp(
     }
 }
 
+/// Internal helper: partial sorting shift markers 32s 6k (OpenMP variant).
+#[doc(hidden)]
 pub fn partial_sorting_shift_markers_32s_6k_omp(
     sa: &mut [SaSint],
     k: SaSint,
@@ -3438,6 +3612,8 @@ pub fn partial_sorting_shift_markers_32s_6k_omp(
     }
 }
 
+/// Internal helper: partial sorting shift markers 32s 4k.
+#[doc(hidden)]
 pub fn partial_sorting_shift_markers_32s_4k(sa: &mut [SaSint], n: SaSint) {
     let mut i = n as isize - 1;
     let mut s = SUFFIX_GROUP_MARKER;
@@ -3478,6 +3654,8 @@ pub fn partial_sorting_shift_markers_32s_4k(sa: &mut [SaSint], n: SaSint) {
     }
 }
 
+/// Internal helper: partial sorting shift buckets 32s 6k.
+#[doc(hidden)]
 pub fn partial_sorting_shift_buckets_32s_6k(k: SaSint, buckets: &mut [SaSint]) {
     let k_usize = usize::try_from(k).expect("k must be non-negative");
     let temp_offset = 4 * k_usize;
@@ -3489,6 +3667,8 @@ pub fn partial_sorting_shift_buckets_32s_6k(k: SaSint, buckets: &mut [SaSint]) {
     }
 }
 
+/// Internal helper: partial sorting scan right to left 8u.
+#[doc(hidden)]
 pub fn partial_sorting_scan_right_to_left_8u(
     t: &[u8],
     sa: &mut [SaSint],
@@ -3574,6 +3754,8 @@ pub fn partial_sorting_scan_right_to_left_8u(
     d
 }
 
+/// Internal helper: partial gsa scan right to left 8u.
+#[doc(hidden)]
 pub fn partial_gsa_scan_right_to_left_8u(
     t: &[u8],
     sa: &mut [SaSint],
@@ -3661,6 +3843,8 @@ pub fn partial_gsa_scan_right_to_left_8u(
     d
 }
 
+/// Internal helper: partial sorting scan right to left 8u block prepare.
+#[doc(hidden)]
 pub fn partial_sorting_scan_right_to_left_8u_block_prepare(
     t: &[u8],
     sa: &[SaSint],
@@ -3705,6 +3889,8 @@ pub fn partial_sorting_scan_right_to_left_8u_block_prepare(
     ((d - 1) as FastSint, count as FastSint)
 }
 
+/// Internal helper: partial sorting scan right to left 8u block place.
+#[doc(hidden)]
 pub fn partial_sorting_scan_right_to_left_8u_block_place(
     sa: &mut [SaSint],
     buckets: &mut [SaSint],
@@ -3728,6 +3914,8 @@ pub fn partial_sorting_scan_right_to_left_8u_block_place(
     }
 }
 
+/// Internal helper: partial gsa scan right to left 8u block place.
+#[doc(hidden)]
 pub fn partial_gsa_scan_right_to_left_8u_block_place(
     sa: &mut [SaSint],
     buckets: &mut [SaSint],
@@ -3754,6 +3942,8 @@ pub fn partial_gsa_scan_right_to_left_8u_block_place(
     }
 }
 
+/// Internal helper: partial sorting scan right to left 8u block (OpenMP variant).
+#[doc(hidden)]
 pub fn partial_sorting_scan_right_to_left_8u_block_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -3848,6 +4038,8 @@ pub fn partial_sorting_scan_right_to_left_8u_block_omp(
     d
 }
 
+/// Internal helper: partial gsa scan right to left 8u block (OpenMP variant).
+#[doc(hidden)]
 pub fn partial_gsa_scan_right_to_left_8u_block_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -3942,6 +4134,8 @@ pub fn partial_gsa_scan_right_to_left_8u_block_omp(
     d
 }
 
+/// Internal helper: partial sorting scan right to left 8u (OpenMP variant).
+#[doc(hidden)]
 pub fn partial_sorting_scan_right_to_left_8u_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -4036,6 +4230,8 @@ pub fn partial_sorting_scan_right_to_left_8u_omp(
     }
 }
 
+/// Internal helper: partial gsa scan right to left 8u (OpenMP variant).
+#[doc(hidden)]
 pub fn partial_gsa_scan_right_to_left_8u_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -4125,6 +4321,8 @@ pub fn partial_gsa_scan_right_to_left_8u_omp(
     }
 }
 
+/// Internal helper: partial sorting scan right to left 32s 6k.
+#[doc(hidden)]
 pub fn partial_sorting_scan_right_to_left_32s_6k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -4183,6 +4381,8 @@ pub fn partial_sorting_scan_right_to_left_32s_6k(
     d
 }
 
+/// Internal helper: partial sorting scan right to left 32s 4k.
+#[doc(hidden)]
 pub fn partial_sorting_scan_right_to_left_32s_4k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -4274,6 +4474,8 @@ pub fn partial_sorting_scan_right_to_left_32s_4k(
     d
 }
 
+/// Internal helper: partial sorting scan right to left 32s 1k.
+#[doc(hidden)]
 pub fn partial_sorting_scan_right_to_left_32s_1k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -4341,6 +4543,8 @@ pub fn partial_sorting_scan_right_to_left_32s_1k(
     }
 }
 
+/// Internal helper: partial sorting scan right to left 32s 6k block gather.
+#[doc(hidden)]
 pub fn partial_sorting_scan_right_to_left_32s_6k_block_gather(
     t: &[SaSint],
     sa: &[SaSint],
@@ -4371,6 +4575,8 @@ pub fn partial_sorting_scan_right_to_left_32s_6k_block_gather(
     }
 }
 
+/// Internal helper: partial sorting scan right to left 32s 4k block gather.
+#[doc(hidden)]
 pub fn partial_sorting_scan_right_to_left_32s_4k_block_gather(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -4402,6 +4608,8 @@ pub fn partial_sorting_scan_right_to_left_32s_4k_block_gather(
     }
 }
 
+/// Internal helper: partial sorting scan right to left 32s 1k block gather.
+#[doc(hidden)]
 pub fn partial_sorting_scan_right_to_left_32s_1k_block_gather(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -4429,6 +4637,8 @@ pub fn partial_sorting_scan_right_to_left_32s_1k_block_gather(
     }
 }
 
+/// Internal helper: partial sorting scan right to left 32s 6k block sort.
+#[doc(hidden)]
 pub fn partial_sorting_scan_right_to_left_32s_6k_block_sort(
     t: &[SaSint],
     buckets: &mut [SaSint],
@@ -4473,6 +4683,8 @@ pub fn partial_sorting_scan_right_to_left_32s_6k_block_sort(
     d
 }
 
+/// Internal helper: partial sorting scan right to left 32s 4k block sort.
+#[doc(hidden)]
 pub fn partial_sorting_scan_right_to_left_32s_4k_block_sort(
     t: &[SaSint],
     k: SaSint,
@@ -4535,6 +4747,8 @@ pub fn partial_sorting_scan_right_to_left_32s_4k_block_sort(
     d
 }
 
+/// Internal helper: partial sorting scan right to left 32s 1k block sort.
+#[doc(hidden)]
 pub fn partial_sorting_scan_right_to_left_32s_1k_block_sort(
     t: &[SaSint],
     induction_bucket: &mut [SaSint],
@@ -4573,6 +4787,8 @@ pub fn partial_sorting_scan_right_to_left_32s_1k_block_sort(
     }
 }
 
+/// Internal helper: partial sorting scan right to left 32s 6k block (OpenMP variant).
+#[doc(hidden)]
 pub fn partial_sorting_scan_right_to_left_32s_6k_block_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -4649,6 +4865,8 @@ pub fn partial_sorting_scan_right_to_left_32s_6k_block_omp(
     d
 }
 
+/// Internal helper: partial sorting scan right to left 32s 4k block (OpenMP variant).
+#[doc(hidden)]
 pub fn partial_sorting_scan_right_to_left_32s_4k_block_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -4733,6 +4951,8 @@ pub fn partial_sorting_scan_right_to_left_32s_4k_block_omp(
     d
 }
 
+/// Internal helper: partial sorting scan right to left 32s 1k block (OpenMP variant).
+#[doc(hidden)]
 pub fn partial_sorting_scan_right_to_left_32s_1k_block_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -4803,6 +5023,8 @@ pub fn partial_sorting_scan_right_to_left_32s_1k_block_omp(
     }
 }
 
+/// Internal helper: partial sorting scan left to right 32s 6k block gather.
+#[doc(hidden)]
 pub fn partial_sorting_scan_left_to_right_32s_6k_block_gather(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -4832,6 +5054,8 @@ pub fn partial_sorting_scan_left_to_right_32s_6k_block_gather(
     }
 }
 
+/// Internal helper: partial sorting scan left to right 32s 4k block gather.
+#[doc(hidden)]
 pub fn partial_sorting_scan_left_to_right_32s_4k_block_gather(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -4864,6 +5088,8 @@ pub fn partial_sorting_scan_left_to_right_32s_4k_block_gather(
     }
 }
 
+/// Internal helper: partial sorting scan left to right 32s 1k block gather.
+#[doc(hidden)]
 pub fn partial_sorting_scan_left_to_right_32s_1k_block_gather(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -4892,6 +5118,8 @@ pub fn partial_sorting_scan_left_to_right_32s_1k_block_gather(
     }
 }
 
+/// Internal helper: partial sorting scan left to right 32s 6k block sort.
+#[doc(hidden)]
 pub fn partial_sorting_scan_left_to_right_32s_6k_block_sort(
     t: &[SaSint],
     buckets: &mut [SaSint],
@@ -4992,6 +5220,8 @@ pub fn partial_sorting_scan_left_to_right_32s_6k_block_sort(
     d
 }
 
+/// Internal helper: partial sorting scan left to right 32s 4k block sort.
+#[doc(hidden)]
 pub fn partial_sorting_scan_left_to_right_32s_4k_block_sort(
     t: &[SaSint],
     k: SaSint,
@@ -5053,6 +5283,8 @@ pub fn partial_sorting_scan_left_to_right_32s_4k_block_sort(
     d
 }
 
+/// Internal helper: partial sorting scan left to right 32s 1k block sort.
+#[doc(hidden)]
 pub fn partial_sorting_scan_left_to_right_32s_1k_block_sort(
     t: &[SaSint],
     induction_bucket: &mut [SaSint],
@@ -5091,6 +5323,8 @@ pub fn partial_sorting_scan_left_to_right_32s_1k_block_sort(
     }
 }
 
+/// Internal helper: partial sorting scan left to right 32s 6k block (OpenMP variant).
+#[doc(hidden)]
 pub fn partial_sorting_scan_left_to_right_32s_6k_block_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -5169,6 +5403,8 @@ pub fn partial_sorting_scan_left_to_right_32s_6k_block_omp(
     d
 }
 
+/// Internal helper: partial sorting scan left to right 32s 4k block (OpenMP variant).
+#[doc(hidden)]
 pub fn partial_sorting_scan_left_to_right_32s_4k_block_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -5253,6 +5489,8 @@ pub fn partial_sorting_scan_left_to_right_32s_4k_block_omp(
     d
 }
 
+/// Internal helper: partial sorting scan left to right 32s 1k block (OpenMP variant).
+#[doc(hidden)]
 pub fn partial_sorting_scan_left_to_right_32s_1k_block_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -5323,6 +5561,8 @@ pub fn partial_sorting_scan_left_to_right_32s_1k_block_omp(
     }
 }
 
+/// Internal helper: partial sorting scan right to left 32s 6k (OpenMP variant).
+#[doc(hidden)]
 pub fn partial_sorting_scan_right_to_left_32s_6k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -5390,6 +5630,8 @@ pub fn partial_sorting_scan_right_to_left_32s_6k_omp(
     d
 }
 
+/// Internal helper: partial sorting scan right to left 32s 4k (OpenMP variant).
+#[doc(hidden)]
 pub fn partial_sorting_scan_right_to_left_32s_4k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -5440,6 +5682,8 @@ pub fn partial_sorting_scan_right_to_left_32s_4k_omp(
     d
 }
 
+/// Internal helper: partial sorting scan right to left 32s 1k (OpenMP variant).
+#[doc(hidden)]
 pub fn partial_sorting_scan_right_to_left_32s_1k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -5487,6 +5731,8 @@ pub fn partial_sorting_scan_right_to_left_32s_1k_omp(
     }
 }
 
+/// Internal helper: partial sorting gather lms suffixes 32s 4k.
+#[doc(hidden)]
 pub fn partial_sorting_gather_lms_suffixes_32s_4k(
     sa: &mut [SaSint],
     omp_block_start: FastSint,
@@ -5510,6 +5756,8 @@ pub fn partial_sorting_gather_lms_suffixes_32s_4k(
     l as FastSint
 }
 
+/// Internal helper: partial sorting gather lms suffixes 32s 1k.
+#[doc(hidden)]
 pub fn partial_sorting_gather_lms_suffixes_32s_1k(
     sa: &mut [SaSint],
     omp_block_start: FastSint,
@@ -5532,6 +5780,8 @@ pub fn partial_sorting_gather_lms_suffixes_32s_1k(
     l as FastSint
 }
 
+/// Internal helper: partial sorting gather lms suffixes 32s 4k (OpenMP variant).
+#[doc(hidden)]
 pub fn partial_sorting_gather_lms_suffixes_32s_4k_omp(
     sa: &mut [SaSint],
     n: SaSint,
@@ -5580,6 +5830,8 @@ pub fn partial_sorting_gather_lms_suffixes_32s_4k_omp(
     }
 }
 
+/// Internal helper: partial sorting gather lms suffixes 32s 1k (OpenMP variant).
+#[doc(hidden)]
 pub fn partial_sorting_gather_lms_suffixes_32s_1k_omp(
     sa: &mut [SaSint],
     n: SaSint,
@@ -5628,6 +5880,8 @@ pub fn partial_sorting_gather_lms_suffixes_32s_1k_omp(
     }
 }
 
+/// Internal helper: induce partial order 8u (OpenMP variant).
+#[doc(hidden)]
 pub fn induce_partial_order_8u_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -5701,6 +5955,8 @@ pub fn induce_partial_order_8u_omp(
     }
 }
 
+/// Internal helper: induce partial order 32s 6k (OpenMP variant).
+#[doc(hidden)]
 pub fn induce_partial_order_32s_6k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -5737,6 +5993,8 @@ pub fn induce_partial_order_32s_6k_omp(
     );
 }
 
+/// Internal helper: induce partial order 32s 4k (OpenMP variant).
+#[doc(hidden)]
 pub fn induce_partial_order_32s_4k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -5773,6 +6031,8 @@ pub fn induce_partial_order_32s_4k_omp(
     partial_sorting_gather_lms_suffixes_32s_4k_omp(sa, n, threads, thread_state);
 }
 
+/// Internal helper: induce partial order 32s 2k (OpenMP variant).
+#[doc(hidden)]
 pub fn induce_partial_order_32s_2k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -5789,6 +6049,8 @@ pub fn induce_partial_order_32s_2k_omp(
     partial_sorting_gather_lms_suffixes_32s_1k_omp(sa, n, threads, thread_state);
 }
 
+/// Internal helper: induce partial order 32s 1k (OpenMP variant).
+#[doc(hidden)]
 pub fn induce_partial_order_32s_1k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -5809,6 +6071,8 @@ pub fn induce_partial_order_32s_1k_omp(
     partial_sorting_gather_lms_suffixes_32s_1k_omp(sa, n, threads, thread_state);
 }
 
+/// Internal helper: renumber lms suffixes 8u.
+#[doc(hidden)]
 pub fn renumber_lms_suffixes_8u(
     sa: &mut [SaSint],
     m: SaSint,
@@ -5862,6 +6126,8 @@ pub fn renumber_lms_suffixes_8u(
     name
 }
 
+/// Internal helper: gather marked lms suffixes.
+#[doc(hidden)]
 pub fn gather_marked_lms_suffixes(
     sa: &mut [SaSint],
     m: SaSint,
@@ -5909,6 +6175,8 @@ pub fn gather_marked_lms_suffixes(
     l + 1
 }
 
+/// Internal helper: renumber lms suffixes 8u (OpenMP variant).
+#[doc(hidden)]
 pub fn renumber_lms_suffixes_8u_omp(
     sa: &mut [SaSint],
     m: SaSint,
@@ -5965,6 +6233,8 @@ pub fn renumber_lms_suffixes_8u_omp(
     name
 }
 
+/// Internal helper: gather marked lms suffixes (OpenMP variant).
+#[doc(hidden)]
 pub fn gather_marked_lms_suffixes_omp(
     sa: &mut [SaSint],
     n: SaSint,
@@ -6034,6 +6304,8 @@ pub fn gather_marked_lms_suffixes_omp(
     }
 }
 
+/// Internal helper: renumber and gather lms suffixes (OpenMP variant).
+#[doc(hidden)]
 pub fn renumber_and_gather_lms_suffixes_omp(
     sa: &mut [SaSint],
     n: SaSint,
@@ -6060,6 +6332,8 @@ pub fn renumber_and_gather_lms_suffixes_omp(
     name
 }
 
+/// Internal helper: renumber distinct lms suffixes 32s 4k.
+#[doc(hidden)]
 pub fn renumber_distinct_lms_suffixes_32s_4k(
     sa: &mut [SaSint],
     m: SaSint,
@@ -6122,6 +6396,8 @@ pub fn renumber_distinct_lms_suffixes_32s_4k(
     name
 }
 
+/// Internal helper: mark distinct lms suffixes 32s.
+#[doc(hidden)]
 pub fn mark_distinct_lms_suffixes_32s(
     sa: &mut [SaSint],
     m: SaSint,
@@ -6169,6 +6445,8 @@ pub fn mark_distinct_lms_suffixes_32s(
     }
 }
 
+/// Internal helper: clamp lms suffixes length 32s.
+#[doc(hidden)]
 pub fn clamp_lms_suffixes_length_32s(
     sa: &mut [SaSint],
     m: SaSint,
@@ -6209,6 +6487,8 @@ pub fn clamp_lms_suffixes_length_32s(
     }
 }
 
+/// Internal helper: renumber distinct lms suffixes 32s 4k (OpenMP variant).
+#[doc(hidden)]
 pub fn renumber_distinct_lms_suffixes_32s_4k_omp(
     sa: &mut [SaSint],
     m: SaSint,
@@ -6282,6 +6562,8 @@ pub fn renumber_distinct_lms_suffixes_32s_4k_omp(
     name - 1
 }
 
+/// Internal helper: mark distinct lms suffixes 32s (OpenMP variant).
+#[doc(hidden)]
 pub fn mark_distinct_lms_suffixes_32s_omp(
     sa: &mut [SaSint],
     n: SaSint,
@@ -6314,6 +6596,8 @@ pub fn mark_distinct_lms_suffixes_32s_omp(
     }
 }
 
+/// Internal helper: clamp lms suffixes length 32s (OpenMP variant).
+#[doc(hidden)]
 pub fn clamp_lms_suffixes_length_32s_omp(sa: &mut [SaSint], n: SaSint, m: SaSint, threads: SaSint) {
     let half_n = usize::try_from(n >> 1).expect("n must be non-negative");
     let omp_num_threads = if threads > 1 && n >= 131_072 {
@@ -6341,6 +6625,8 @@ pub fn clamp_lms_suffixes_length_32s_omp(sa: &mut [SaSint], n: SaSint, m: SaSint
     }
 }
 
+/// Internal helper: renumber and mark distinct lms suffixes 32s 4k (OpenMP variant).
+#[doc(hidden)]
 pub fn renumber_and_mark_distinct_lms_suffixes_32s_4k_omp(
     sa: &mut [SaSint],
     n: SaSint,
@@ -6360,6 +6646,8 @@ pub fn renumber_and_mark_distinct_lms_suffixes_32s_4k_omp(
     name
 }
 
+/// Internal helper: renumber and mark distinct lms suffixes 32s 1k (OpenMP variant).
+#[doc(hidden)]
 pub fn renumber_and_mark_distinct_lms_suffixes_32s_1k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -6491,6 +6779,8 @@ pub fn renumber_and_mark_distinct_lms_suffixes_32s_1k_omp(
     name - 1
 }
 
+/// Internal helper: reconstruct lms suffixes.
+#[doc(hidden)]
 pub fn reconstruct_lms_suffixes(
     sa: &mut [SaSint],
     n: SaSint,
@@ -6529,6 +6819,8 @@ pub fn reconstruct_lms_suffixes(
     }
 }
 
+/// Internal helper: reconstruct lms suffixes (OpenMP variant).
+#[doc(hidden)]
 pub fn reconstruct_lms_suffixes_omp(sa: &mut [SaSint], n: SaSint, m: SaSint, threads: SaSint) {
     let m_usize = usize::try_from(m).expect("m must be non-negative");
     let omp_num_threads = if threads > 1 && m >= 65_536 {
@@ -6557,6 +6849,8 @@ pub fn reconstruct_lms_suffixes_omp(sa: &mut [SaSint], n: SaSint, m: SaSint, thr
     }
 }
 
+/// Internal helper: place lms suffixes interval 8u.
+#[doc(hidden)]
 pub fn place_lms_suffixes_interval_8u(
     sa: &mut [SaSint],
     n: SaSint,
@@ -6598,6 +6892,8 @@ pub fn place_lms_suffixes_interval_8u(
     }
 }
 
+/// Internal helper: place lms suffixes interval 32s 4k.
+#[doc(hidden)]
 pub fn place_lms_suffixes_interval_32s_4k(
     sa: &mut [SaSint],
     n: SaSint,
@@ -6632,6 +6928,8 @@ pub fn place_lms_suffixes_interval_32s_4k(
     sa[..j].fill(0);
 }
 
+/// Internal helper: place lms suffixes interval 32s 2k.
+#[doc(hidden)]
 pub fn place_lms_suffixes_interval_32s_2k(
     sa: &mut [SaSint],
     n: SaSint,
@@ -6671,6 +6969,8 @@ pub fn place_lms_suffixes_interval_32s_2k(
     sa[..j].fill(0);
 }
 
+/// Internal helper: place lms suffixes interval 32s 1k.
+#[doc(hidden)]
 pub fn place_lms_suffixes_interval_32s_1k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -6703,6 +7003,8 @@ pub fn place_lms_suffixes_interval_32s_1k(
     sa[..l].fill(0);
 }
 
+/// Internal helper: place lms suffixes histogram 32s 6k.
+#[doc(hidden)]
 pub fn place_lms_suffixes_histogram_32s_6k(
     sa: &mut [SaSint],
     n: SaSint,
@@ -6735,6 +7037,8 @@ pub fn place_lms_suffixes_histogram_32s_6k(
     sa[..j].fill(0);
 }
 
+/// Internal helper: place lms suffixes histogram 32s 4k.
+#[doc(hidden)]
 pub fn place_lms_suffixes_histogram_32s_4k(
     sa: &mut [SaSint],
     n: SaSint,
@@ -6767,6 +7071,8 @@ pub fn place_lms_suffixes_histogram_32s_4k(
     sa[..j].fill(0);
 }
 
+/// Internal helper: place lms suffixes histogram 32s 2k.
+#[doc(hidden)]
 pub fn place_lms_suffixes_histogram_32s_2k(
     sa: &mut [SaSint],
     n: SaSint,
@@ -6804,6 +7110,8 @@ pub fn place_lms_suffixes_histogram_32s_2k(
     sa[..j].fill(0);
 }
 
+/// Internal helper: final bwt scan left to right 8u.
+#[doc(hidden)]
 pub fn final_bwt_scan_left_to_right_8u(
     t: &[u8],
     sa: &mut [SaSint],
@@ -6835,6 +7143,8 @@ pub fn final_bwt_scan_left_to_right_8u(
     }
 }
 
+/// Internal helper: final bwt aux scan left to right 8u.
+#[doc(hidden)]
 pub fn final_bwt_aux_scan_left_to_right_8u(
     t: &[u8],
     sa: &mut [SaSint],
@@ -6873,6 +7183,8 @@ pub fn final_bwt_aux_scan_left_to_right_8u(
     }
 }
 
+/// Internal helper: final sorting scan left to right 8u.
+#[doc(hidden)]
 pub fn final_sorting_scan_left_to_right_8u(
     t: &[u8],
     sa: &mut [SaSint],
@@ -6942,6 +7254,8 @@ pub fn final_sorting_scan_left_to_right_8u(
     }
 }
 
+/// Internal helper: final sorting scan left to right 32s.
+#[doc(hidden)]
 pub fn final_sorting_scan_left_to_right_32s(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -7006,6 +7320,8 @@ pub fn final_sorting_scan_left_to_right_32s(
     }
 }
 
+/// Internal helper: final bwt scan left to right 8u block prepare.
+#[doc(hidden)]
 pub fn final_bwt_scan_left_to_right_8u_block_prepare(
     t: &[u8],
     sa: &mut [SaSint],
@@ -7045,6 +7361,8 @@ pub fn final_bwt_scan_left_to_right_8u_block_prepare(
     count as FastSint
 }
 
+/// Internal helper: final sorting scan left to right 8u block prepare.
+#[doc(hidden)]
 pub fn final_sorting_scan_left_to_right_8u_block_prepare(
     t: &[u8],
     sa: &mut [SaSint],
@@ -7083,6 +7401,8 @@ pub fn final_sorting_scan_left_to_right_8u_block_prepare(
     count as FastSint
 }
 
+/// Internal helper: final order scan left to right 8u block place.
+#[doc(hidden)]
 pub fn final_order_scan_left_to_right_8u_block_place(
     sa: &mut [SaSint],
     buckets: &mut [SaSint],
@@ -7102,6 +7422,8 @@ pub fn final_order_scan_left_to_right_8u_block_place(
     }
 }
 
+/// Internal helper: final bwt aux scan left to right 8u block place.
+#[doc(hidden)]
 pub fn final_bwt_aux_scan_left_to_right_8u_block_place(
     sa: &mut [SaSint],
     rm: SaSint,
@@ -7128,6 +7450,8 @@ pub fn final_bwt_aux_scan_left_to_right_8u_block_place(
     }
 }
 
+/// Internal helper: final sorting scan left to right 32s block gather.
+#[doc(hidden)]
 pub fn final_sorting_scan_left_to_right_32s_block_gather(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -7157,6 +7481,8 @@ pub fn final_sorting_scan_left_to_right_32s_block_gather(
     }
 }
 
+/// Internal helper: final sorting scan left to right 32s block sort.
+#[doc(hidden)]
 pub fn final_sorting_scan_left_to_right_32s_block_sort(
     t: &[SaSint],
     induction_bucket: &mut [SaSint],
@@ -7252,6 +7578,8 @@ pub fn final_sorting_scan_left_to_right_32s_block_sort(
     }
 }
 
+/// Internal helper: final bwt scan left to right 8u block (OpenMP variant).
+#[doc(hidden)]
 pub fn final_bwt_scan_left_to_right_8u_block_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -7321,6 +7649,8 @@ pub fn final_bwt_scan_left_to_right_8u_block_omp(
     }
 }
 
+/// Internal helper: final bwt aux scan left to right 8u block (OpenMP variant).
+#[doc(hidden)]
 pub fn final_bwt_aux_scan_left_to_right_8u_block_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -7402,6 +7732,8 @@ pub fn final_bwt_aux_scan_left_to_right_8u_block_omp(
     }
 }
 
+/// Internal helper: final sorting scan left to right 8u block (OpenMP variant).
+#[doc(hidden)]
 pub fn final_sorting_scan_left_to_right_8u_block_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -7471,6 +7803,8 @@ pub fn final_sorting_scan_left_to_right_8u_block_omp(
     }
 }
 
+/// Internal helper: final sorting scan left to right 32s block (OpenMP variant).
+#[doc(hidden)]
 pub fn final_sorting_scan_left_to_right_32s_block_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -7507,6 +7841,8 @@ pub fn final_sorting_scan_left_to_right_32s_block_omp(
     }
 }
 
+/// Internal helper: final bwt scan left to right 8u (OpenMP variant).
+#[doc(hidden)]
 pub fn final_bwt_scan_left_to_right_8u_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -7571,6 +7907,8 @@ pub fn final_bwt_scan_left_to_right_8u_omp(
     }
 }
 
+/// Internal helper: final bwt aux scan left to right 8u (OpenMP variant).
+#[doc(hidden)]
 pub fn final_bwt_aux_scan_left_to_right_8u_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -7645,6 +7983,8 @@ pub fn final_bwt_aux_scan_left_to_right_8u_omp(
     }
 }
 
+/// Internal helper: final sorting scan left to right 8u (OpenMP variant).
+#[doc(hidden)]
 pub fn final_sorting_scan_left_to_right_8u_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -7709,6 +8049,8 @@ pub fn final_sorting_scan_left_to_right_8u_omp(
     }
 }
 
+/// Internal helper: final sorting scan left to right 32s (OpenMP variant).
+#[doc(hidden)]
 pub fn final_sorting_scan_left_to_right_32s_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -7754,6 +8096,8 @@ pub fn final_sorting_scan_left_to_right_32s_omp(
     }
 }
 
+/// Internal helper: final bwt scan right to left 8u.
+#[doc(hidden)]
 pub fn final_bwt_scan_right_to_left_8u(
     t: &[u8],
     sa: &mut [SaSint],
@@ -7841,6 +8185,8 @@ pub fn final_bwt_scan_right_to_left_8u(
     index
 }
 
+/// Internal helper: final bwt aux scan right to left 8u.
+#[doc(hidden)]
 pub fn final_bwt_aux_scan_right_to_left_8u(
     t: &[u8],
     sa: &mut [SaSint],
@@ -7932,6 +8278,8 @@ pub fn final_bwt_aux_scan_right_to_left_8u(
     }
 }
 
+/// Internal helper: final sorting scan right to left 8u.
+#[doc(hidden)]
 pub fn final_sorting_scan_right_to_left_8u(
     t: &[u8],
     sa: &mut [SaSint],
@@ -8001,6 +8349,8 @@ pub fn final_sorting_scan_right_to_left_8u(
     }
 }
 
+/// Internal helper: final gsa scan right to left 8u.
+#[doc(hidden)]
 pub fn final_gsa_scan_right_to_left_8u(
     t: &[u8],
     sa: &mut [SaSint],
@@ -8037,6 +8387,8 @@ pub fn final_gsa_scan_right_to_left_8u(
     }
 }
 
+/// Internal helper: final sorting scan right to left 32s.
+#[doc(hidden)]
 pub fn final_sorting_scan_right_to_left_32s(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -8101,6 +8453,8 @@ pub fn final_sorting_scan_right_to_left_32s(
     }
 }
 
+/// Internal helper: final bwt scan right to left 8u block prepare.
+#[doc(hidden)]
 pub fn final_bwt_scan_right_to_left_8u_block_prepare(
     t: &[u8],
     sa: &mut [SaSint],
@@ -8138,6 +8492,8 @@ pub fn final_bwt_scan_right_to_left_8u_block_prepare(
     count as FastSint
 }
 
+/// Internal helper: final bwt aux scan right to left 8u block prepare.
+#[doc(hidden)]
 pub fn final_bwt_aux_scan_right_to_left_8u_block_prepare(
     t: &[u8],
     sa: &mut [SaSint],
@@ -8176,6 +8532,8 @@ pub fn final_bwt_aux_scan_right_to_left_8u_block_prepare(
     count as FastSint
 }
 
+/// Internal helper: final sorting scan right to left 8u block prepare.
+#[doc(hidden)]
 pub fn final_sorting_scan_right_to_left_8u_block_prepare(
     t: &[u8],
     sa: &mut [SaSint],
@@ -8256,6 +8614,8 @@ pub fn final_sorting_scan_right_to_left_8u_block_prepare(
     count as FastSint
 }
 
+/// Internal helper: final order scan right to left 8u block place.
+#[doc(hidden)]
 pub fn final_order_scan_right_to_left_8u_block_place(
     sa: &mut [SaSint],
     buckets: &mut [SaSint],
@@ -8274,6 +8634,8 @@ pub fn final_order_scan_right_to_left_8u_block_place(
     }
 }
 
+/// Internal helper: final gsa scan right to left 8u block place.
+#[doc(hidden)]
 pub fn final_gsa_scan_right_to_left_8u_block_place(
     sa: &mut [SaSint],
     buckets: &mut [SaSint],
@@ -8294,6 +8656,8 @@ pub fn final_gsa_scan_right_to_left_8u_block_place(
     }
 }
 
+/// Internal helper: final bwt aux scan right to left 8u block place.
+#[doc(hidden)]
 pub fn final_bwt_aux_scan_right_to_left_8u_block_place(
     sa: &mut [SaSint],
     rm: SaSint,
@@ -8321,6 +8685,8 @@ pub fn final_bwt_aux_scan_right_to_left_8u_block_place(
     }
 }
 
+/// Internal helper: final sorting scan right to left 32s block gather.
+#[doc(hidden)]
 pub fn final_sorting_scan_right_to_left_32s_block_gather(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -8350,6 +8716,8 @@ pub fn final_sorting_scan_right_to_left_32s_block_gather(
     }
 }
 
+/// Internal helper: final sorting scan right to left 32s block sort.
+#[doc(hidden)]
 pub fn final_sorting_scan_right_to_left_32s_block_sort(
     t: &[SaSint],
     induction_bucket: &mut [SaSint],
@@ -8448,6 +8816,8 @@ pub fn final_sorting_scan_right_to_left_32s_block_sort(
     }
 }
 
+/// Internal helper: final bwt scan right to left 8u block (OpenMP variant).
+#[doc(hidden)]
 pub fn final_bwt_scan_right_to_left_8u_block_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -8506,6 +8876,8 @@ pub fn final_bwt_scan_right_to_left_8u_block_omp(
     }
 }
 
+/// Internal helper: final bwt aux scan right to left 8u block (OpenMP variant).
+#[doc(hidden)]
 pub fn final_bwt_aux_scan_right_to_left_8u_block_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -8576,6 +8948,8 @@ pub fn final_bwt_aux_scan_right_to_left_8u_block_omp(
     }
 }
 
+/// Internal helper: final sorting scan right to left 8u block (OpenMP variant).
+#[doc(hidden)]
 pub fn final_sorting_scan_right_to_left_8u_block_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -8634,6 +9008,8 @@ pub fn final_sorting_scan_right_to_left_8u_block_omp(
     }
 }
 
+/// Internal helper: final gsa scan right to left 8u block (OpenMP variant).
+#[doc(hidden)]
 pub fn final_gsa_scan_right_to_left_8u_block_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -8692,6 +9068,8 @@ pub fn final_gsa_scan_right_to_left_8u_block_omp(
     }
 }
 
+/// Internal helper: final sorting scan right to left 32s block (OpenMP variant).
+#[doc(hidden)]
 pub fn final_sorting_scan_right_to_left_32s_block_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -8728,6 +9106,8 @@ pub fn final_sorting_scan_right_to_left_32s_block_omp(
     }
 }
 
+/// Internal helper: final bwt scan right to left 8u (OpenMP variant).
+#[doc(hidden)]
 pub fn final_bwt_scan_right_to_left_8u_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -8788,6 +9168,8 @@ pub fn final_bwt_scan_right_to_left_8u_omp(
     index
 }
 
+/// Internal helper: final bwt aux scan right to left 8u (OpenMP variant).
+#[doc(hidden)]
 pub fn final_bwt_aux_scan_right_to_left_8u_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -8848,6 +9230,8 @@ pub fn final_bwt_aux_scan_right_to_left_8u_omp(
     }
 }
 
+/// Internal helper: final sorting scan right to left 8u (OpenMP variant).
+#[doc(hidden)]
 pub fn final_sorting_scan_right_to_left_8u_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -8911,6 +9295,8 @@ pub fn final_sorting_scan_right_to_left_8u_omp(
     }
 }
 
+/// Internal helper: final gsa scan right to left 8u (OpenMP variant).
+#[doc(hidden)]
 pub fn final_gsa_scan_right_to_left_8u_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -8968,6 +9354,8 @@ pub fn final_gsa_scan_right_to_left_8u_omp(
     }
 }
 
+/// Internal helper: final sorting scan right to left 32s (OpenMP variant).
+#[doc(hidden)]
 pub fn final_sorting_scan_right_to_left_32s_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -9007,6 +9395,8 @@ pub fn final_sorting_scan_right_to_left_32s_omp(
     }
 }
 
+/// Internal helper: clear lms suffixes (OpenMP variant).
+#[doc(hidden)]
 pub fn clear_lms_suffixes_omp(
     sa: &mut [SaSint],
     n: SaSint,
@@ -9035,6 +9425,8 @@ pub fn clear_lms_suffixes_omp(
     }
 }
 
+/// Internal helper: induce final order 8u (OpenMP variant).
+#[doc(hidden)]
 pub fn induce_final_order_8u_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -9168,6 +9560,8 @@ pub fn induce_final_order_8u_omp(
     }
 }
 
+/// Internal helper: induce final order 32s 6k.
+#[doc(hidden)]
 pub fn induce_final_order_32s_6k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -9184,6 +9578,8 @@ pub fn induce_final_order_32s_6k(
     final_sorting_scan_right_to_left_32s_omp(t, sa, n, right, threads, thread_state);
 }
 
+/// Internal helper: induce final order 32s 4k.
+#[doc(hidden)]
 pub fn induce_final_order_32s_4k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -9200,6 +9596,8 @@ pub fn induce_final_order_32s_4k(
     final_sorting_scan_right_to_left_32s_omp(t, sa, n, right, threads, thread_state);
 }
 
+/// Internal helper: induce final order 32s 2k.
+#[doc(hidden)]
 pub fn induce_final_order_32s_2k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -9215,6 +9613,8 @@ pub fn induce_final_order_32s_2k(
     final_sorting_scan_right_to_left_32s_omp(t, sa, n, right, threads, thread_state);
 }
 
+/// Internal helper: induce final order 32s 1k.
+#[doc(hidden)]
 pub fn induce_final_order_32s_1k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -9233,6 +9633,8 @@ pub fn induce_final_order_32s_1k(
     final_sorting_scan_right_to_left_32s_omp(t, sa, n, buckets, threads, thread_state);
 }
 
+/// Internal helper: renumber unique and nonunique lms suffixes 32s.
+#[doc(hidden)]
 pub fn renumber_unique_and_nonunique_lms_suffixes_32s(
     t: &mut [SaSint],
     sa: &mut [SaSint],
@@ -9312,6 +9714,8 @@ pub fn renumber_unique_and_nonunique_lms_suffixes_32s(
     f
 }
 
+/// Internal helper: compact unique and nonunique lms suffixes 32s.
+#[doc(hidden)]
 pub fn compact_unique_and_nonunique_lms_suffixes_32s(
     sa: &mut [SaSint],
     m: SaSint,
@@ -9345,6 +9749,8 @@ pub fn compact_unique_and_nonunique_lms_suffixes_32s(
     *pr = r as FastSint + 1;
 }
 
+/// Internal helper: count unique suffixes.
+#[doc(hidden)]
 pub fn count_unique_suffixes(
     sa: &[SaSint],
     m: SaSint,
@@ -9392,6 +9798,8 @@ pub fn count_unique_suffixes(
     f0 + f1 + f2 + f3
 }
 
+/// Internal helper: renumber unique and nonunique lms suffixes 32s (OpenMP variant).
+#[doc(hidden)]
 pub fn renumber_unique_and_nonunique_lms_suffixes_32s_omp(
     t: &mut [SaSint],
     sa: &mut [SaSint],
@@ -9454,6 +9862,8 @@ pub fn renumber_unique_and_nonunique_lms_suffixes_32s_omp(
     f
 }
 
+/// Internal helper: compact unique and nonunique lms suffixes 32s (OpenMP variant).
+#[doc(hidden)]
 pub fn compact_unique_and_nonunique_lms_suffixes_32s_omp(
     sa: &mut [SaSint],
     n: SaSint,
@@ -9547,6 +9957,8 @@ pub fn compact_unique_and_nonunique_lms_suffixes_32s_omp(
     sa.copy_within(copy_src..copy_src + copy_len, copy_dst);
 }
 
+/// Internal helper: compact lms suffixes 32s (OpenMP variant).
+#[doc(hidden)]
 pub fn compact_lms_suffixes_32s_omp(
     t: &mut [SaSint],
     sa: &mut [SaSint],
@@ -9561,6 +9973,8 @@ pub fn compact_lms_suffixes_32s_omp(
     f
 }
 
+/// Internal helper: merge unique lms suffixes 32s.
+#[doc(hidden)]
 pub fn merge_unique_lms_suffixes_32s(
     t: &mut [SaSint],
     sa: &mut [SaSint],
@@ -9637,6 +10051,8 @@ pub fn merge_unique_lms_suffixes_32s(
     }
 }
 
+/// Internal helper: merge nonunique lms suffixes 32s.
+#[doc(hidden)]
 pub fn merge_nonunique_lms_suffixes_32s(
     sa: &mut [SaSint],
     n: SaSint,
@@ -9693,6 +10109,8 @@ pub fn merge_nonunique_lms_suffixes_32s(
     }
 }
 
+/// Internal helper: merge unique lms suffixes 32s (OpenMP variant).
+#[doc(hidden)]
 pub fn merge_unique_lms_suffixes_32s_omp(
     t: &mut [SaSint],
     sa: &mut [SaSint],
@@ -9750,6 +10168,8 @@ pub fn merge_unique_lms_suffixes_32s_omp(
     }
 }
 
+/// Internal helper: merge nonunique lms suffixes 32s (OpenMP variant).
+#[doc(hidden)]
 pub fn merge_nonunique_lms_suffixes_32s_omp(
     sa: &mut [SaSint],
     n: SaSint,
@@ -9804,6 +10224,8 @@ pub fn merge_nonunique_lms_suffixes_32s_omp(
     }
 }
 
+/// Internal helper: merge compacted lms suffixes 32s (OpenMP variant).
+#[doc(hidden)]
 pub fn merge_compacted_lms_suffixes_32s_omp(
     t: &mut [SaSint],
     sa: &mut [SaSint],
@@ -9817,6 +10239,8 @@ pub fn merge_compacted_lms_suffixes_32s_omp(
     merge_nonunique_lms_suffixes_32s_omp(sa, n, m, f, threads, thread_state);
 }
 
+/// Internal helper: reconstruct compacted lms suffixes 32s 2k (OpenMP variant).
+#[doc(hidden)]
 pub fn reconstruct_compacted_lms_suffixes_32s_2k_omp(
     t: &mut [SaSint],
     sa: &mut [SaSint],
@@ -9861,6 +10285,8 @@ pub fn reconstruct_compacted_lms_suffixes_32s_2k_omp(
     }
 }
 
+/// Internal helper: reconstruct compacted lms suffixes 32s 1k (OpenMP variant).
+#[doc(hidden)]
 pub fn reconstruct_compacted_lms_suffixes_32s_1k_omp(
     t: &mut [SaSint],
     sa: &mut [SaSint],
@@ -10949,6 +11375,14 @@ fn libsais64_main_ctx(
     )
 }
 
+/// Constructs the suffix array of a given string.
+///
+/// - `t` (`[0..n-1]`): the input string.
+/// - `sa` (`[0..n-1+fs]`): the output array of suffixes.
+/// - `fs`: extra space available at the end of `sa` (0 should be enough for most cases).
+/// - `freq` (`[0..255]`): optional output symbol frequency table.
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais64(t: &[u8], sa: &mut [SaSint], fs: SaSint, freq: Option<&mut [SaSint]>) -> SaSint {
     if fs < 0
         || sa.len()
@@ -10985,6 +11419,7 @@ pub fn libsais64(t: &[u8], sa: &mut [SaSint], fs: SaSint, freq: Option<&mut [SaS
     libsais64_main(t, sa, LIBSAIS_FLAGS_NONE, 0, None, fs, freq, 1)
 }
 
+#[cfg(feature = "upstream-c")]
 unsafe extern "C" {
     fn probe_public_libsais64_omp_freq(
         t: *const u8,
@@ -10996,6 +11431,18 @@ unsafe extern "C" {
     ) -> SaSint;
 }
 
+/// Wrapper around the bundled upstream C `libsais64_omp` implementation.
+///
+/// Available only with the `upstream-c` feature. Same semantics as the Rust [`libsais64_omp`] function but defers all work to the C library; intended for the differential test suite and benchmarks.
+///
+/// - `t` (`[0..n-1]`): the input string.
+/// - `sa` (`[0..n-1+fs]`): the output array of suffixes.
+/// - `fs`: extra space available at the end of `sa`.
+/// - `freq` (`[0..255]`): optional output symbol frequency table.
+/// - `threads`: number of worker threads (can be 0 for the implementation default).
+///
+/// Returns 0 on success, -1 or -2 on error.
+#[cfg(feature = "upstream-c")]
 pub fn libsais64_upstream_c_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -11034,6 +11481,10 @@ pub fn libsais64_upstream_c_omp(
     }
 }
 
+/// `MaybeUninit` variant of [`libsais64_upstream_c_omp`].
+///
+/// Available only with the `upstream-c` feature. Identical semantics, except that the `sa` output may be uninitialised on entry — the C implementation always writes every required slot, so the caller may treat the slice as initialised on success.
+#[cfg(feature = "upstream-c")]
 pub fn libsais64_upstream_c_omp_uninit(
     t: &[u8],
     sa: &mut [MaybeUninit<SaSint>],
@@ -11072,6 +11523,14 @@ pub fn libsais64_upstream_c_omp_uninit(
     }
 }
 
+/// Constructs the generalized suffix array (GSA) of a given string set.
+///
+/// - `t` (`[0..n-1]`): the input string set using 0 as separators (`t[n-1]` must be 0).
+/// - `sa` (`[0..n-1+fs]`): the output array of suffixes.
+/// - `fs`: extra space available at the end of `sa` (0 should be enough for most cases).
+/// - `freq` (`[0..255]`): optional output symbol frequency table.
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais64_gsa(
     t: &[u8],
     sa: &mut [SaSint],
@@ -11117,6 +11576,7 @@ pub fn libsais64_gsa(
     libsais64_main(t, sa, LIBSAIS_FLAGS_GSA, 0, None, fs, freq, 1)
 }
 
+/// Alias for `libsais64_long`. See its documentation.
 pub fn libsais64_int(t: &mut [SaSint], sa: &mut [SaSint], k: SaSint, fs: SaSint) -> SaSint {
     if fs < 0
         || sa.len()
@@ -11136,10 +11596,29 @@ pub fn libsais64_int(t: &mut [SaSint], sa: &mut [SaSint], k: SaSint, fs: SaSint)
     libsais64_main_int(t, sa, k, fs, 1)
 }
 
+/// Constructs the suffix array of a given integer array.
+///
+/// During construction the input array is modified, but restored at the end if no error occurred.
+///
+/// - `t` (`[0..n-1]`): the input integer array.
+/// - `sa` (`[0..n-1+fs]`): the output array of suffixes.
+/// - `k`: the alphabet size of the input integer array.
+/// - `fs`: extra space available at the end of `sa` (can be 0, but 4k or better 6k is recommended for optimal performance).
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais64_long(t: &mut [SaSint], sa: &mut [SaSint], k: SaSint, fs: SaSint) -> SaSint {
     libsais64_int(t, sa, k, fs)
 }
 
+/// Constructs the suffix array of a given string using a libsais64 context.
+///
+/// - `ctx`: the libsais64 context.
+/// - `t` (`[0..n-1]`): the input string.
+/// - `sa` (`[0..n-1+fs]`): the output array of suffixes.
+/// - `fs`: extra space available at the end of `sa` (0 should be enough for most cases).
+/// - `freq` (`[0..255]`): optional output symbol frequency table.
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais64_ctx(
     ctx: &mut Context,
     t: &[u8],
@@ -11177,6 +11656,15 @@ pub fn libsais64_ctx(
     libsais64_main_ctx(ctx, t, sa, LIBSAIS_FLAGS_NONE, 0, None, fs, freq)
 }
 
+/// Constructs the generalized suffix array (GSA) of a given string set using a libsais64 context.
+///
+/// - `ctx`: the libsais64 context.
+/// - `t` (`[0..n-1]`): the input string set using 0 as separators (`t[n-1]` must be 0).
+/// - `sa` (`[0..n-1+fs]`): the output array of suffixes.
+/// - `fs`: extra space available at the end of `sa` (0 should be enough for most cases).
+/// - `freq` (`[0..255]`): optional output symbol frequency table.
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais64_gsa_ctx(
     ctx: &mut Context,
     t: &[u8],
@@ -11218,6 +11706,15 @@ pub fn libsais64_gsa_ctx(
     libsais64_main_ctx(ctx, t, sa, LIBSAIS_FLAGS_GSA, 0, None, fs, freq)
 }
 
+/// Constructs the Burrows-Wheeler transformed string (BWT) of a given string.
+///
+/// - `t` (`[0..n-1]`): the input string.
+/// - `u` (`[0..n-1]`): the output string (can alias `t`).
+/// - `a` (`[0..n-1+fs]`): the temporary array.
+/// - `fs`: extra space available at the end of `a` (0 should be enough for most cases).
+/// - `freq` (`[0..255]`): optional output symbol frequency table.
+///
+/// Returns the primary index on success, -1 or -2 on error.
 pub fn libsais64_bwt(
     t: &[u8],
     u: &mut [u8],
@@ -11274,6 +11771,17 @@ pub fn libsais64_bwt(
     index
 }
 
+/// Constructs the Burrows-Wheeler transformed string (BWT) of a given string with auxiliary indexes.
+///
+/// - `t` (`[0..n-1]`): the input string.
+/// - `u` (`[0..n-1]`): the output string (can alias `t`).
+/// - `a` (`[0..n-1+fs]`): the temporary array.
+/// - `fs`: extra space available at the end of `a` (0 should be enough for most cases).
+/// - `freq` (`[0..255]`): optional output symbol frequency table.
+/// - `r`: sampling rate for the auxiliary indexes (must be a power of two).
+/// - `i` (`[0..(n-1)/r]`): output auxiliary indexes.
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais64_bwt_aux(
     t: &[u8],
     u: &mut [u8],
@@ -11338,6 +11846,16 @@ pub fn libsais64_bwt_aux(
     index
 }
 
+/// Constructs the Burrows-Wheeler transformed string (BWT) of a given string using a libsais64 context.
+///
+/// - `ctx`: the libsais64 context.
+/// - `t` (`[0..n-1]`): the input string.
+/// - `u` (`[0..n-1]`): the output string (can alias `t`).
+/// - `a` (`[0..n-1+fs]`): the temporary array.
+/// - `fs`: extra space available at the end of `a` (0 should be enough for most cases).
+/// - `freq` (`[0..255]`): optional output symbol frequency table.
+///
+/// Returns the primary index on success, -1 or -2 on error.
 pub fn libsais64_bwt_ctx(
     ctx: &mut Context,
     t: &[u8],
@@ -11395,6 +11913,18 @@ pub fn libsais64_bwt_ctx(
     index
 }
 
+/// Constructs the BWT of a given string with auxiliary indexes using a libsais64 context.
+///
+/// - `ctx`: the libsais64 context.
+/// - `t` (`[0..n-1]`): the input string.
+/// - `u` (`[0..n-1]`): the output string (can alias `t`).
+/// - `a` (`[0..n-1+fs]`): the temporary array.
+/// - `fs`: extra space available at the end of `a` (0 should be enough for most cases).
+/// - `freq` (`[0..255]`): optional output symbol frequency table.
+/// - `r`: sampling rate for the auxiliary indexes (must be a power of two).
+/// - `i` (`[0..(n-1)/r]`): output auxiliary indexes.
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais64_bwt_aux_ctx(
     ctx: &mut Context,
     t: &[u8],
@@ -11464,6 +11994,13 @@ pub fn libsais64_bwt_aux_ctx(
     index
 }
 
+/// Creates the libsais64 context for parallel operations using OpenMP-style threading.
+///
+/// In multi-threaded environments, use one context per thread for parallel executions.
+///
+/// - `threads`: number of worker threads (can be 0 for the implementation default).
+///
+/// Returns the context, or `None` on allocation failure.
 pub fn create_ctx_omp(threads: SaSint) -> Option<Context> {
     if threads < 0 {
         return None;
@@ -11619,6 +12156,15 @@ fn libsais64_bwt_aux_run_32bit_omp(
     Some(SaSint::from(index))
 }
 
+/// Constructs the suffix array of a given string in parallel using OpenMP-style threading.
+///
+/// - `t` (`[0..n-1]`): the input string.
+/// - `sa` (`[0..n-1+fs]`): the output array of suffixes.
+/// - `fs`: extra space available at the end of `sa` (0 should be enough for most cases).
+/// - `freq` (`[0..255]`): optional output symbol frequency table.
+/// - `threads`: number of worker threads (can be 0 for the implementation default).
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais64_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -11664,6 +12210,15 @@ pub fn libsais64_omp(
     libsais64_main(t, sa, LIBSAIS_FLAGS_NONE, 0, None, fs, freq, threads)
 }
 
+/// Constructs the generalized suffix array (GSA) of a given string set in parallel using OpenMP-style threading.
+///
+/// - `t` (`[0..n-1]`): the input string set using 0 as separators (`t[n-1]` must be 0).
+/// - `sa` (`[0..n-1+fs]`): the output array of suffixes.
+/// - `fs`: extra space available at the end of `sa` (0 should be enough for most cases).
+/// - `freq` (`[0..255]`): optional output symbol frequency table.
+/// - `threads`: number of worker threads (can be 0 for the implementation default).
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais64_gsa_omp(
     t: &[u8],
     sa: &mut [SaSint],
@@ -11708,6 +12263,7 @@ pub fn libsais64_gsa_omp(
     libsais64_main(t, sa, LIBSAIS_FLAGS_GSA, 0, None, fs, freq, threads)
 }
 
+/// Alias for `libsais64_long_omp`. See its documentation.
 pub fn libsais64_int_omp(
     t: &mut [SaSint],
     sa: &mut [SaSint],
@@ -11735,6 +12291,17 @@ pub fn libsais64_int_omp(
     libsais64_main_int(t, sa, k, fs, normalize_omp_threads(threads))
 }
 
+/// Constructs the suffix array of a given integer array in parallel using OpenMP-style threading.
+///
+/// During construction the input array is modified, but restored at the end if no error occurred.
+///
+/// - `t` (`[0..n-1]`): the input integer array.
+/// - `sa` (`[0..n-1+fs]`): the output array of suffixes.
+/// - `k`: the alphabet size of the input integer array.
+/// - `fs`: extra space available at the end of `sa` (can be 0, but 4k or better 6k is recommended for optimal performance).
+/// - `threads`: number of worker threads (can be 0 for the implementation default).
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais64_long_omp(
     t: &mut [SaSint],
     sa: &mut [SaSint],
@@ -11745,6 +12312,16 @@ pub fn libsais64_long_omp(
     libsais64_int_omp(t, sa, k, fs, threads)
 }
 
+/// Constructs the Burrows-Wheeler transformed string (BWT) of a given string in parallel using OpenMP-style threading.
+///
+/// - `t` (`[0..n-1]`): the input string.
+/// - `u` (`[0..n-1]`): the output string (can alias `t`).
+/// - `a` (`[0..n-1+fs]`): the temporary array.
+/// - `fs`: extra space available at the end of `a` (0 should be enough for most cases).
+/// - `freq` (`[0..255]`): optional output symbol frequency table.
+/// - `threads`: number of worker threads (can be 0 for the implementation default).
+///
+/// Returns the primary index on success, -1 or -2 on error.
 pub fn libsais64_bwt_omp(
     t: &[u8],
     u: &mut [u8],
@@ -11803,6 +12380,18 @@ pub fn libsais64_bwt_omp(
     index
 }
 
+/// Constructs the BWT of a given string with auxiliary indexes in parallel using OpenMP-style threading.
+///
+/// - `t` (`[0..n-1]`): the input string.
+/// - `u` (`[0..n-1]`): the output string (can alias `t`).
+/// - `a` (`[0..n-1+fs]`): the temporary array.
+/// - `fs`: extra space available at the end of `a` (0 should be enough for most cases).
+/// - `freq` (`[0..255]`): optional output symbol frequency table.
+/// - `r`: sampling rate for the auxiliary indexes (must be a power of two).
+/// - `i` (`[0..(n-1)/r]`): output auxiliary indexes.
+/// - `threads`: number of worker threads (can be 0 for the implementation default).
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais64_bwt_aux_omp(
     t: &[u8],
     u: &mut [u8],
@@ -11873,6 +12462,8 @@ pub fn libsais64_bwt_aux_omp(
     index
 }
 
+/// Internal helper: compute phi.
+#[doc(hidden)]
 pub fn compute_phi(
     sa: &[SaSint],
     plcp: &mut [SaSint],
@@ -11911,6 +12502,8 @@ pub fn compute_phi(
     }
 }
 
+/// Internal helper: compute phi (OpenMP variant).
+#[doc(hidden)]
 pub fn compute_phi_omp(sa: &[SaSint], plcp: &mut [SaSint], n: SaSint, threads: SaSint) {
     if threads == 1 || n < 65_536 {
         compute_phi(sa, plcp, n, 0, n as FastSint);
@@ -11975,6 +12568,8 @@ pub fn compute_phi_omp(sa: &[SaSint], plcp: &mut [SaSint], n: SaSint, threads: S
     });
 }
 
+/// Internal helper: compute plcp.
+#[doc(hidden)]
 pub fn compute_plcp(
     t: &[u8],
     plcp: &mut [SaSint],
@@ -11999,6 +12594,8 @@ pub fn compute_plcp(
     }
 }
 
+/// Internal helper: compute plcp (OpenMP variant).
+#[doc(hidden)]
 pub fn compute_plcp_omp(t: &[u8], plcp: &mut [SaSint], n: SaSint, threads: SaSint) {
     if threads == 1 || n < 65_536 {
         compute_plcp(t, plcp, n as FastSint, 0, n as FastSint);
@@ -12029,6 +12626,8 @@ pub fn compute_plcp_omp(t: &[u8], plcp: &mut [SaSint], n: SaSint, threads: SaSin
     });
 }
 
+/// Internal helper: compute plcp gsa.
+#[doc(hidden)]
 pub fn compute_plcp_gsa(
     t: &[u8],
     plcp: &mut [SaSint],
@@ -12050,6 +12649,8 @@ pub fn compute_plcp_gsa(
     }
 }
 
+/// Internal helper: compute plcp gsa (OpenMP variant).
+#[doc(hidden)]
 pub fn compute_plcp_gsa_omp(t: &[u8], plcp: &mut [SaSint], n: SaSint, threads: SaSint) {
     if threads == 1 || n < 65_536 {
         compute_plcp_gsa(t, plcp, 0, n as FastSint);
@@ -12079,6 +12680,8 @@ pub fn compute_plcp_gsa_omp(t: &[u8], plcp: &mut [SaSint], n: SaSint, threads: S
     });
 }
 
+/// Internal helper: compute plcp int.
+#[doc(hidden)]
 pub fn compute_plcp_int(
     t: &[SaSint],
     plcp: &mut [SaSint],
@@ -12103,6 +12706,8 @@ pub fn compute_plcp_int(
     }
 }
 
+/// Internal helper: compute plcp int (OpenMP variant).
+#[doc(hidden)]
 pub fn compute_plcp_int_omp(t: &[SaSint], plcp: &mut [SaSint], n: SaSint, threads: SaSint) {
     if threads == 1 || n < 65_536 {
         compute_plcp_int(t, plcp, n as FastSint, 0, n as FastSint);
@@ -12133,6 +12738,8 @@ pub fn compute_plcp_int_omp(t: &[SaSint], plcp: &mut [SaSint], n: SaSint, thread
     });
 }
 
+/// Internal helper: compute lcp.
+#[doc(hidden)]
 pub fn compute_lcp(
     plcp: &[SaSint],
     sa: &[SaSint],
@@ -12149,6 +12756,8 @@ pub fn compute_lcp(
     }
 }
 
+/// Internal helper: compute lcp (OpenMP variant).
+#[doc(hidden)]
 pub fn compute_lcp_omp(
     plcp: &[SaSint],
     sa: &[SaSint],
@@ -12192,6 +12801,13 @@ pub fn compute_lcp_omp(
     });
 }
 
+/// Constructs the permuted longest common prefix array (PLCP) of a given string and suffix array.
+///
+/// - `t` (`[0..n-1]`): the input string.
+/// - `sa` (`[0..n-1]`): the input suffix array.
+/// - `plcp` (`[0..n-1]`): the output permuted longest common prefix array.
+///
+/// Returns 0 on success, -1 on error.
 pub fn libsais64_plcp(t: &[u8], sa: &[SaSint], plcp: &mut [SaSint]) -> SaSint {
     if sa.len() != t.len() || plcp.len() != t.len() {
         return -1;
@@ -12212,6 +12828,13 @@ pub fn libsais64_plcp(t: &[u8], sa: &[SaSint], plcp: &mut [SaSint]) -> SaSint {
     0
 }
 
+/// Constructs the PLCP of a given string set and generalized suffix array (GSA).
+///
+/// - `t` (`[0..n-1]`): the input string set using 0 as separators (`t[n-1]` must be 0).
+/// - `sa` (`[0..n-1]`): the input generalized suffix array.
+/// - `plcp` (`[0..n-1]`): the output permuted longest common prefix array.
+///
+/// Returns 0 on success, -1 on error.
 pub fn libsais64_plcp_gsa(t: &[u8], sa: &[SaSint], plcp: &mut [SaSint]) -> SaSint {
     if t.last().copied().unwrap_or(0) != 0 {
         return -1;
@@ -12235,6 +12858,13 @@ pub fn libsais64_plcp_gsa(t: &[u8], sa: &[SaSint], plcp: &mut [SaSint]) -> SaSin
     0
 }
 
+/// Constructs the PLCP of a given integer array and suffix array.
+///
+/// - `t` (`[0..n-1]`): the input integer array.
+/// - `sa` (`[0..n-1]`): the input suffix array.
+/// - `plcp` (`[0..n-1]`): the output permuted longest common prefix array.
+///
+/// Returns 0 on success, -1 on error.
 pub fn libsais64_plcp_int(t: &[SaSint], sa: &[SaSint], plcp: &mut [SaSint]) -> SaSint {
     if sa.len() != t.len() || plcp.len() != t.len() {
         return -1;
@@ -12255,6 +12885,13 @@ pub fn libsais64_plcp_int(t: &[SaSint], sa: &[SaSint], plcp: &mut [SaSint]) -> S
     0
 }
 
+/// Constructs the longest common prefix array (LCP) from a PLCP and suffix array.
+///
+/// - `plcp` (`[0..n-1]`): the input permuted longest common prefix array.
+/// - `sa` (`[0..n-1]`): the input suffix array or generalized suffix array (GSA).
+/// - `lcp` (`[0..n-1]`): the output longest common prefix array (can alias `sa`).
+///
+/// Returns 0 on success, -1 on error.
 pub fn libsais64_lcp(plcp: &[SaSint], sa: &[SaSint], lcp: &mut [SaSint]) -> SaSint {
     if plcp.len() != sa.len() || lcp.len() != sa.len() {
         return -1;
@@ -12279,6 +12916,14 @@ pub fn libsais64_lcp(plcp: &[SaSint], sa: &[SaSint], lcp: &mut [SaSint]) -> SaSi
     0
 }
 
+/// Constructs the PLCP of a given string and suffix array in parallel using OpenMP-style threading.
+///
+/// - `t` (`[0..n-1]`): the input string.
+/// - `sa` (`[0..n-1]`): the input suffix array.
+/// - `plcp` (`[0..n-1]`): the output permuted longest common prefix array.
+/// - `threads`: number of worker threads (can be 0 for the implementation default).
+///
+/// Returns 0 on success, -1 on error.
 pub fn libsais64_plcp_omp(t: &[u8], sa: &[SaSint], plcp: &mut [SaSint], threads: SaSint) -> SaSint {
     if threads < 0 {
         return -1;
@@ -12303,6 +12948,14 @@ pub fn libsais64_plcp_omp(t: &[u8], sa: &[SaSint], plcp: &mut [SaSint], threads:
     0
 }
 
+/// Constructs the PLCP of a given string set and GSA in parallel using OpenMP-style threading.
+///
+/// - `t` (`[0..n-1]`): the input string set using 0 as separators (`t[n-1]` must be 0).
+/// - `sa` (`[0..n-1]`): the input generalized suffix array.
+/// - `plcp` (`[0..n-1]`): the output permuted longest common prefix array.
+/// - `threads`: number of worker threads (can be 0 for the implementation default).
+///
+/// Returns 0 on success, -1 on error.
 pub fn libsais64_plcp_gsa_omp(
     t: &[u8],
     sa: &[SaSint],
@@ -12332,6 +12985,14 @@ pub fn libsais64_plcp_gsa_omp(
     0
 }
 
+/// Constructs the PLCP of a given integer array and suffix array in parallel using OpenMP-style threading.
+///
+/// - `t` (`[0..n-1]`): the input integer array.
+/// - `sa` (`[0..n-1]`): the input suffix array.
+/// - `plcp` (`[0..n-1]`): the output permuted longest common prefix array.
+/// - `threads`: number of worker threads (can be 0 for the implementation default).
+///
+/// Returns 0 on success, -1 on error.
 pub fn libsais64_plcp_int_omp(
     t: &[SaSint],
     sa: &[SaSint],
@@ -12361,6 +13022,14 @@ pub fn libsais64_plcp_int_omp(
     0
 }
 
+/// Constructs the LCP from a PLCP and suffix array in parallel using OpenMP-style threading.
+///
+/// - `plcp` (`[0..n-1]`): the input permuted longest common prefix array.
+/// - `sa` (`[0..n-1]`): the input suffix array or generalized suffix array (GSA).
+/// - `lcp` (`[0..n-1]`): the output longest common prefix array (can alias `sa`).
+/// - `threads`: number of worker threads (can be 0 for the implementation default).
+///
+/// Returns 0 on success, -1 on error.
 pub fn libsais64_lcp_omp(
     plcp: &[SaSint],
     sa: &[SaSint],
@@ -12398,6 +13067,8 @@ fn suffix_entries_in_bounds(sa: &[SaSint], len: usize) -> bool {
         .all(|&value| usize::try_from(value).is_ok_and(|index| index < len))
 }
 
+/// Internal helper: unbwt compute histogram.
+#[doc(hidden)]
 pub fn unbwt_compute_histogram(t: &[u8], n: FastSint, count: &mut [SaUint]) {
     let n = usize::try_from(n).expect("n must be non-negative");
     assert!(count.len() >= ALPHABET_SIZE);
@@ -12406,6 +13077,8 @@ pub fn unbwt_compute_histogram(t: &[u8], n: FastSint, count: &mut [SaUint]) {
     }
 }
 
+/// Internal helper: unbwt transpose bucket2.
+#[doc(hidden)]
 pub fn unbwt_transpose_bucket2(bucket2: &mut [SaUint]) {
     assert!(bucket2.len() >= ALPHABET_SIZE * ALPHABET_SIZE);
     for x in 0..ALPHABET_SIZE {
@@ -12415,6 +13088,8 @@ pub fn unbwt_transpose_bucket2(bucket2: &mut [SaUint]) {
     }
 }
 
+/// Internal helper: unbwt compute bigram histogram single.
+#[doc(hidden)]
 pub fn unbwt_compute_bigram_histogram_single(
     t: &[u8],
     bucket1: &mut [SaUint],
@@ -12444,6 +13119,8 @@ pub fn unbwt_compute_bigram_histogram_single(
     unbwt_transpose_bucket2(bucket2);
 }
 
+/// Internal helper: unbwt calculate fastbits.
+#[doc(hidden)]
 pub fn unbwt_calculate_fastbits(
     bucket2: &mut [SaUint],
     fastbits: &mut [u16],
@@ -12474,6 +13151,8 @@ pub fn unbwt_calculate_fastbits(
     }
 }
 
+/// Internal helper: unbwt calculate bi psi.
+#[doc(hidden)]
 pub fn unbwt_calculate_bi_psi(
     t: &[u8],
     p: &mut [SaUint],
@@ -12525,6 +13204,8 @@ pub fn unbwt_calculate_bi_psi(
     }
 }
 
+/// Internal helper: unbwt calculate biPSI.
+#[doc(hidden)]
 #[allow(dead_code, non_snake_case)]
 pub fn unbwt_calculate_biPSI(
     t: &[u8],
@@ -12546,6 +13227,8 @@ pub fn unbwt_calculate_biPSI(
     );
 }
 
+/// Internal helper: unbwt init single.
+#[doc(hidden)]
 pub fn unbwt_init_single(
     t: &[u8],
     p: &mut [SaUint],
@@ -12579,6 +13262,8 @@ pub fn unbwt_init_single(
     unbwt_calculate_bi_psi(t, p, &mut bucket1, bucket2, index, 0, n as FastSint);
 }
 
+/// Internal helper: unbwt compute bigram histogram parallel.
+#[doc(hidden)]
 pub fn unbwt_compute_bigram_histogram_parallel(
     t: &[u8],
     index: FastUint,
@@ -12602,6 +13287,8 @@ pub fn unbwt_compute_bigram_histogram_parallel(
     }
 }
 
+/// Internal helper: unbwt init parallel.
+#[doc(hidden)]
 pub fn unbwt_init_parallel(
     t: &[u8],
     p: &mut [SaUint],
@@ -12761,6 +13448,8 @@ fn unbwt_resolve_symbol(bucket2: &[SaUint], fastbits: &[u16], shift: FastUint, p
     c
 }
 
+/// Internal helper: unbwt decode 1.
+#[doc(hidden)]
 pub fn unbwt_decode_1(
     u: &mut [u8],
     p: &[SaUint],
@@ -12784,6 +13473,8 @@ pub fn unbwt_decode_1(
     *i0 = p0 as FastUint;
 }
 
+/// Internal helper: unbwt decode 2.
+#[doc(hidden)]
 pub fn unbwt_decode_2(
     u: &mut [u8],
     p: &[SaUint],
@@ -12800,6 +13491,8 @@ pub fn unbwt_decode_2(
     unbwt_decode_1(&mut u[r..r + width], p, bucket2, fastbits, shift, i1, k);
 }
 
+/// Internal helper: unbwt decode 3.
+#[doc(hidden)]
 pub fn unbwt_decode_3(
     u: &mut [u8],
     p: &[SaUint],
@@ -12826,6 +13519,8 @@ pub fn unbwt_decode_3(
     );
 }
 
+/// Internal helper: unbwt decode 4.
+#[doc(hidden)]
 pub fn unbwt_decode_4(
     u: &mut [u8],
     p: &[SaUint],
@@ -12862,6 +13557,8 @@ pub fn unbwt_decode_4(
     );
 }
 
+/// Internal helper: unbwt decode 5.
+#[doc(hidden)]
 pub fn unbwt_decode_5(
     u: &mut [u8],
     p: &[SaUint],
@@ -12908,6 +13605,8 @@ pub fn unbwt_decode_5(
     );
 }
 
+/// Internal helper: unbwt decode 6.
+#[doc(hidden)]
 pub fn unbwt_decode_6(
     u: &mut [u8],
     p: &[SaUint],
@@ -12964,6 +13663,8 @@ pub fn unbwt_decode_6(
     );
 }
 
+/// Internal helper: unbwt decode 7.
+#[doc(hidden)]
 pub fn unbwt_decode_7(
     u: &mut [u8],
     p: &[SaUint],
@@ -13030,6 +13731,8 @@ pub fn unbwt_decode_7(
     );
 }
 
+/// Internal helper: unbwt decode 8.
+#[doc(hidden)]
 pub fn unbwt_decode_8(
     u: &mut [u8],
     p: &[SaUint],
@@ -13106,6 +13809,8 @@ pub fn unbwt_decode_8(
     );
 }
 
+/// Internal helper: unbwt decode.
+#[doc(hidden)]
 pub fn unbwt_decode(
     u: &mut [u8],
     p: &[SaUint],
@@ -13412,6 +14117,8 @@ pub fn unbwt_decode(
     }
 }
 
+/// Internal helper: unbwt decode (OpenMP variant).
+#[doc(hidden)]
 pub fn unbwt_decode_omp(
     t: &[u8],
     u: &mut [u8],
@@ -13457,6 +14164,8 @@ pub fn unbwt_decode_omp(
     u[usize::try_from(n).expect("n must be non-negative") - 1] = lastc;
 }
 
+/// Internal helper: unbwt core.
+#[doc(hidden)]
 pub fn unbwt_core(
     t: &[u8],
     u: &mut [u8],
@@ -13480,6 +14189,8 @@ pub fn unbwt_core(
     0
 }
 
+/// Internal helper: unbwt main.
+#[doc(hidden)]
 pub fn unbwt_main(
     t: &[u8],
     u: &mut [u8],
@@ -13526,6 +14237,8 @@ pub fn unbwt_main(
     )
 }
 
+/// Internal helper: unbwt main ctx.
+#[doc(hidden)]
 pub fn unbwt_main_ctx(
     ctx: &mut UnbwtContext,
     t: &[u8],
@@ -13568,6 +14281,15 @@ pub fn unbwt_main_ctx(
     )
 }
 
+/// Reconstructs the original string from a given BWT and primary index.
+///
+/// - `t` (`[0..n-1]`): the input string.
+/// - `u` (`[0..n-1]`): the output string (can alias `t`).
+/// - `a` (`[0..n]`): the temporary array (must have length `n + 1`).
+/// - `freq` (`[0..255]`): optional input symbol frequency table.
+/// - `i`: the primary index.
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais64_unbwt(
     t: &[u8],
     u: &mut [u8],
@@ -13585,6 +14307,16 @@ pub fn libsais64_unbwt(
     )
 }
 
+/// Reconstructs the original string from a given BWT and primary index using a libsais64 reverse-BWT context.
+///
+/// - `ctx`: the libsais64 reverse-BWT context.
+/// - `t` (`[0..n-1]`): the input string.
+/// - `u` (`[0..n-1]`): the output string (can alias `t`).
+/// - `a` (`[0..n]`): the temporary array (must have length `n + 1`).
+/// - `freq` (`[0..255]`): optional input symbol frequency table.
+/// - `i`: the primary index.
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais64_unbwt_ctx(
     ctx: &mut UnbwtContext,
     t: &[u8],
@@ -13604,6 +14336,16 @@ pub fn libsais64_unbwt_ctx(
     )
 }
 
+/// Reconstructs the original string from a given BWT with auxiliary indexes.
+///
+/// - `t` (`[0..n-1]`): the input string.
+/// - `u` (`[0..n-1]`): the output string (can alias `t`).
+/// - `a` (`[0..n]`): the temporary array (must have length `n + 1`).
+/// - `freq` (`[0..255]`): optional input symbol frequency table.
+/// - `r`: sampling rate for the auxiliary indexes (must be a power of two).
+/// - `i` (`[0..(n-1)/r]`): input auxiliary indexes.
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais64_unbwt_aux(
     t: &[u8],
     u: &mut [u8],
@@ -13660,6 +14402,17 @@ pub fn libsais64_unbwt_aux(
     result
 }
 
+/// Reconstructs the original string from a given BWT with auxiliary indexes using a libsais64 reverse-BWT context.
+///
+/// - `ctx`: the libsais64 reverse-BWT context.
+/// - `t` (`[0..n-1]`): the input string.
+/// - `u` (`[0..n-1]`): the output string (can alias `t`).
+/// - `a` (`[0..n]`): the temporary array (must have length `n + 1`).
+/// - `freq` (`[0..255]`): optional input symbol frequency table.
+/// - `r`: sampling rate for the auxiliary indexes (must be a power of two).
+/// - `i` (`[0..(n-1)/r]`): input auxiliary indexes.
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais64_unbwt_aux_ctx(
     ctx: &mut UnbwtContext,
     t: &[u8],
@@ -13717,6 +14470,13 @@ pub fn libsais64_unbwt_aux_ctx(
     result
 }
 
+/// Creates the libsais64 reverse-BWT context for parallel `libsais64_unbwt_*` operations using OpenMP-style threading.
+///
+/// In multi-threaded environments, use one context per thread for parallel executions.
+///
+/// - `threads`: number of worker threads (can be 0 for the implementation default).
+///
+/// Returns the context, or `None` on allocation failure.
 pub fn unbwt_create_ctx_omp(threads: SaSint) -> Option<UnbwtContext> {
     if threads < 0 {
         return None;
@@ -13724,6 +14484,16 @@ pub fn unbwt_create_ctx_omp(threads: SaSint) -> Option<UnbwtContext> {
     unbwt_create_ctx_main(normalize_omp_threads(threads))
 }
 
+/// Reconstructs the original string from a given BWT and primary index in parallel using OpenMP-style threading.
+///
+/// - `t` (`[0..n-1]`): the input string.
+/// - `u` (`[0..n-1]`): the output string (can alias `t`).
+/// - `a` (`[0..n]`): the temporary array (must have length `n + 1`).
+/// - `freq` (`[0..255]`): optional input symbol frequency table.
+/// - `i`: the primary index.
+/// - `threads`: number of worker threads (can be 0 for the implementation default).
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais64_unbwt_omp(
     t: &[u8],
     u: &mut [u8],
@@ -13743,6 +14513,17 @@ pub fn libsais64_unbwt_omp(
     )
 }
 
+/// Reconstructs the original string from a given BWT with auxiliary indexes in parallel using OpenMP-style threading.
+///
+/// - `t` (`[0..n-1]`): the input string.
+/// - `u` (`[0..n-1]`): the output string (can alias `t`).
+/// - `a` (`[0..n]`): the temporary array (must have length `n + 1`).
+/// - `freq` (`[0..255]`): optional input symbol frequency table.
+/// - `r`: sampling rate for the auxiliary indexes (must be a power of two).
+/// - `i` (`[0..(n-1)/r]`): input auxiliary indexes.
+/// - `threads`: number of worker threads (can be 0 for the implementation default).
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais64_unbwt_aux_omp(
     t: &[u8],
     u: &mut [u8],
@@ -13802,6 +14583,8 @@ pub fn libsais64_unbwt_aux_omp(
     result
 }
 
+/// Internal helper: bwt copy 8u.
+#[doc(hidden)]
 pub fn bwt_copy_8u(u: &mut [u8], a: &[SaSint], n: SaSint) {
     if n <= 0 {
         return;
@@ -13813,6 +14596,8 @@ pub fn bwt_copy_8u(u: &mut [u8], a: &[SaSint], n: SaSint) {
     }
 }
 
+/// Internal helper: bwt copy 8u (OpenMP variant).
+#[doc(hidden)]
 pub fn bwt_copy_8u_omp(u: &mut [u8], a: &[SaSint], n: SaSint, threads: SaSint) {
     if threads == 1 || n < 65_536 {
         bwt_copy_8u(u, a, n);
@@ -13842,6 +14627,8 @@ pub fn bwt_copy_8u_omp(u: &mut [u8], a: &[SaSint], n: SaSint, threads: SaSint) {
     });
 }
 
+/// Internal helper: accumulate counts s32 2.
+#[doc(hidden)]
 pub fn accumulate_counts_s32_2(bucket00: &mut [SaSint], bucket01: &[SaSint]) {
     assert_eq!(bucket00.len(), bucket01.len());
     for (dst, src) in bucket00.iter_mut().zip(bucket01.iter()) {
@@ -13849,6 +14636,8 @@ pub fn accumulate_counts_s32_2(bucket00: &mut [SaSint], bucket01: &[SaSint]) {
     }
 }
 
+/// Internal helper: accumulate counts s32 3.
+#[doc(hidden)]
 pub fn accumulate_counts_s32_3(bucket00: &mut [SaSint], bucket01: &[SaSint], bucket02: &[SaSint]) {
     assert_eq!(bucket00.len(), bucket01.len());
     assert_eq!(bucket00.len(), bucket02.len());
@@ -13861,6 +14650,8 @@ pub fn accumulate_counts_s32_3(bucket00: &mut [SaSint], bucket01: &[SaSint], buc
     }
 }
 
+/// Internal helper: accumulate counts s32 4.
+#[doc(hidden)]
 pub fn accumulate_counts_s32_4(
     bucket00: &mut [SaSint],
     bucket01: &[SaSint],
@@ -13880,6 +14671,8 @@ pub fn accumulate_counts_s32_4(
     }
 }
 
+/// Internal helper: accumulate counts s32 5.
+#[doc(hidden)]
 pub fn accumulate_counts_s32_5(
     bucket00: &mut [SaSint],
     bucket01: &[SaSint],
@@ -13902,6 +14695,8 @@ pub fn accumulate_counts_s32_5(
     }
 }
 
+/// Internal helper: accumulate counts s32 6.
+#[doc(hidden)]
 pub fn accumulate_counts_s32_6(
     bucket00: &mut [SaSint],
     bucket01: &[SaSint],
@@ -13927,6 +14722,8 @@ pub fn accumulate_counts_s32_6(
     }
 }
 
+/// Internal helper: accumulate counts s32 7.
+#[doc(hidden)]
 pub fn accumulate_counts_s32_7(
     bucket00: &mut [SaSint],
     bucket01: &[SaSint],
@@ -13955,6 +14752,8 @@ pub fn accumulate_counts_s32_7(
     }
 }
 
+/// Internal helper: accumulate counts s32 8.
+#[doc(hidden)]
 pub fn accumulate_counts_s32_8(
     bucket00: &mut [SaSint],
     bucket01: &[SaSint],
@@ -13986,6 +14785,8 @@ pub fn accumulate_counts_s32_8(
     }
 }
 
+/// Internal helper: accumulate counts s32 9.
+#[doc(hidden)]
 pub fn accumulate_counts_s32_9(
     bucket00: &mut [SaSint],
     bucket01: &[SaSint],
@@ -14020,6 +14821,8 @@ pub fn accumulate_counts_s32_9(
     }
 }
 
+/// Internal helper: accumulate counts s32.
+#[doc(hidden)]
 pub fn accumulate_counts_s32(
     buckets: &mut [SaSint],
     bucket_size: FastSint,
@@ -14119,11 +14922,13 @@ fn accumulate_counts_at(
     buckets[bucket00_start..dst_end].copy_from_slice(&sums);
 }
 
+/// Internal helper: thread state size.
+#[doc(hidden)]
 pub fn thread_state_size() -> usize {
     mem::size_of::<ThreadState>()
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "upstream-c"))]
 mod tests {
     use super::*;
 

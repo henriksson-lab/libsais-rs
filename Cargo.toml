@@ -1,6 +1,6 @@
 [package]
 name = "libsais-rs"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "Rust translation of libsais for suffix array construction and related transforms"
@@ -18,23 +18,32 @@ include = [
     "/src/**",
     "/examples/**",
     "/cprobe/**",
-    "/libsais/LICENSE",
-    "/libsais/README.md",
-    "/libsais/VERSION",
-    "/libsais/CHANGES",
-    "/libsais/include/**",
-    "/libsais/src/**",
 ]
 
 [lib]
 name = "libsais_rs"
 path = "src/lib.rs"
 
+[[example]]
+name = "bench_vs_c"
+required-features = ["upstream-c"]
+
+[features]
+default = []
+# Build and link the upstream C libsais (with OpenMP) and expose
+# `libsais*_upstream_c*` wrappers. Required for the differential test suite.
+#
+# This feature is for development only. The upstream C source is not shipped
+# in the published crate; the feature only works in a source checkout that
+# has `./libsais/` populated (see README). Requires GCC with OpenMP
+# (libgomp); other toolchains are not supported.
+upstream-c = ["dep:cc"]
+
 [dependencies]
 rayon = "1.10"
 
 [build-dependencies]
-cc = "1"
+cc = { version = "1", optional = true }
 
 [profile.release]
 codegen-units = 1

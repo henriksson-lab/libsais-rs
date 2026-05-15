@@ -1,3 +1,9 @@
+//! Rust translation of upstream [libsais](https://github.com/IlyaGrebnov/libsais)
+//! 2.10.4 by Ilya Grebnov.
+//!
+//! This module exposes the 16-bit alphabet, 64-bit suffix array, BWT, unBWT,
+//! PLCP and LCP entry points (mirroring `libsais16x64.h`).
+
 use std::mem;
 
 pub type SaSint = i64;
@@ -48,10 +54,22 @@ pub struct UnbwtContext {
     threads: SaSint,
 }
 
+/// Creates the libsais16x64 context that allows reusing allocated memory with each libsais16x64 operation.
+///
+/// In multi-threaded environments, use one context per thread for parallel executions.
+///
+/// Returns the context, or `None` on allocation failure.
 pub fn create_ctx() -> Option<Context> {
     create_ctx_main(1)
 }
 
+/// Creates the libsais16x64 context for parallel operations using OpenMP-style threading.
+///
+/// In multi-threaded environments, use one context per thread for parallel executions.
+///
+/// - `threads`: number of worker threads (can be 0 for the implementation default).
+///
+/// Returns the context, or `None` on allocation failure.
 pub fn create_ctx_omp(threads: SaSint) -> Option<Context> {
     if threads < 0 {
         None
@@ -60,12 +78,25 @@ pub fn create_ctx_omp(threads: SaSint) -> Option<Context> {
     }
 }
 
+/// Destroys the libsais16x64 context and frees previously allocated memory.
 pub fn free_ctx(_ctx: Context) {}
 
+/// Creates the libsais16x64 reverse-BWT context that allows reusing allocated memory with each `libsais16x64_unbwt_*` operation.
+///
+/// In multi-threaded environments, use one context per thread for parallel executions.
+///
+/// Returns the context, or `None` on allocation failure.
 pub fn unbwt_create_ctx() -> Option<UnbwtContext> {
     unbwt_create_ctx_main(1)
 }
 
+/// Creates the libsais16x64 reverse-BWT context for parallel `libsais16x64_unbwt_*` operations using OpenMP-style threading.
+///
+/// In multi-threaded environments, use one context per thread for parallel executions.
+///
+/// - `threads`: number of worker threads (can be 0 for the implementation default).
+///
+/// Returns the context, or `None` on allocation failure.
 pub fn unbwt_create_ctx_omp(threads: SaSint) -> Option<UnbwtContext> {
     if threads < 0 {
         None
@@ -74,6 +105,7 @@ pub fn unbwt_create_ctx_omp(threads: SaSint) -> Option<UnbwtContext> {
     }
 }
 
+/// Destroys the libsais16x64 reverse-BWT context and frees previously allocated memory.
 pub fn unbwt_free_ctx(_ctx: UnbwtContext) {}
 
 fn normalize_threads(threads: SaSint) -> SaSint {
@@ -10171,6 +10203,14 @@ fn main_long(
     )
 }
 
+/// Constructs the suffix array of a given 16-bit string.
+///
+/// - `t` (`[0..n-1]`): the input 16-bit string.
+/// - `sa` (`[0..n-1+fs]`): the output array of suffixes.
+/// - `fs`: extra space available at the end of `sa` (0 should be enough for most cases).
+/// - `freq` (`[0..65535]`): optional output symbol frequency table.
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais16x64(
     t: &[u16],
     sa: &mut [SaSint],
@@ -10180,6 +10220,14 @@ pub fn libsais16x64(
     main_16u_alloc(t, sa, 0, 0, None, fs, freq, 1)
 }
 
+/// Constructs the generalized suffix array (GSA) of a given 16-bit string set.
+///
+/// - `t` (`[0..n-1]`): the input 16-bit string set using 0 as separators (`t[n-1]` must be 0).
+/// - `sa` (`[0..n-1+fs]`): the output array of suffixes.
+/// - `fs`: extra space available at the end of `sa` (0 should be enough for most cases).
+/// - `freq` (`[0..65535]`): optional output symbol frequency table.
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais16x64_gsa(
     t: &[u16],
     sa: &mut [SaSint],
@@ -10189,6 +10237,7 @@ pub fn libsais16x64_gsa(
     main_16u_alloc(t, sa, LIBSAIS_FLAGS_GSA, 0, None, fs, freq, 1)
 }
 
+/// Alias for `libsais16x64_long`. See its documentation.
 pub fn libsais16x64_int(t: &mut [SaSint], sa: &mut [SaSint], k: SaSint, fs: SaSint) -> SaSint {
     if fs < 0
         || sa.len()
@@ -10208,10 +10257,29 @@ pub fn libsais16x64_int(t: &mut [SaSint], sa: &mut [SaSint], k: SaSint, fs: SaSi
     main_long(t, sa, k, fs, 1)
 }
 
+/// Constructs the suffix array of a given integer array.
+///
+/// During construction the input array is modified, but restored at the end if no error occurred.
+///
+/// - `t` (`[0..n-1]`): the input integer array.
+/// - `sa` (`[0..n-1+fs]`): the output array of suffixes.
+/// - `k`: the alphabet size of the input integer array.
+/// - `fs`: extra space available at the end of `sa` (can be 0, but 4k or better 6k is recommended for optimal performance).
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais16x64_long(t: &mut [SaSint], sa: &mut [SaSint], k: SaSint, fs: SaSint) -> SaSint {
     libsais16x64_int(t, sa, k, fs)
 }
 
+/// Constructs the suffix array of a given 16-bit string using a libsais16x64 context.
+///
+/// - `ctx`: the libsais16x64 context.
+/// - `t` (`[0..n-1]`): the input 16-bit string.
+/// - `sa` (`[0..n-1+fs]`): the output array of suffixes.
+/// - `fs`: extra space available at the end of `sa` (0 should be enough for most cases).
+/// - `freq` (`[0..65535]`): optional output symbol frequency table.
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais16x64_ctx(
     ctx: &mut Context,
     t: &[u16],
@@ -10222,6 +10290,15 @@ pub fn libsais16x64_ctx(
     main_16u_ctx(ctx, t, sa, 0, 0, None, fs, freq)
 }
 
+/// Constructs the generalized suffix array (GSA) of a given 16-bit string set using a libsais16x64 context.
+///
+/// - `ctx`: the libsais16x64 context.
+/// - `t` (`[0..n-1]`): the input 16-bit string set using 0 as separators (`t[n-1]` must be 0).
+/// - `sa` (`[0..n-1+fs]`): the output array of suffixes.
+/// - `fs`: extra space available at the end of `sa` (0 should be enough for most cases).
+/// - `freq` (`[0..65535]`): optional output symbol frequency table.
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais16x64_gsa_ctx(
     ctx: &mut Context,
     t: &[u16],
@@ -10232,6 +10309,15 @@ pub fn libsais16x64_gsa_ctx(
     main_16u_ctx(ctx, t, sa, LIBSAIS_FLAGS_GSA, 0, None, fs, freq)
 }
 
+/// Constructs the suffix array of a given 16-bit string in parallel using OpenMP-style threading.
+///
+/// - `t` (`[0..n-1]`): the input 16-bit string.
+/// - `sa` (`[0..n-1+fs]`): the output array of suffixes.
+/// - `fs`: extra space available at the end of `sa` (0 should be enough for most cases).
+/// - `freq` (`[0..65535]`): optional output symbol frequency table.
+/// - `threads`: number of worker threads (can be 0 for the implementation default).
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais16x64_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -10246,6 +10332,15 @@ pub fn libsais16x64_omp(
     }
 }
 
+/// Constructs the generalized suffix array (GSA) of a given 16-bit string set in parallel using OpenMP-style threading.
+///
+/// - `t` (`[0..n-1]`): the input 16-bit string set using 0 as separators (`t[n-1]` must be 0).
+/// - `sa` (`[0..n-1+fs]`): the output array of suffixes.
+/// - `fs`: extra space available at the end of `sa` (0 should be enough for most cases).
+/// - `freq` (`[0..65535]`): optional output symbol frequency table.
+/// - `threads`: number of worker threads (can be 0 for the implementation default).
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais16x64_gsa_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -10260,6 +10355,7 @@ pub fn libsais16x64_gsa_omp(
     }
 }
 
+/// Alias for `libsais16x64_long_omp`. See its documentation.
 pub fn libsais16x64_int_omp(
     t: &mut [SaSint],
     sa: &mut [SaSint],
@@ -10286,6 +10382,17 @@ pub fn libsais16x64_int_omp(
     main_long(t, sa, k, fs, threads)
 }
 
+/// Constructs the suffix array of a given integer array in parallel using OpenMP-style threading.
+///
+/// During construction the input array is modified, but restored at the end if no error occurred.
+///
+/// - `t` (`[0..n-1]`): the input integer array.
+/// - `sa` (`[0..n-1+fs]`): the output array of suffixes.
+/// - `k`: the alphabet size of the input integer array.
+/// - `fs`: extra space available at the end of `sa` (can be 0, but 4k or better 6k is recommended for optimal performance).
+/// - `threads`: number of worker threads (can be 0 for the implementation default).
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais16x64_long_omp(
     t: &mut [SaSint],
     sa: &mut [SaSint],
@@ -10337,6 +10444,15 @@ fn build_bwt(
     index
 }
 
+/// Constructs the Burrows-Wheeler transformed 16-bit string (BWT) of a given 16-bit string.
+///
+/// - `t` (`[0..n-1]`): the input 16-bit string.
+/// - `u` (`[0..n-1]`): the output 16-bit string (can alias `t`).
+/// - `a` (`[0..n-1+fs]`): the temporary array.
+/// - `fs`: extra space available at the end of `a` (0 should be enough for most cases).
+/// - `freq` (`[0..65535]`): optional output symbol frequency table.
+///
+/// Returns the primary index on success, -1 or -2 on error.
 pub fn libsais16x64_bwt(
     t: &[u16],
     u: &mut [u16],
@@ -10391,6 +10507,17 @@ fn build_bwt_aux(
     index
 }
 
+/// Constructs the Burrows-Wheeler transformed 16-bit string (BWT) of a given 16-bit string with auxiliary indexes.
+///
+/// - `t` (`[0..n-1]`): the input 16-bit string.
+/// - `u` (`[0..n-1]`): the output 16-bit string (can alias `t`).
+/// - `a` (`[0..n-1+fs]`): the temporary array.
+/// - `fs`: extra space available at the end of `a` (0 should be enough for most cases).
+/// - `freq` (`[0..65535]`): optional output symbol frequency table.
+/// - `r`: sampling rate for the auxiliary indexes (must be a power of two).
+/// - `i` (`[0..(n-1)/r]`): output auxiliary indexes.
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais16x64_bwt_aux(
     t: &[u16],
     u: &mut [u16],
@@ -10403,6 +10530,16 @@ pub fn libsais16x64_bwt_aux(
     build_bwt_aux(t, u, a, fs, freq, r, i, 1)
 }
 
+/// Constructs the Burrows-Wheeler transformed 16-bit string (BWT) of a given 16-bit string using a libsais16x64 context.
+///
+/// - `ctx`: the libsais16x64 context.
+/// - `t` (`[0..n-1]`): the input 16-bit string.
+/// - `u` (`[0..n-1]`): the output 16-bit string (can alias `t`).
+/// - `a` (`[0..n-1+fs]`): the temporary array.
+/// - `fs`: extra space available at the end of `a` (0 should be enough for most cases).
+/// - `freq` (`[0..65535]`): optional output symbol frequency table.
+///
+/// Returns the primary index on success, -1 or -2 on error.
 pub fn libsais16x64_bwt_ctx(
     ctx: &mut Context,
     t: &[u16],
@@ -10443,6 +10580,18 @@ pub fn libsais16x64_bwt_ctx(
     index
 }
 
+/// Constructs the BWT of a given 16-bit string with auxiliary indexes using a libsais16x64 context.
+///
+/// - `ctx`: the libsais16x64 context.
+/// - `t` (`[0..n-1]`): the input 16-bit string.
+/// - `u` (`[0..n-1]`): the output 16-bit string (can alias `t`).
+/// - `a` (`[0..n-1+fs]`): the temporary array.
+/// - `fs`: extra space available at the end of `a` (0 should be enough for most cases).
+/// - `freq` (`[0..65535]`): optional output symbol frequency table.
+/// - `r`: sampling rate for the auxiliary indexes (must be a power of two).
+/// - `i` (`[0..(n-1)/r]`): output auxiliary indexes.
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais16x64_bwt_aux_ctx(
     ctx: &mut Context,
     t: &[u16],
@@ -10493,6 +10642,16 @@ pub fn libsais16x64_bwt_aux_ctx(
     index
 }
 
+/// Constructs the Burrows-Wheeler transformed 16-bit string (BWT) of a given 16-bit string in parallel using OpenMP-style threading.
+///
+/// - `t` (`[0..n-1]`): the input 16-bit string.
+/// - `u` (`[0..n-1]`): the output 16-bit string (can alias `t`).
+/// - `a` (`[0..n-1+fs]`): the temporary array.
+/// - `fs`: extra space available at the end of `a` (0 should be enough for most cases).
+/// - `freq` (`[0..65535]`): optional output symbol frequency table.
+/// - `threads`: number of worker threads (can be 0 for the implementation default).
+///
+/// Returns the primary index on success, -1 or -2 on error.
 pub fn libsais16x64_bwt_omp(
     t: &[u16],
     u: &mut [u16],
@@ -10508,6 +10667,18 @@ pub fn libsais16x64_bwt_omp(
     }
 }
 
+/// Constructs the BWT of a given 16-bit string with auxiliary indexes in parallel using OpenMP-style threading.
+///
+/// - `t` (`[0..n-1]`): the input 16-bit string.
+/// - `u` (`[0..n-1]`): the output 16-bit string (can alias `t`).
+/// - `a` (`[0..n-1+fs]`): the temporary array.
+/// - `fs`: extra space available at the end of `a` (0 should be enough for most cases).
+/// - `freq` (`[0..65535]`): optional output symbol frequency table.
+/// - `r`: sampling rate for the auxiliary indexes (must be a power of two).
+/// - `i` (`[0..(n-1)/r]`): output auxiliary indexes.
+/// - `threads`: number of worker threads (can be 0 for the implementation default).
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais16x64_bwt_aux_omp(
     t: &[u16],
     u: &mut [u16],
@@ -11306,6 +11477,15 @@ fn inverse_bwt(
     unbwt_core(t, u, a, freq, n as SaSint, &i)
 }
 
+/// Reconstructs the original 16-bit string from a given BWT and primary index.
+///
+/// - `t` (`[0..n-1]`): the input 16-bit string.
+/// - `u` (`[0..n-1]`): the output 16-bit string (can alias `t`).
+/// - `a` (`[0..n]`): the temporary array (must have length `n + 1`).
+/// - `freq` (`[0..65535]`): optional input symbol frequency table.
+/// - `i`: the primary index.
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais16x64_unbwt(
     t: &[u16],
     u: &mut [u16],
@@ -11316,6 +11496,16 @@ pub fn libsais16x64_unbwt(
     inverse_bwt(t, u, a, freq, i)
 }
 
+/// Reconstructs the original 16-bit string from a given BWT and primary index using a libsais16x64 reverse-BWT context.
+///
+/// - `ctx`: the libsais16x64 reverse-BWT context.
+/// - `t` (`[0..n-1]`): the input 16-bit string.
+/// - `u` (`[0..n-1]`): the output 16-bit string (can alias `t`).
+/// - `a` (`[0..n]`): the temporary array (must have length `n + 1`).
+/// - `freq` (`[0..65535]`): optional input symbol frequency table.
+/// - `i`: the primary index.
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais16x64_unbwt_ctx(
     ctx: &mut UnbwtContext,
     t: &[u16],
@@ -11327,6 +11517,16 @@ pub fn libsais16x64_unbwt_ctx(
     libsais16x64_unbwt_aux_ctx(ctx, t, u, a, freq, t.len() as SaSint, &[i])
 }
 
+/// Reconstructs the original 16-bit string from a given BWT with auxiliary indexes.
+///
+/// - `t` (`[0..n-1]`): the input 16-bit string.
+/// - `u` (`[0..n-1]`): the output 16-bit string (can alias `t`).
+/// - `a` (`[0..n]`): the temporary array (must have length `n + 1`).
+/// - `freq` (`[0..65535]`): optional input symbol frequency table.
+/// - `r`: sampling rate for the auxiliary indexes (must be a power of two).
+/// - `i` (`[0..(n-1)/r]`): input auxiliary indexes.
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais16x64_unbwt_aux(
     t: &[u16],
     u: &mut [u16],
@@ -11348,6 +11548,17 @@ pub fn libsais16x64_unbwt_aux(
     unbwt_core(t, u, a, freq, r, i)
 }
 
+/// Reconstructs the original 16-bit string from a given BWT with auxiliary indexes using a libsais16x64 reverse-BWT context.
+///
+/// - `ctx`: the libsais16x64 reverse-BWT context.
+/// - `t` (`[0..n-1]`): the input 16-bit string.
+/// - `u` (`[0..n-1]`): the output 16-bit string (can alias `t`).
+/// - `a` (`[0..n]`): the temporary array (must have length `n + 1`).
+/// - `freq` (`[0..65535]`): optional input symbol frequency table.
+/// - `r`: sampling rate for the auxiliary indexes (must be a power of two).
+/// - `i` (`[0..(n-1)/r]`): input auxiliary indexes.
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais16x64_unbwt_aux_ctx(
     ctx: &mut UnbwtContext,
     t: &[u16],
@@ -11380,6 +11591,16 @@ pub fn libsais16x64_unbwt_aux_ctx(
     )
 }
 
+/// Reconstructs the original 16-bit string from a given BWT and primary index in parallel using OpenMP-style threading.
+///
+/// - `t` (`[0..n-1]`): the input 16-bit string.
+/// - `u` (`[0..n-1]`): the output 16-bit string (can alias `t`).
+/// - `a` (`[0..n]`): the temporary array (must have length `n + 1`).
+/// - `freq` (`[0..65535]`): optional input symbol frequency table.
+/// - `i`: the primary index.
+/// - `threads`: number of worker threads (can be 0 for the implementation default).
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais16x64_unbwt_omp(
     t: &[u16],
     u: &mut [u16],
@@ -11396,6 +11617,17 @@ pub fn libsais16x64_unbwt_omp(
     }
 }
 
+/// Reconstructs the original 16-bit string from a given BWT with auxiliary indexes in parallel using OpenMP-style threading.
+///
+/// - `t` (`[0..n-1]`): the input 16-bit string.
+/// - `u` (`[0..n-1]`): the output 16-bit string (can alias `t`).
+/// - `a` (`[0..n]`): the temporary array (must have length `n + 1`).
+/// - `freq` (`[0..65535]`): optional input symbol frequency table.
+/// - `r`: sampling rate for the auxiliary indexes (must be a power of two).
+/// - `i` (`[0..(n-1)/r]`): input auxiliary indexes.
+/// - `threads`: number of worker threads (can be 0 for the implementation default).
+///
+/// Returns 0 on success, -1 or -2 on error.
 pub fn libsais16x64_unbwt_aux_omp(
     t: &[u16],
     u: &mut [u16],
@@ -11436,10 +11668,24 @@ pub fn libsais16x64_unbwt_aux_omp(
     }
 }
 
+/// Constructs the permuted longest common prefix array (PLCP) of a given 16-bit string and suffix array.
+///
+/// - `t` (`[0..n-1]`): the input 16-bit string.
+/// - `sa` (`[0..n-1]`): the input suffix array.
+/// - `plcp` (`[0..n-1]`): the output permuted longest common prefix array.
+///
+/// Returns 0 on success, -1 on error.
 pub fn libsais16x64_plcp(t: &[u16], sa: &[SaSint], plcp: &mut [SaSint]) -> SaSint {
     compute_plcp(t, sa, plcp, false)
 }
 
+/// Constructs the PLCP of a given 16-bit string set and generalized suffix array (GSA).
+///
+/// - `t` (`[0..n-1]`): the input 16-bit string set using 0 as separators (`t[n-1]` must be 0).
+/// - `sa` (`[0..n-1]`): the input generalized suffix array.
+/// - `plcp` (`[0..n-1]`): the output permuted longest common prefix array.
+///
+/// Returns 0 on success, -1 on error.
 pub fn libsais16x64_plcp_gsa(t: &[u16], sa: &[SaSint], plcp: &mut [SaSint]) -> SaSint {
     if t.last().copied().unwrap_or(0) != 0 {
         -1
@@ -11700,6 +11946,13 @@ fn compute_lcp_omp(
     0
 }
 
+/// Constructs the longest common prefix array (LCP) from a PLCP and suffix array.
+///
+/// - `plcp` (`[0..n-1]`): the input permuted longest common prefix array.
+/// - `sa` (`[0..n-1]`): the input suffix array or generalized suffix array (GSA).
+/// - `lcp` (`[0..n-1]`): the output longest common prefix array (can alias `sa`).
+///
+/// Returns 0 on success, -1 on error.
 pub fn libsais16x64_lcp(plcp: &[SaSint], sa: &[SaSint], lcp: &mut [SaSint]) -> SaSint {
     if plcp.len() != sa.len() || lcp.len() != sa.len() {
         return -1;
@@ -11717,6 +11970,14 @@ fn suffix_index(value: SaSint, len: usize) -> Option<usize> {
     usize::try_from(value).ok().filter(|&index| index < len)
 }
 
+/// Constructs the PLCP of a given 16-bit string and suffix array in parallel using OpenMP-style threading.
+///
+/// - `t` (`[0..n-1]`): the input 16-bit string.
+/// - `sa` (`[0..n-1]`): the input suffix array.
+/// - `plcp` (`[0..n-1]`): the output permuted longest common prefix array.
+/// - `threads`: number of worker threads (can be 0 for the implementation default).
+///
+/// Returns 0 on success, -1 on error.
 pub fn libsais16x64_plcp_omp(
     t: &[u16],
     sa: &[SaSint],
@@ -11744,6 +12005,14 @@ pub fn libsais16x64_plcp_omp(
     compute_plcp_omp(t, plcp, n, threads)
 }
 
+/// Constructs the PLCP of a given 16-bit string set and GSA in parallel using OpenMP-style threading.
+///
+/// - `t` (`[0..n-1]`): the input 16-bit string set using 0 as separators (`t[n-1]` must be 0).
+/// - `sa` (`[0..n-1]`): the input generalized suffix array.
+/// - `plcp` (`[0..n-1]`): the output permuted longest common prefix array.
+/// - `threads`: number of worker threads (can be 0 for the implementation default).
+///
+/// Returns 0 on success, -1 on error.
 pub fn libsais16x64_plcp_gsa_omp(
     t: &[u16],
     sa: &[SaSint],
@@ -11774,6 +12043,14 @@ pub fn libsais16x64_plcp_gsa_omp(
     compute_plcp_gsa_omp(t, plcp, n, threads)
 }
 
+/// Constructs the LCP from a PLCP and suffix array in parallel using OpenMP-style threading.
+///
+/// - `plcp` (`[0..n-1]`): the input permuted longest common prefix array.
+/// - `sa` (`[0..n-1]`): the input suffix array or generalized suffix array (GSA).
+/// - `lcp` (`[0..n-1]`): the output longest common prefix array (can alias `sa`).
+/// - `threads`: number of worker threads (can be 0 for the implementation default).
+///
+/// Returns 0 on success, -1 on error.
 pub fn libsais16x64_lcp_omp(
     plcp: &[SaSint],
     sa: &[SaSint],
@@ -11796,7 +12073,7 @@ pub fn libsais16x64_lcp_omp(
     )
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "upstream-c"))]
 mod tests {
     use super::*;
 
