@@ -6,6 +6,10 @@
 
 use std::mem;
 
+use rayon::prelude::*;
+
+use crate::{run_rayon_with_threads, SyncMutPtr};
+
 pub type SaSint = i64;
 pub type SaUint = u64;
 
@@ -178,17 +182,14 @@ fn fill_freq(t: &[u16], freq: Option<&mut [SaSint]>) {
     }
 }
 
-#[allow(dead_code)]
 fn buckets_index4(c: usize, s: usize) -> usize {
     (c << 2) + s
 }
 
-#[allow(dead_code)]
 fn buckets_index2(c: usize, s: usize) -> usize {
     (c << 1) + s
 }
 
-#[allow(dead_code)]
 fn place_cached_suffixes(
     sa: &mut [SaSint],
     cache: &[ThreadCache],
@@ -208,7 +209,6 @@ fn place_cached_suffixes(
     }
 }
 
-#[allow(dead_code)]
 fn compact_and_place_cached_suffixes(
     sa: &mut [SaSint],
     cache: &mut [ThreadCache],
@@ -231,7 +231,6 @@ fn compact_and_place_cached_suffixes(
     place_cached_suffixes(sa, cache, block_start, (write - read_start) as SaSint);
 }
 
-#[allow(dead_code)]
 fn count_negative_marked_suffixes(
     sa: &[SaSint],
     block_start: SaSint,
@@ -242,14 +241,12 @@ fn count_negative_marked_suffixes(
     sa[start..end].iter().filter(|&&value| value < 0).count() as SaSint
 }
 
-#[allow(dead_code)]
 fn count_zero_marked_suffixes(sa: &[SaSint], block_start: SaSint, block_size: SaSint) -> SaSint {
     let start = block_start as usize;
     let end = start + block_size as usize;
     sa[start..end].iter().filter(|&&value| value == 0).count() as SaSint
 }
 
-#[allow(dead_code)]
 fn accumulate_counts_s32_n(
     buckets: &mut [SaSint],
     bucket00: usize,
@@ -266,7 +263,6 @@ fn accumulate_counts_s32_n(
     }
 }
 
-#[allow(dead_code)]
 fn accumulate_counts_s32_2(
     buckets: &mut [SaSint],
     bucket00: usize,
@@ -276,7 +272,6 @@ fn accumulate_counts_s32_2(
     accumulate_counts_s32_n(buckets, bucket00, bucket_size, bucket_stride, 2);
 }
 
-#[allow(dead_code)]
 fn accumulate_counts_s32_3(
     buckets: &mut [SaSint],
     bucket00: usize,
@@ -286,7 +281,6 @@ fn accumulate_counts_s32_3(
     accumulate_counts_s32_n(buckets, bucket00, bucket_size, bucket_stride, 3);
 }
 
-#[allow(dead_code)]
 fn accumulate_counts_s32_4(
     buckets: &mut [SaSint],
     bucket00: usize,
@@ -296,7 +290,6 @@ fn accumulate_counts_s32_4(
     accumulate_counts_s32_n(buckets, bucket00, bucket_size, bucket_stride, 4);
 }
 
-#[allow(dead_code)]
 fn accumulate_counts_s32_5(
     buckets: &mut [SaSint],
     bucket00: usize,
@@ -306,7 +299,6 @@ fn accumulate_counts_s32_5(
     accumulate_counts_s32_n(buckets, bucket00, bucket_size, bucket_stride, 5);
 }
 
-#[allow(dead_code)]
 fn accumulate_counts_s32_6(
     buckets: &mut [SaSint],
     bucket00: usize,
@@ -316,7 +308,6 @@ fn accumulate_counts_s32_6(
     accumulate_counts_s32_n(buckets, bucket00, bucket_size, bucket_stride, 6);
 }
 
-#[allow(dead_code)]
 fn accumulate_counts_s32_7(
     buckets: &mut [SaSint],
     bucket00: usize,
@@ -326,7 +317,6 @@ fn accumulate_counts_s32_7(
     accumulate_counts_s32_n(buckets, bucket00, bucket_size, bucket_stride, 7);
 }
 
-#[allow(dead_code)]
 fn accumulate_counts_s32_8(
     buckets: &mut [SaSint],
     bucket00: usize,
@@ -336,7 +326,6 @@ fn accumulate_counts_s32_8(
     accumulate_counts_s32_n(buckets, bucket00, bucket_size, bucket_stride, 8);
 }
 
-#[allow(dead_code)]
 fn accumulate_counts_s32_9(
     buckets: &mut [SaSint],
     bucket00: usize,
@@ -346,7 +335,6 @@ fn accumulate_counts_s32_9(
     accumulate_counts_s32_n(buckets, bucket00, bucket_size, bucket_stride, 9);
 }
 
-#[allow(dead_code)]
 fn accumulate_counts_s32(
     buckets: &mut [SaSint],
     bucket00: usize,
@@ -376,7 +364,6 @@ fn accumulate_counts_s32(
     }
 }
 
-#[allow(dead_code)]
 fn flip_suffix_markers_omp(sa: &mut [SaSint], l: SaSint, threads: SaSint) {
     let len = usize::try_from(l).expect("l must be non-negative");
     let omp_num_threads = if threads > 1 && l >= 65_536 {
@@ -385,20 +372,22 @@ fn flip_suffix_markers_omp(sa: &mut [SaSint], l: SaSint, threads: SaSint) {
         1
     };
     let omp_block_stride = (len / omp_num_threads) & !15usize;
-    for omp_thread_num in 0..omp_num_threads {
-        let omp_block_start = omp_thread_num * omp_block_stride;
-        let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
-            omp_block_stride
-        } else {
-            len - omp_block_start
-        };
-        for value in &mut sa[omp_block_start..omp_block_start + omp_block_size] {
-            *value ^= SAINT_MIN;
-        }
+    if omp_num_threads > 1 {
+        let chunk_size = omp_block_stride.max(16);
+        run_rayon_with_threads(omp_num_threads, || {
+            sa[..len].par_chunks_mut(chunk_size).for_each(|chunk| {
+                for value in chunk {
+                    *value ^= SAINT_MIN;
+                }
+            });
+        });
+        return;
+    }
+    for value in &mut sa[..len] {
+        *value ^= SAINT_MIN;
     }
 }
 
-#[allow(dead_code)]
 fn gather_lms_suffixes_32s(t: &[SaSint], sa: &mut [SaSint], n: SaSint) -> SaSint {
     let mut i = n - 2;
     let mut m = n - 1;
@@ -444,7 +433,6 @@ fn gather_lms_suffixes_32s(t: &[SaSint], sa: &mut [SaSint], n: SaSint) -> SaSint
     n - 1 - m
 }
 
-#[allow(dead_code)]
 fn gather_compacted_lms_suffixes_32s(t: &[SaSint], sa: &mut [SaSint], n: SaSint) -> SaSint {
     let mut i = n - 2;
     let mut m = n - 1;
@@ -490,7 +478,6 @@ fn gather_compacted_lms_suffixes_32s(t: &[SaSint], sa: &mut [SaSint], n: SaSint)
     n - 1 - m
 }
 
-#[allow(dead_code)]
 fn count_lms_suffixes_32s_4k(t: &[SaSint], n: SaSint, k: SaSint, buckets: &mut [SaSint]) {
     buckets[..4 * k as usize].fill(0);
     let mut i = n - 2;
@@ -531,7 +518,6 @@ fn count_lms_suffixes_32s_4k(t: &[SaSint], n: SaSint, k: SaSint, buckets: &mut [
     buckets[buckets_index4(c0 as usize, f0 + f0)] += 1;
 }
 
-#[allow(dead_code)]
 fn count_lms_suffixes_32s_2k(t: &[SaSint], n: SaSint, k: SaSint, buckets: &mut [SaSint]) {
     buckets[..2 * k as usize].fill(0);
     let mut i = n - 2;
@@ -572,7 +558,6 @@ fn count_lms_suffixes_32s_2k(t: &[SaSint], n: SaSint, k: SaSint, buckets: &mut [
     buckets[buckets_index2(c0 as usize, 0)] += 1;
 }
 
-#[allow(dead_code)]
 fn count_compacted_lms_suffixes_32s_2k(t: &[SaSint], n: SaSint, k: SaSint, buckets: &mut [SaSint]) {
     buckets[..2 * k as usize].fill(0);
     let mut i = n - 2;
@@ -613,7 +598,6 @@ fn count_compacted_lms_suffixes_32s_2k(t: &[SaSint], n: SaSint, k: SaSint, bucke
     buckets[buckets_index2((c0 as SaSint & SAINT_MAX) as usize, 0)] += 1;
 }
 
-#[allow(dead_code)]
 fn get_bucket_stride(free_space: SaSint, bucket_size: SaSint, num_buckets: SaSint) -> SaSint {
     let bucket_size_1024 = (bucket_size + 1023) & !1023;
     if free_space / (num_buckets - 1) >= bucket_size_1024 {
@@ -626,7 +610,6 @@ fn get_bucket_stride(free_space: SaSint, bucket_size: SaSint, num_buckets: SaSin
     bucket_size
 }
 
-#[allow(dead_code)]
 fn count_and_gather_lms_suffixes_32s_4k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -705,7 +688,6 @@ fn count_and_gather_lms_suffixes_32s_4k(
     (omp_block_start + omp_block_size - 1 - m) as SaSint
 }
 
-#[allow(dead_code)]
 fn count_and_gather_lms_suffixes_32s_2k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -784,7 +766,6 @@ fn count_and_gather_lms_suffixes_32s_2k(
     (omp_block_start + omp_block_size - 1 - m) as SaSint
 }
 
-#[allow(dead_code)]
 fn count_and_gather_compacted_lms_suffixes_32s_2k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -863,7 +844,6 @@ fn count_and_gather_compacted_lms_suffixes_32s_2k(
     (omp_block_start + omp_block_size - 1 - m) as SaSint
 }
 
-#[allow(dead_code)]
 fn count_and_gather_lms_suffixes_32s_4k_fs_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -948,7 +928,6 @@ fn count_and_gather_lms_suffixes_32s_4k_fs_omp(
     m as SaSint
 }
 
-#[allow(dead_code)]
 fn count_and_gather_lms_suffixes_32s_2k_fs_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -1033,7 +1012,6 @@ fn count_and_gather_lms_suffixes_32s_2k_fs_omp(
     m as SaSint
 }
 
-#[allow(dead_code)]
 fn count_and_gather_compacted_lms_suffixes_32s_2k_fs_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -1101,7 +1079,6 @@ fn count_and_gather_compacted_lms_suffixes_32s_2k_fs_omp(
     }
 }
 
-#[allow(dead_code)]
 fn count_and_gather_lms_suffixes_32s_4k_nofs_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -1118,7 +1095,6 @@ fn count_and_gather_lms_suffixes_32s_4k_nofs_omp(
     }
 }
 
-#[allow(dead_code)]
 fn count_and_gather_lms_suffixes_32s_2k_nofs_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -1135,7 +1111,6 @@ fn count_and_gather_lms_suffixes_32s_2k_nofs_omp(
     }
 }
 
-#[allow(dead_code)]
 fn count_and_gather_compacted_lms_suffixes_32s_2k_nofs_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -1152,7 +1127,6 @@ fn count_and_gather_compacted_lms_suffixes_32s_2k_nofs_omp(
     }
 }
 
-#[allow(dead_code)]
 fn count_and_gather_lms_suffixes_32s_4k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -1193,7 +1167,6 @@ fn count_and_gather_lms_suffixes_32s_4k_omp(
     }
 }
 
-#[allow(dead_code)]
 fn count_and_gather_lms_suffixes_32s_2k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -1234,7 +1207,6 @@ fn count_and_gather_lms_suffixes_32s_2k_omp(
     }
 }
 
-#[allow(dead_code)]
 fn count_suffixes_32s(t: &[SaSint], n: SaSint, k: SaSint, buckets: &mut [SaSint]) {
     buckets[..k as usize].fill(0);
 
@@ -1259,7 +1231,6 @@ fn count_suffixes_32s(t: &[SaSint], n: SaSint, k: SaSint, buckets: &mut [SaSint]
     }
 }
 
-#[allow(dead_code)]
 fn initialize_buckets_start_and_end_32s_6k(k: SaSint, buckets: &mut [SaSint]) {
     let k = k as usize;
     let mut sum = 0;
@@ -1271,7 +1242,6 @@ fn initialize_buckets_start_and_end_32s_6k(k: SaSint, buckets: &mut [SaSint]) {
     }
 }
 
-#[allow(dead_code)]
 fn initialize_buckets_start_and_end_32s_4k(k: SaSint, buckets: &mut [SaSint]) {
     let k = k as usize;
     let mut sum = 0;
@@ -1283,7 +1253,6 @@ fn initialize_buckets_start_and_end_32s_4k(k: SaSint, buckets: &mut [SaSint]) {
     }
 }
 
-#[allow(dead_code)]
 fn initialize_buckets_end_32s_2k(k: SaSint, buckets: &mut [SaSint]) {
     let mut sum0 = 0;
     for j in 0..k as usize {
@@ -1293,7 +1262,6 @@ fn initialize_buckets_end_32s_2k(k: SaSint, buckets: &mut [SaSint]) {
     }
 }
 
-#[allow(dead_code)]
 fn initialize_buckets_start_and_end_32s_2k(k: SaSint, buckets: &mut [SaSint]) {
     let k = k as usize;
     for j in 0..k {
@@ -1304,7 +1272,6 @@ fn initialize_buckets_start_and_end_32s_2k(k: SaSint, buckets: &mut [SaSint]) {
     buckets.copy_within(0..k - 1, k + 1);
 }
 
-#[allow(dead_code)]
 fn initialize_buckets_start_32s_1k(k: SaSint, buckets: &mut [SaSint]) {
     let mut sum = 0;
     for bucket in buckets.iter_mut().take(k as usize) {
@@ -1314,7 +1281,6 @@ fn initialize_buckets_start_32s_1k(k: SaSint, buckets: &mut [SaSint]) {
     }
 }
 
-#[allow(dead_code)]
 fn initialize_buckets_end_32s_1k(k: SaSint, buckets: &mut [SaSint]) {
     let mut sum = 0;
     for bucket in buckets.iter_mut().take(k as usize) {
@@ -1323,7 +1289,6 @@ fn initialize_buckets_end_32s_1k(k: SaSint, buckets: &mut [SaSint]) {
     }
 }
 
-#[allow(dead_code)]
 fn initialize_buckets_for_lms_suffixes_radix_sort_32s_2k(
     t: &[SaSint],
     k: SaSint,
@@ -1344,7 +1309,6 @@ fn initialize_buckets_for_lms_suffixes_radix_sort_32s_2k(
     }
 }
 
-#[allow(dead_code)]
 fn initialize_buckets_for_lms_suffixes_radix_sort_32s_6k(
     t: &[SaSint],
     k: SaSint,
@@ -1376,7 +1340,6 @@ fn initialize_buckets_for_lms_suffixes_radix_sort_32s_6k(
     sum
 }
 
-#[allow(dead_code)]
 fn initialize_buckets_for_partial_sorting_32s_6k(
     t: &[SaSint],
     k: SaSint,
@@ -1435,7 +1398,6 @@ fn initialize_buckets_for_partial_sorting_32s_6k(
     }
 }
 
-#[allow(dead_code)]
 fn initialize_buckets_for_radix_and_partial_sorting_32s_4k(
     t: &[SaSint],
     k: SaSint,
@@ -1458,7 +1420,6 @@ fn initialize_buckets_for_radix_and_partial_sorting_32s_4k(
     }
 }
 
-#[allow(dead_code)]
 fn count_and_gather_compacted_lms_suffixes_32s_2k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -1496,7 +1457,6 @@ fn count_and_gather_compacted_lms_suffixes_32s_2k_omp(
     }
 }
 
-#[allow(dead_code)]
 fn gather_lms_suffixes_16u(
     t: &[u16],
     sa: &mut [SaSint],
@@ -1564,7 +1524,6 @@ fn gather_lms_suffixes_16u(
     }
 }
 
-#[allow(dead_code)]
 fn count_and_gather_lms_suffixes_16u(
     t: &[u16],
     sa: &mut [SaSint],
@@ -1647,7 +1606,6 @@ fn count_and_gather_lms_suffixes_16u(
     omp_block_start + omp_block_size - 1 - m as SaSint
 }
 
-#[allow(dead_code)]
 fn gather_lms_suffixes_16u_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -1694,7 +1652,6 @@ fn gather_lms_suffixes_16u_omp(
     }
 }
 
-#[allow(dead_code)]
 fn count_and_gather_lms_suffixes_16u_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -1755,7 +1712,6 @@ fn count_and_gather_lms_suffixes_16u_omp(
     m
 }
 
-#[allow(dead_code)]
 fn initialize_buckets_start_and_end_16u(
     buckets: &mut [SaSint],
     freq: Option<&mut [SaSint]>,
@@ -1802,7 +1758,6 @@ fn initialize_buckets_start_and_end_16u(
     k + 1
 }
 
-#[allow(dead_code)]
 fn initialize_buckets_for_lms_suffixes_radix_sort_16u(
     t: &[u16],
     buckets: &mut [SaSint],
@@ -1839,7 +1794,6 @@ fn initialize_buckets_for_lms_suffixes_radix_sort_16u(
     sum
 }
 
-#[allow(dead_code)]
 fn radix_sort_lms_suffixes_16u(
     t: &[u16],
     sa: &mut [SaSint],
@@ -1878,7 +1832,6 @@ fn radix_sort_lms_suffixes_16u(
     }
 }
 
-#[allow(dead_code)]
 fn radix_sort_lms_suffixes_16u_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -1930,7 +1883,6 @@ fn radix_sort_lms_suffixes_16u_omp(
     }
 }
 
-#[allow(dead_code)]
 fn radix_sort_lms_suffixes_32s_6k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -1965,7 +1917,6 @@ fn radix_sort_lms_suffixes_32s_6k(
     }
 }
 
-#[allow(dead_code)]
 fn radix_sort_lms_suffixes_32s_2k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -2000,7 +1951,6 @@ fn radix_sort_lms_suffixes_32s_2k(
     }
 }
 
-#[allow(dead_code)]
 fn radix_sort_lms_suffixes_32s_block_gather(
     t: &[SaSint],
     sa: &[SaSint],
@@ -2042,7 +1992,6 @@ fn radix_sort_lms_suffixes_32s_block_gather(
     }
 }
 
-#[allow(dead_code)]
 fn radix_sort_lms_suffixes_32s_6k_block_sort(
     induction_bucket: &mut [SaSint],
     cache: &mut [ThreadCache],
@@ -2086,7 +2035,6 @@ fn radix_sort_lms_suffixes_32s_6k_block_sort(
     }
 }
 
-#[allow(dead_code)]
 fn radix_sort_lms_suffixes_32s_2k_block_sort(
     induction_bucket: &mut [SaSint],
     cache: &mut [ThreadCache],
@@ -2130,7 +2078,6 @@ fn radix_sort_lms_suffixes_32s_2k_block_sort(
     }
 }
 
-#[allow(dead_code)]
 fn radix_sort_lms_suffixes_32s_6k_block_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -2150,7 +2097,6 @@ fn radix_sort_lms_suffixes_32s_6k_block_omp(
     place_cached_suffixes(sa, cache, block_start, block_size);
 }
 
-#[allow(dead_code)]
 fn radix_sort_lms_suffixes_32s_2k_block_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -2170,7 +2116,6 @@ fn radix_sort_lms_suffixes_32s_2k_block_omp(
     place_cached_suffixes(sa, cache, block_start, block_size);
 }
 
-#[allow(dead_code)]
 fn radix_sort_lms_suffixes_32s_6k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -2206,7 +2151,6 @@ fn radix_sort_lms_suffixes_32s_6k_omp(
     }
 }
 
-#[allow(dead_code)]
 fn radix_sort_lms_suffixes_32s_2k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -2242,7 +2186,6 @@ fn radix_sort_lms_suffixes_32s_2k_omp(
     }
 }
 
-#[allow(dead_code)]
 fn radix_sort_lms_suffixes_32s_1k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -2314,7 +2257,6 @@ fn radix_sort_lms_suffixes_32s_1k(
     m
 }
 
-#[allow(dead_code)]
 fn radix_sort_set_markers_32s_6k(
     sa: &mut [SaSint],
     induction_bucket: &[SaSint],
@@ -2339,7 +2281,6 @@ fn radix_sort_set_markers_32s_6k(
     }
 }
 
-#[allow(dead_code)]
 fn radix_sort_set_markers_32s_4k(
     sa: &mut [SaSint],
     induction_bucket: &[SaSint],
@@ -2364,7 +2305,6 @@ fn radix_sort_set_markers_32s_4k(
     }
 }
 
-#[allow(dead_code)]
 fn radix_sort_set_markers_32s_6k_omp(
     sa: &mut [SaSint],
     k: SaSint,
@@ -2383,27 +2323,31 @@ fn radix_sort_set_markers_32s_6k_omp(
     let threads_usize = usize::try_from(threads).expect("threads must be positive");
     let last = usize::try_from(k - 1).expect("k must be positive");
     let stride = (last / threads_usize) & !15usize;
-    let mut start = 0usize;
 
-    for thread in 0..threads_usize {
-        let end = if thread + 1 == threads_usize {
-            last
-        } else {
-            start + stride
-        };
-        if end > start {
-            radix_sort_set_markers_32s_6k(
-                sa,
-                induction_bucket,
-                start as SaSint,
-                (end - start) as SaSint,
-            );
-        }
-        start = end;
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        run_rayon_with_threads(threads_usize, || {
+            (0..threads_usize).into_par_iter().for_each(|thread| {
+                let start = thread * stride;
+                let end = if thread + 1 == threads_usize {
+                    last
+                } else {
+                    start + stride
+                };
+                if end > start {
+                    let sa = unsafe { sa_ptr.as_slice() };
+                    radix_sort_set_markers_32s_6k(
+                        sa,
+                        induction_bucket,
+                        start as SaSint,
+                        (end - start) as SaSint,
+                    );
+                }
+            });
+        });
     }
 }
 
-#[allow(dead_code)]
 fn radix_sort_set_markers_32s_4k_omp(
     sa: &mut [SaSint],
     k: SaSint,
@@ -2422,27 +2366,31 @@ fn radix_sort_set_markers_32s_4k_omp(
     let threads_usize = usize::try_from(threads).expect("threads must be positive");
     let last = usize::try_from(k - 1).expect("k must be positive");
     let stride = (last / threads_usize) & !15usize;
-    let mut start = 0usize;
 
-    for thread in 0..threads_usize {
-        let end = if thread + 1 == threads_usize {
-            last
-        } else {
-            start + stride
-        };
-        if end > start {
-            radix_sort_set_markers_32s_4k(
-                sa,
-                induction_bucket,
-                start as SaSint,
-                (end - start) as SaSint,
-            );
-        }
-        start = end;
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        run_rayon_with_threads(threads_usize, || {
+            (0..threads_usize).into_par_iter().for_each(|thread| {
+                let start = thread * stride;
+                let end = if thread + 1 == threads_usize {
+                    last
+                } else {
+                    start + stride
+                };
+                if end > start {
+                    let sa = unsafe { sa_ptr.as_slice() };
+                    radix_sort_set_markers_32s_4k(
+                        sa,
+                        induction_bucket,
+                        start as SaSint,
+                        (end - start) as SaSint,
+                    );
+                }
+            });
+        });
     }
 }
 
-#[allow(dead_code)]
 fn initialize_buckets_for_partial_sorting_16u(
     t: &[u16],
     buckets: &mut [SaSint],
@@ -2469,7 +2417,6 @@ fn initialize_buckets_for_partial_sorting_16u(
     }
 }
 
-#[allow(dead_code)]
 fn partial_sorting_shift_markers_32s_6k_omp(
     sa: &mut [SaSint],
     k: SaSint,
@@ -2483,12 +2430,17 @@ fn partial_sorting_shift_markers_32s_6k_omp(
     } else {
         1
     };
-    for t in 0..thread_count {
+    let sa_ptr = SyncMutPtr::new(sa);
+    let buckets_ref: &[SaSint] = buckets;
+    let temp_bucket_ref: &[SaSint] = temp_bucket;
+    run_rayon_with_threads(thread_count, || {
+        (0..thread_count).into_par_iter().for_each(|t| {
         let mut c = k_usize as isize - 1 - t as isize;
+        let sa = unsafe { sa_ptr.as_slice() };
         while c >= 1 {
             let c_usize = c as usize;
-            let mut i = buckets[buckets_index4(c_usize, 0)] - 1;
-            let mut j = temp_bucket[buckets_index2(c_usize - 1, 0)] + 3;
+            let mut i = buckets_ref[buckets_index4(c_usize, 0)] - 1;
+            let mut j = temp_bucket_ref[buckets_index2(c_usize - 1, 0)] + 3;
             let mut s = SAINT_MIN;
 
             while i >= j {
@@ -2526,10 +2478,10 @@ fn partial_sorting_shift_markers_32s_6k_omp(
 
             c -= thread_count as isize;
         }
-    }
+        });
+    });
 }
 
-#[allow(dead_code)]
 fn partial_sorting_shift_markers_32s_4k(sa: &mut [SaSint], n: SaSint) {
     let mut i = n - 1;
     let mut s = SUFFIX_GROUP_MARKER;
@@ -2571,7 +2523,6 @@ fn partial_sorting_shift_markers_32s_4k(sa: &mut [SaSint], n: SaSint) {
     }
 }
 
-#[allow(dead_code)]
 fn partial_sorting_shift_buckets_32s_6k(k: SaSint, buckets: &mut [SaSint]) {
     let temp_offset = 4 * k as usize;
     let mut i = buckets_index2(0, 0);
@@ -2583,7 +2534,6 @@ fn partial_sorting_shift_buckets_32s_6k(k: SaSint, buckets: &mut [SaSint]) {
     }
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_left_to_right_16u(
     t: &[u16],
     sa: &mut [SaSint],
@@ -2656,7 +2606,6 @@ fn partial_sorting_scan_left_to_right_16u(
     d
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_left_to_right_16u_block_prepare(
     t: &[u16],
     sa: &mut [SaSint],
@@ -2691,7 +2640,6 @@ fn partial_sorting_scan_left_to_right_16u_block_prepare(
     d - 1
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_left_to_right_16u_block_place(
     sa: &mut [SaSint],
     buckets: &mut [SaSint],
@@ -2716,7 +2664,6 @@ fn partial_sorting_scan_left_to_right_16u_block_place(
     }
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_left_to_right_16u_block_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -2797,7 +2744,6 @@ fn partial_sorting_scan_left_to_right_16u_block_omp(
     next_d
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_left_to_right_16u_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -2878,7 +2824,6 @@ fn partial_sorting_scan_left_to_right_16u_omp(
     d
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_right_to_left_16u(
     t: &[u16],
     sa: &mut [SaSint],
@@ -2948,7 +2893,6 @@ fn partial_sorting_scan_right_to_left_16u(
     d
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_right_to_left_16u_block_prepare(
     t: &[u16],
     sa: &mut [SaSint],
@@ -2983,7 +2927,6 @@ fn partial_sorting_scan_right_to_left_16u_block_prepare(
     d - 1
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_right_to_left_16u_block_place(
     sa: &mut [SaSint],
     buckets: &mut [SaSint],
@@ -3007,7 +2950,6 @@ fn partial_sorting_scan_right_to_left_16u_block_place(
     }
 }
 
-#[allow(dead_code)]
 fn partial_gsa_scan_right_to_left_16u_block_place(
     sa: &mut [SaSint],
     buckets: &mut [SaSint],
@@ -3033,7 +2975,6 @@ fn partial_gsa_scan_right_to_left_16u_block_place(
     }
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_right_to_left_16u_block_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -3116,7 +3057,6 @@ fn partial_sorting_scan_right_to_left_16u_block_omp(
     next_d
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_right_to_left_16u_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -3197,7 +3137,6 @@ fn partial_sorting_scan_right_to_left_16u_omp(
     }
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_left_to_right_32s_6k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -3256,7 +3195,6 @@ fn partial_sorting_scan_left_to_right_32s_6k(
     d
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_left_to_right_32s_4k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -3341,7 +3279,6 @@ fn partial_sorting_scan_left_to_right_32s_4k(
     d
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_left_to_right_32s_1k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -3397,7 +3334,6 @@ fn partial_sorting_scan_left_to_right_32s_1k(
     }
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_left_to_right_32s_6k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -3445,7 +3381,6 @@ fn partial_sorting_scan_left_to_right_32s_6k_omp(
     d
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_left_to_right_32s_4k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -3496,7 +3431,6 @@ fn partial_sorting_scan_left_to_right_32s_4k_omp(
     d
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_left_to_right_32s_1k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -3534,7 +3468,6 @@ fn partial_sorting_scan_left_to_right_32s_1k_omp(
     }
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_right_to_left_32s_6k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -3596,7 +3529,6 @@ fn partial_sorting_scan_right_to_left_32s_6k(
     d
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_right_to_left_32s_4k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -3679,7 +3611,6 @@ fn partial_sorting_scan_right_to_left_32s_4k(
     d
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_right_to_left_32s_1k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -3733,7 +3664,6 @@ fn partial_sorting_scan_right_to_left_32s_1k(
     }
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_right_to_left_32s_6k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -3780,7 +3710,6 @@ fn partial_sorting_scan_right_to_left_32s_6k_omp(
     d
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_right_to_left_32s_4k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -3816,7 +3745,6 @@ fn partial_sorting_scan_right_to_left_32s_4k_omp(
     d
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_right_to_left_32s_1k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -3846,7 +3774,6 @@ fn partial_sorting_scan_right_to_left_32s_1k_omp(
     }
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_left_to_right_32s_6k_block_gather(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -3902,7 +3829,6 @@ fn partial_sorting_scan_left_to_right_32s_6k_block_gather(
     }
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_left_to_right_32s_4k_block_gather(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -3964,7 +3890,6 @@ fn partial_sorting_scan_left_to_right_32s_4k_block_gather(
     }
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_left_to_right_32s_1k_block_gather(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -4020,7 +3945,6 @@ fn partial_sorting_scan_left_to_right_32s_1k_block_gather(
     }
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_right_to_left_32s_6k_block_gather(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -4076,7 +4000,6 @@ fn partial_sorting_scan_right_to_left_32s_6k_block_gather(
     }
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_right_to_left_32s_4k_block_gather(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -4135,7 +4058,6 @@ fn partial_sorting_scan_right_to_left_32s_4k_block_gather(
     }
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_right_to_left_32s_1k_block_gather(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -4188,7 +4110,6 @@ fn partial_sorting_scan_right_to_left_32s_1k_block_gather(
     }
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_left_to_right_32s_6k_block_sort(
     t: &[SaSint],
     buckets: &mut [SaSint],
@@ -4265,7 +4186,6 @@ fn partial_sorting_scan_left_to_right_32s_6k_block_sort(
     d
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_left_to_right_32s_4k_block_sort(
     t: &[SaSint],
     k: SaSint,
@@ -4348,7 +4268,6 @@ fn partial_sorting_scan_left_to_right_32s_4k_block_sort(
     d
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_left_to_right_32s_1k_block_sort(
     t: &[SaSint],
     induction_bucket: &mut [SaSint],
@@ -4407,7 +4326,6 @@ fn partial_sorting_scan_left_to_right_32s_1k_block_sort(
     }
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_right_to_left_32s_6k_block_sort(
     t: &[SaSint],
     buckets: &mut [SaSint],
@@ -4483,7 +4401,6 @@ fn partial_sorting_scan_right_to_left_32s_6k_block_sort(
     d
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_right_to_left_32s_4k_block_sort(
     t: &[SaSint],
     k: SaSint,
@@ -4563,7 +4480,6 @@ fn partial_sorting_scan_right_to_left_32s_4k_block_sort(
     d
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_right_to_left_32s_1k_block_sort(
     t: &[SaSint],
     induction_bucket: &mut [SaSint],
@@ -4619,7 +4535,6 @@ fn partial_sorting_scan_right_to_left_32s_1k_block_sort(
     }
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_left_to_right_32s_6k_block_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -4652,24 +4567,33 @@ fn partial_sorting_scan_left_to_right_32s_6k_block_omp(
     let omp_num_threads = threads_usize.min(block_size_usize.max(1));
     let omp_block_stride = (block_size_usize / omp_num_threads) & !15usize;
 
-    for omp_thread_num in 0..omp_num_threads {
-        let mut omp_block_size = if omp_thread_num + 1 < omp_num_threads {
-            omp_block_stride
-        } else {
-            block_size_usize - omp_thread_num * omp_block_stride
-        };
-        let omp_block_start = block_start_usize + omp_thread_num * omp_block_stride;
-        if omp_block_size == 0 {
-            omp_block_size = block_size_usize - (omp_block_start - block_start_usize);
-        }
-        partial_sorting_scan_left_to_right_32s_6k_block_gather(
-            t,
-            sa,
-            &mut cache[omp_thread_num * omp_block_stride
-                ..omp_thread_num * omp_block_stride + omp_block_size],
-            omp_block_start as SaSint,
-            omp_block_size as SaSint,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        let t_ro: &[SaSint] = t;
+        let cache_ptr = SyncMutPtr::new(cache);
+        run_rayon_with_threads(omp_num_threads, || {
+            (0..omp_num_threads).into_par_iter().for_each(|omp_thread_num| {
+                let mut omp_block_size = if omp_thread_num + 1 < omp_num_threads {
+                    omp_block_stride
+                } else {
+                    block_size_usize - omp_thread_num * omp_block_stride
+                };
+                let omp_block_start = block_start_usize + omp_thread_num * omp_block_stride;
+                if omp_block_size == 0 {
+                    omp_block_size = block_size_usize - (omp_block_start - block_start_usize);
+                }
+                let cache = unsafe { cache_ptr.as_slice() };
+                let sa = unsafe { sa_ptr.as_slice() };
+                partial_sorting_scan_left_to_right_32s_6k_block_gather(
+                    t_ro,
+                    sa,
+                    &mut cache[omp_thread_num * omp_block_stride
+                        ..omp_thread_num * omp_block_stride + omp_block_size],
+                    omp_block_start as SaSint,
+                    omp_block_size as SaSint,
+                );
+            });
+        });
     }
 
     let d = partial_sorting_scan_left_to_right_32s_6k_block_sort(
@@ -4684,7 +4608,6 @@ fn partial_sorting_scan_left_to_right_32s_6k_block_omp(
     d
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_left_to_right_32s_4k_block_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -4719,24 +4642,33 @@ fn partial_sorting_scan_left_to_right_32s_4k_block_omp(
     let omp_num_threads = threads_usize.min(block_size_usize.max(1));
     let omp_block_stride = (block_size_usize / omp_num_threads) & !15usize;
 
-    for omp_thread_num in 0..omp_num_threads {
-        let mut omp_block_size = if omp_thread_num + 1 < omp_num_threads {
-            omp_block_stride
-        } else {
-            block_size_usize - omp_thread_num * omp_block_stride
-        };
-        let omp_block_start = block_start_usize + omp_thread_num * omp_block_stride;
-        if omp_block_size == 0 {
-            omp_block_size = block_size_usize - (omp_block_start - block_start_usize);
-        }
-        partial_sorting_scan_left_to_right_32s_4k_block_gather(
-            t,
-            sa,
-            &mut cache[omp_thread_num * omp_block_stride
-                ..omp_thread_num * omp_block_stride + omp_block_size],
-            omp_block_start as SaSint,
-            omp_block_size as SaSint,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        let t_ro: &[SaSint] = t;
+        let cache_ptr = SyncMutPtr::new(cache);
+        run_rayon_with_threads(omp_num_threads, || {
+            (0..omp_num_threads).into_par_iter().for_each(|omp_thread_num| {
+                let mut omp_block_size = if omp_thread_num + 1 < omp_num_threads {
+                    omp_block_stride
+                } else {
+                    block_size_usize - omp_thread_num * omp_block_stride
+                };
+                let omp_block_start = block_start_usize + omp_thread_num * omp_block_stride;
+                if omp_block_size == 0 {
+                    omp_block_size = block_size_usize - (omp_block_start - block_start_usize);
+                }
+                let cache = unsafe { cache_ptr.as_slice() };
+                let sa = unsafe { sa_ptr.as_slice() };
+                partial_sorting_scan_left_to_right_32s_4k_block_gather(
+                    t_ro,
+                    sa,
+                    &mut cache[omp_thread_num * omp_block_stride
+                        ..omp_thread_num * omp_block_stride + omp_block_size],
+                    omp_block_start as SaSint,
+                    omp_block_size as SaSint,
+                );
+            });
+        });
     }
 
     let cache = &mut cache[..block_size_usize];
@@ -4757,7 +4689,6 @@ fn partial_sorting_scan_left_to_right_32s_4k_block_omp(
     d
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_left_to_right_32s_1k_block_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -4783,24 +4714,33 @@ fn partial_sorting_scan_left_to_right_32s_1k_block_omp(
     let omp_num_threads = threads_usize.min(block_size_usize.max(1));
     let omp_block_stride = (block_size_usize / omp_num_threads) & !15usize;
 
-    for omp_thread_num in 0..omp_num_threads {
-        let mut omp_block_size = if omp_thread_num + 1 < omp_num_threads {
-            omp_block_stride
-        } else {
-            block_size_usize - omp_thread_num * omp_block_stride
-        };
-        let omp_block_start = block_start_usize + omp_thread_num * omp_block_stride;
-        if omp_block_size == 0 {
-            omp_block_size = block_size_usize - (omp_block_start - block_start_usize);
-        }
-        partial_sorting_scan_left_to_right_32s_1k_block_gather(
-            t,
-            sa,
-            &mut cache[omp_thread_num * omp_block_stride
-                ..omp_thread_num * omp_block_stride + omp_block_size],
-            omp_block_start as SaSint,
-            omp_block_size as SaSint,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        let t_ro: &[SaSint] = t;
+        let cache_ptr = SyncMutPtr::new(cache);
+        run_rayon_with_threads(omp_num_threads, || {
+            (0..omp_num_threads).into_par_iter().for_each(|omp_thread_num| {
+                let mut omp_block_size = if omp_thread_num + 1 < omp_num_threads {
+                    omp_block_stride
+                } else {
+                    block_size_usize - omp_thread_num * omp_block_stride
+                };
+                let omp_block_start = block_start_usize + omp_thread_num * omp_block_stride;
+                if omp_block_size == 0 {
+                    omp_block_size = block_size_usize - (omp_block_start - block_start_usize);
+                }
+                let cache = unsafe { cache_ptr.as_slice() };
+                let sa = unsafe { sa_ptr.as_slice() };
+                partial_sorting_scan_left_to_right_32s_1k_block_gather(
+                    t_ro,
+                    sa,
+                    &mut cache[omp_thread_num * omp_block_stride
+                        ..omp_thread_num * omp_block_stride + omp_block_size],
+                    omp_block_start as SaSint,
+                    omp_block_size as SaSint,
+                );
+            });
+        });
     }
 
     let cache = &mut cache[..block_size_usize];
@@ -4814,7 +4754,6 @@ fn partial_sorting_scan_left_to_right_32s_1k_block_omp(
     compact_and_place_cached_suffixes(sa, cache, block_start, block_size);
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_right_to_left_32s_6k_block_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -4847,24 +4786,33 @@ fn partial_sorting_scan_right_to_left_32s_6k_block_omp(
     let omp_num_threads = threads_usize.min(block_size_usize.max(1));
     let omp_block_stride = (block_size_usize / omp_num_threads) & !15usize;
 
-    for omp_thread_num in 0..omp_num_threads {
-        let mut omp_block_size = if omp_thread_num + 1 < omp_num_threads {
-            omp_block_stride
-        } else {
-            block_size_usize - omp_thread_num * omp_block_stride
-        };
-        let omp_block_start = block_start_usize + omp_thread_num * omp_block_stride;
-        if omp_block_size == 0 {
-            omp_block_size = block_size_usize - (omp_block_start - block_start_usize);
-        }
-        partial_sorting_scan_right_to_left_32s_6k_block_gather(
-            t,
-            sa,
-            &mut cache[omp_thread_num * omp_block_stride
-                ..omp_thread_num * omp_block_stride + omp_block_size],
-            omp_block_start as SaSint,
-            omp_block_size as SaSint,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        let t_ro: &[SaSint] = t;
+        let cache_ptr = SyncMutPtr::new(cache);
+        run_rayon_with_threads(omp_num_threads, || {
+            (0..omp_num_threads).into_par_iter().for_each(|omp_thread_num| {
+                let mut omp_block_size = if omp_thread_num + 1 < omp_num_threads {
+                    omp_block_stride
+                } else {
+                    block_size_usize - omp_thread_num * omp_block_stride
+                };
+                let omp_block_start = block_start_usize + omp_thread_num * omp_block_stride;
+                if omp_block_size == 0 {
+                    omp_block_size = block_size_usize - (omp_block_start - block_start_usize);
+                }
+                let cache = unsafe { cache_ptr.as_slice() };
+                let sa = unsafe { sa_ptr.as_slice() };
+                partial_sorting_scan_right_to_left_32s_6k_block_gather(
+                    t_ro,
+                    sa,
+                    &mut cache[omp_thread_num * omp_block_stride
+                        ..omp_thread_num * omp_block_stride + omp_block_size],
+                    omp_block_start as SaSint,
+                    omp_block_size as SaSint,
+                );
+            });
+        });
     }
 
     d = partial_sorting_scan_right_to_left_32s_6k_block_sort(
@@ -4875,24 +4823,30 @@ fn partial_sorting_scan_right_to_left_32s_6k_block_omp(
         block_start,
         block_size,
     );
-    for omp_thread_num in 0..omp_num_threads {
-        let mut omp_block_size = if omp_thread_num + 1 < omp_num_threads {
-            omp_block_stride
-        } else {
-            block_size_usize - omp_thread_num * omp_block_stride
-        };
-        let cache_start = omp_thread_num * omp_block_stride;
-        if omp_block_size == 0 {
-            omp_block_size = block_size_usize - cache_start;
-        }
-        for entry in &cache[cache_start..cache_start + omp_block_size] {
-            sa[entry.symbol as usize] = entry.index;
-        }
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        let cache_ro: &[ThreadCache] = cache;
+        run_rayon_with_threads(omp_num_threads, || {
+            (0..omp_num_threads).into_par_iter().for_each(|omp_thread_num| {
+                let mut omp_block_size = if omp_thread_num + 1 < omp_num_threads {
+                    omp_block_stride
+                } else {
+                    block_size_usize - omp_thread_num * omp_block_stride
+                };
+                let cache_start = omp_thread_num * omp_block_stride;
+                if omp_block_size == 0 {
+                    omp_block_size = block_size_usize - cache_start;
+                }
+                let sa = unsafe { sa_ptr.as_slice() };
+                for entry in &cache_ro[cache_start..cache_start + omp_block_size] {
+                    sa[entry.symbol as usize] = entry.index;
+                }
+            });
+        });
     }
     d
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_right_to_left_32s_4k_block_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -4927,24 +4881,33 @@ fn partial_sorting_scan_right_to_left_32s_4k_block_omp(
     let omp_num_threads = threads_usize.min(block_size_usize.max(1));
     let omp_block_stride = (block_size_usize / omp_num_threads) & !15usize;
 
-    for omp_thread_num in 0..omp_num_threads {
-        let mut omp_block_size = if omp_thread_num + 1 < omp_num_threads {
-            omp_block_stride
-        } else {
-            block_size_usize - omp_thread_num * omp_block_stride
-        };
-        let omp_block_start = block_start_usize + omp_thread_num * omp_block_stride;
-        if omp_block_size == 0 {
-            omp_block_size = block_size_usize - (omp_block_start - block_start_usize);
-        }
-        partial_sorting_scan_right_to_left_32s_4k_block_gather(
-            t,
-            sa,
-            &mut cache[omp_thread_num * omp_block_stride
-                ..omp_thread_num * omp_block_stride + omp_block_size],
-            omp_block_start as SaSint,
-            omp_block_size as SaSint,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        let t_ro: &[SaSint] = t;
+        let cache_ptr = SyncMutPtr::new(cache);
+        run_rayon_with_threads(omp_num_threads, || {
+            (0..omp_num_threads).into_par_iter().for_each(|omp_thread_num| {
+                let mut omp_block_size = if omp_thread_num + 1 < omp_num_threads {
+                    omp_block_stride
+                } else {
+                    block_size_usize - omp_thread_num * omp_block_stride
+                };
+                let omp_block_start = block_start_usize + omp_thread_num * omp_block_stride;
+                if omp_block_size == 0 {
+                    omp_block_size = block_size_usize - (omp_block_start - block_start_usize);
+                }
+                let cache = unsafe { cache_ptr.as_slice() };
+                let sa = unsafe { sa_ptr.as_slice() };
+                partial_sorting_scan_right_to_left_32s_4k_block_gather(
+                    t_ro,
+                    sa,
+                    &mut cache[omp_thread_num * omp_block_stride
+                        ..omp_thread_num * omp_block_stride + omp_block_size],
+                    omp_block_start as SaSint,
+                    omp_block_size as SaSint,
+                );
+            });
+        });
     }
 
     d = partial_sorting_scan_right_to_left_32s_4k_block_sort(
@@ -4970,7 +4933,6 @@ fn partial_sorting_scan_right_to_left_32s_4k_block_omp(
     d
 }
 
-#[allow(dead_code)]
 fn partial_sorting_scan_right_to_left_32s_1k_block_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -4996,24 +4958,33 @@ fn partial_sorting_scan_right_to_left_32s_1k_block_omp(
     let omp_num_threads = threads_usize.min(block_size_usize.max(1));
     let omp_block_stride = (block_size_usize / omp_num_threads) & !15usize;
 
-    for omp_thread_num in 0..omp_num_threads {
-        let mut omp_block_size = if omp_thread_num + 1 < omp_num_threads {
-            omp_block_stride
-        } else {
-            block_size_usize - omp_thread_num * omp_block_stride
-        };
-        let omp_block_start = block_start_usize + omp_thread_num * omp_block_stride;
-        if omp_block_size == 0 {
-            omp_block_size = block_size_usize - (omp_block_start - block_start_usize);
-        }
-        partial_sorting_scan_right_to_left_32s_1k_block_gather(
-            t,
-            sa,
-            &mut cache[omp_thread_num * omp_block_stride
-                ..omp_thread_num * omp_block_stride + omp_block_size],
-            omp_block_start as SaSint,
-            omp_block_size as SaSint,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        let t_ro: &[SaSint] = t;
+        let cache_ptr = SyncMutPtr::new(cache);
+        run_rayon_with_threads(omp_num_threads, || {
+            (0..omp_num_threads).into_par_iter().for_each(|omp_thread_num| {
+                let mut omp_block_size = if omp_thread_num + 1 < omp_num_threads {
+                    omp_block_stride
+                } else {
+                    block_size_usize - omp_thread_num * omp_block_stride
+                };
+                let omp_block_start = block_start_usize + omp_thread_num * omp_block_stride;
+                if omp_block_size == 0 {
+                    omp_block_size = block_size_usize - (omp_block_start - block_start_usize);
+                }
+                let cache = unsafe { cache_ptr.as_slice() };
+                let sa = unsafe { sa_ptr.as_slice() };
+                partial_sorting_scan_right_to_left_32s_1k_block_gather(
+                    t_ro,
+                    sa,
+                    &mut cache[omp_thread_num * omp_block_stride
+                        ..omp_thread_num * omp_block_stride + omp_block_size],
+                    omp_block_start as SaSint,
+                    omp_block_size as SaSint,
+                );
+            });
+        });
     }
 
     let cache = &mut cache[..block_size_usize];
@@ -5027,7 +4998,6 @@ fn partial_sorting_scan_right_to_left_32s_1k_block_omp(
     compact_and_place_cached_suffixes(sa, cache, block_start, block_size);
 }
 
-#[allow(dead_code)]
 fn partial_sorting_gather_lms_suffixes_32s_4k(
     sa: &mut [SaSint],
     omp_block_start: SaSint,
@@ -5073,7 +5043,6 @@ fn partial_sorting_gather_lms_suffixes_32s_4k(
     l
 }
 
-#[allow(dead_code)]
 fn partial_sorting_gather_lms_suffixes_32s_1k(
     sa: &mut [SaSint],
     omp_block_start: SaSint,
@@ -5114,7 +5083,6 @@ fn partial_sorting_gather_lms_suffixes_32s_1k(
     l
 }
 
-#[allow(dead_code)]
 fn partial_sorting_gather_lms_suffixes_32s_4k_omp(
     sa: &mut [SaSint],
     n: SaSint,
@@ -5163,7 +5131,6 @@ fn partial_sorting_gather_lms_suffixes_32s_4k_omp(
     }
 }
 
-#[allow(dead_code)]
 fn partial_sorting_gather_lms_suffixes_32s_1k_omp(
     sa: &mut [SaSint],
     n: SaSint,
@@ -5212,7 +5179,6 @@ fn partial_sorting_gather_lms_suffixes_32s_1k_omp(
     }
 }
 
-#[allow(dead_code)]
 fn partial_gsa_scan_right_to_left_16u(
     t: &[u16],
     sa: &mut [SaSint],
@@ -5288,7 +5254,6 @@ fn partial_gsa_scan_right_to_left_16u(
     d
 }
 
-#[allow(dead_code)]
 fn partial_gsa_scan_right_to_left_16u_block_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -5371,7 +5336,6 @@ fn partial_gsa_scan_right_to_left_16u_block_omp(
     next_d
 }
 
-#[allow(dead_code)]
 fn partial_gsa_scan_right_to_left_16u_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -5447,7 +5411,6 @@ fn partial_gsa_scan_right_to_left_16u_omp(
     }
 }
 
-#[allow(dead_code)]
 fn partial_sorting_shift_markers_16u_omp(
     sa: &mut [SaSint],
     n: SaSint,
@@ -5462,13 +5425,17 @@ fn partial_sorting_shift_markers_16u_omp(
     let c_step = buckets_index2(1, 0) as isize;
     let c_min = buckets_index2(1, 0) as isize;
     let c_max = buckets_index2(ALPHABET_SIZE - 1, 0) as isize;
-    for t in 0..thread_count {
+    let sa_ptr = SyncMutPtr::new(sa);
+    let buckets_ref: &[SaSint] = buckets;
+    run_rayon_with_threads(thread_count, || {
+        (0..thread_count).into_par_iter().for_each(|t| {
         let mut c = c_max - (t as isize * c_step);
+        let sa = unsafe { sa_ptr.as_slice() };
         while c >= c_min {
             let c_usize = c as usize;
             let mut s = SAINT_MIN;
-            let mut i = buckets[4 * ALPHABET_SIZE + c_usize] as isize - 1;
-            let mut j = buckets[c_usize - buckets_index2(1, 0)] as isize + 3;
+            let mut i = buckets_ref[4 * ALPHABET_SIZE + c_usize] as isize - 1;
+            let mut j = buckets_ref[c_usize - buckets_index2(1, 0)] as isize + 3;
             while i >= j {
                 let p0 = sa[i as usize];
                 let q0 = (p0 & SAINT_MIN) ^ s;
@@ -5504,10 +5471,10 @@ fn partial_sorting_shift_markers_16u_omp(
 
             c -= c_step * thread_count as isize;
         }
-    }
+        });
+    });
 }
 
-#[allow(dead_code)]
 fn induce_partial_order_16u_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -5574,7 +5541,6 @@ fn induce_partial_order_16u_omp(
     }
 }
 
-#[allow(dead_code)]
 fn induce_partial_order_32s_6k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -5611,7 +5577,6 @@ fn induce_partial_order_32s_6k_omp(
     );
 }
 
-#[allow(dead_code)]
 fn induce_partial_order_32s_4k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -5637,7 +5602,6 @@ fn induce_partial_order_32s_4k_omp(
     partial_sorting_gather_lms_suffixes_32s_4k_omp(sa, n, threads, thread_state);
 }
 
-#[allow(dead_code)]
 fn induce_partial_order_32s_2k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -5654,7 +5618,6 @@ fn induce_partial_order_32s_2k_omp(
     partial_sorting_gather_lms_suffixes_32s_1k_omp(sa, n, threads, thread_state);
 }
 
-#[allow(dead_code)]
 fn induce_partial_order_32s_1k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -5675,7 +5638,6 @@ fn induce_partial_order_32s_1k_omp(
     partial_sorting_gather_lms_suffixes_32s_1k_omp(sa, n, threads, thread_state);
 }
 
-#[allow(dead_code)]
 fn final_sorting_scan_left_to_right_16u(
     t: &[u16],
     sa: &mut [SaSint],
@@ -5697,7 +5659,6 @@ fn final_sorting_scan_left_to_right_16u(
     }
 }
 
-#[allow(dead_code)]
 fn final_sorting_scan_right_to_left_16u(
     t: &[u16],
     sa: &mut [SaSint],
@@ -5719,7 +5680,6 @@ fn final_sorting_scan_right_to_left_16u(
     }
 }
 
-#[allow(dead_code)]
 fn final_sorting_scan_left_to_right_32s(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -5767,7 +5727,6 @@ fn final_sorting_scan_left_to_right_32s(
     }
 }
 
-#[allow(dead_code)]
 fn final_sorting_scan_left_to_right_32s_block_gather(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -5798,7 +5757,6 @@ fn final_sorting_scan_left_to_right_32s_block_gather(
     }
 }
 
-#[allow(dead_code)]
 fn final_sorting_scan_left_to_right_32s_block_sort(
     t: &[SaSint],
     induction_bucket: &mut [SaSint],
@@ -5840,7 +5798,6 @@ fn final_sorting_scan_left_to_right_32s_block_sort(
     }
 }
 
-#[allow(dead_code)]
 fn final_sorting_scan_left_to_right_32s_block_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -5862,23 +5819,30 @@ fn final_sorting_scan_left_to_right_32s_block_omp(
     let threads_usize = usize::try_from(threads.max(1)).expect("threads must be positive");
     let omp_num_threads = threads_usize.min(block_size_usize.max(1));
     let omp_block_stride = (block_size_usize / omp_num_threads) & !15usize;
-    for omp_thread_num in 0..omp_num_threads {
-        let omp_block_start = omp_thread_num * omp_block_stride;
-        let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
-            omp_block_stride
-        } else {
-            block_size_usize - omp_block_start
-        };
-        compact_and_place_cached_suffixes(
-            sa,
-            cache,
-            omp_block_start as SaSint,
-            omp_block_size as SaSint,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        let cache_ptr = SyncMutPtr::new(cache);
+        run_rayon_with_threads(omp_num_threads, || {
+            (0..omp_num_threads).into_par_iter().for_each(|omp_thread_num| {
+                let omp_block_start = omp_thread_num * omp_block_stride;
+                let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
+                    omp_block_stride
+                } else {
+                    block_size_usize - omp_block_start
+                };
+                let sa = unsafe { sa_ptr.as_slice() };
+                let cache = unsafe { cache_ptr.as_slice() };
+                compact_and_place_cached_suffixes(
+                    sa,
+                    cache,
+                    omp_block_start as SaSint,
+                    omp_block_size as SaSint,
+                );
+            });
+        });
     }
 }
 
-#[allow(dead_code)]
 fn final_sorting_scan_left_to_right_32s_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -5919,7 +5883,6 @@ fn final_sorting_scan_left_to_right_32s_omp(
     }
 }
 
-#[allow(dead_code)]
 fn final_sorting_scan_right_to_left_32s(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -5967,7 +5930,6 @@ fn final_sorting_scan_right_to_left_32s(
     }
 }
 
-#[allow(dead_code)]
 fn final_sorting_scan_right_to_left_32s_block_gather(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -5998,7 +5960,6 @@ fn final_sorting_scan_right_to_left_32s_block_gather(
     }
 }
 
-#[allow(dead_code)]
 fn final_sorting_scan_right_to_left_32s_block_sort(
     t: &[SaSint],
     induction_bucket: &mut [SaSint],
@@ -6041,7 +6002,6 @@ fn final_sorting_scan_right_to_left_32s_block_sort(
     }
 }
 
-#[allow(dead_code)]
 fn final_sorting_scan_right_to_left_32s_block_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -6063,23 +6023,30 @@ fn final_sorting_scan_right_to_left_32s_block_omp(
     let threads_usize = usize::try_from(threads.max(1)).expect("threads must be positive");
     let omp_num_threads = threads_usize.min(block_size_usize.max(1));
     let omp_block_stride = (block_size_usize / omp_num_threads) & !15usize;
-    for omp_thread_num in 0..omp_num_threads {
-        let omp_block_start = omp_thread_num * omp_block_stride;
-        let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
-            omp_block_stride
-        } else {
-            block_size_usize - omp_block_start
-        };
-        compact_and_place_cached_suffixes(
-            sa,
-            cache,
-            omp_block_start as SaSint,
-            omp_block_size as SaSint,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        let cache_ptr = SyncMutPtr::new(cache);
+        run_rayon_with_threads(omp_num_threads, || {
+            (0..omp_num_threads).into_par_iter().for_each(|omp_thread_num| {
+                let omp_block_start = omp_thread_num * omp_block_stride;
+                let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
+                    omp_block_stride
+                } else {
+                    block_size_usize - omp_block_start
+                };
+                let sa = unsafe { sa_ptr.as_slice() };
+                let cache = unsafe { cache_ptr.as_slice() };
+                compact_and_place_cached_suffixes(
+                    sa,
+                    cache,
+                    omp_block_start as SaSint,
+                    omp_block_size as SaSint,
+                );
+            });
+        });
     }
 }
 
-#[allow(dead_code)]
 fn final_sorting_scan_right_to_left_32s_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -6114,7 +6081,6 @@ fn final_sorting_scan_right_to_left_32s_omp(
     }
 }
 
-#[allow(dead_code)]
 fn induce_final_order_32s_6k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -6143,7 +6109,6 @@ fn induce_final_order_32s_6k(
     );
 }
 
-#[allow(dead_code)]
 fn induce_final_order_32s_4k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -6172,7 +6137,6 @@ fn induce_final_order_32s_4k(
     );
 }
 
-#[allow(dead_code)]
 fn induce_final_order_32s_2k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -6194,7 +6158,6 @@ fn induce_final_order_32s_2k(
     final_sorting_scan_right_to_left_32s_omp(t, sa, n, &mut buckets[..k], threads, thread_state);
 }
 
-#[allow(dead_code)]
 fn induce_final_order_32s_1k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -6213,7 +6176,6 @@ fn induce_final_order_32s_1k(
     final_sorting_scan_right_to_left_32s_omp(t, sa, n, buckets, threads, thread_state);
 }
 
-#[allow(dead_code)]
 fn clear_lms_suffixes_omp(
     sa: &mut [SaSint],
     n: SaSint,
@@ -6228,20 +6190,27 @@ fn clear_lms_suffixes_omp(
     } else {
         1
     };
-    for t in 0..thread_count {
-        let mut c = t;
-        while c < k_usize {
-            if bucket_end[c] > bucket_start[c] {
-                let start = bucket_start[c] as usize;
-                let end = bucket_end[c] as usize;
-                sa[start..end].fill(0);
-            }
-            c += thread_count;
-        }
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        let bucket_start_ref: &[SaSint] = bucket_start;
+        let bucket_end_ref: &[SaSint] = bucket_end;
+        run_rayon_with_threads(thread_count, || {
+            (0..thread_count).into_par_iter().for_each(|t| {
+                let mut c = t;
+                let sa = unsafe { sa_ptr.as_slice() };
+                while c < k_usize {
+                    if bucket_end_ref[c] > bucket_start_ref[c] {
+                        let start = bucket_start_ref[c] as usize;
+                        let end = bucket_end_ref[c] as usize;
+                        sa[start..end].fill(0);
+                    }
+                    c += thread_count;
+                }
+            });
+        });
     }
 }
 
-#[allow(dead_code)]
 fn final_gsa_scan_right_to_left_16u(
     t: &[u16],
     sa: &mut [SaSint],
@@ -6263,7 +6232,6 @@ fn final_gsa_scan_right_to_left_16u(
     }
 }
 
-#[allow(dead_code)]
 fn final_sorting_ltr_step(
     t: &[u16],
     sa: &mut [SaSint],
@@ -6286,7 +6254,6 @@ fn final_sorting_ltr_step(
     }
 }
 
-#[allow(dead_code)]
 fn final_sorting_rtl_step(
     t: &[u16],
     sa: &mut [SaSint],
@@ -6309,7 +6276,6 @@ fn final_sorting_rtl_step(
     }
 }
 
-#[allow(dead_code)]
 fn final_bwt_scan_left_to_right_16u(
     t: &[u16],
     sa: &mut [SaSint],
@@ -6331,7 +6297,6 @@ fn final_bwt_scan_left_to_right_16u(
     }
 }
 
-#[allow(dead_code)]
 fn final_bwt_scan_right_to_left_16u(
     t: &[u16],
     sa: &mut [SaSint],
@@ -6355,7 +6320,6 @@ fn final_bwt_scan_right_to_left_16u(
     index
 }
 
-#[allow(dead_code)]
 fn final_bwt_aux_scan_left_to_right_16u(
     t: &[u16],
     sa: &mut [SaSint],
@@ -6379,7 +6343,6 @@ fn final_bwt_aux_scan_left_to_right_16u(
     }
 }
 
-#[allow(dead_code)]
 fn final_bwt_aux_scan_right_to_left_16u(
     t: &[u16],
     sa: &mut [SaSint],
@@ -6403,7 +6366,6 @@ fn final_bwt_aux_scan_right_to_left_16u(
     }
 }
 
-#[allow(dead_code)]
 fn renumber_lms_suffixes_16u(
     sa: &mut [SaSint],
     m: SaSint,
@@ -6444,7 +6406,6 @@ fn renumber_lms_suffixes_16u(
     name
 }
 
-#[allow(dead_code)]
 fn renumber_lms_suffixes_16u_omp(
     sa: &mut [SaSint],
     m: SaSint,
@@ -6485,7 +6446,6 @@ fn renumber_lms_suffixes_16u_omp(
     name
 }
 
-#[allow(dead_code)]
 fn gather_marked_lms_suffixes(
     sa: &mut [SaSint],
     m: SaSint,
@@ -6531,7 +6491,6 @@ fn gather_marked_lms_suffixes(
     l + 1
 }
 
-#[allow(dead_code)]
 fn gather_marked_lms_suffixes_omp(
     sa: &mut [SaSint],
     n: SaSint,
@@ -6583,7 +6542,6 @@ fn gather_marked_lms_suffixes_omp(
     }
 }
 
-#[allow(dead_code)]
 fn renumber_and_gather_lms_suffixes_omp(
     sa: &mut [SaSint],
     n: SaSint,
@@ -6608,7 +6566,6 @@ fn renumber_and_gather_lms_suffixes_omp(
     name
 }
 
-#[allow(dead_code)]
 fn reconstruct_lms_suffixes(
     sa: &mut [SaSint],
     n: SaSint,
@@ -6645,7 +6602,6 @@ fn reconstruct_lms_suffixes(
     }
 }
 
-#[allow(dead_code)]
 fn reconstruct_lms_suffixes_omp(sa: &mut [SaSint], n: SaSint, m: SaSint, threads: SaSint) {
     if threads == 1 || m < 65_536 {
         reconstruct_lms_suffixes(sa, n, m, 0, m as isize);
@@ -6665,7 +6621,6 @@ fn reconstruct_lms_suffixes_omp(sa: &mut [SaSint], n: SaSint, m: SaSint, threads
     }
 }
 
-#[allow(dead_code)]
 fn renumber_distinct_lms_suffixes_32s_4k(
     sa: &mut [SaSint],
     m: SaSint,
@@ -6722,7 +6677,6 @@ fn renumber_distinct_lms_suffixes_32s_4k(
     name
 }
 
-#[allow(dead_code)]
 fn mark_distinct_lms_suffixes_32s(
     sa: &mut [SaSint],
     m: SaSint,
@@ -6765,7 +6719,6 @@ fn mark_distinct_lms_suffixes_32s(
     }
 }
 
-#[allow(dead_code)]
 fn clamp_lms_suffixes_length_32s(
     sa: &mut [SaSint],
     m: SaSint,
@@ -6802,7 +6755,6 @@ fn clamp_lms_suffixes_length_32s(
     }
 }
 
-#[allow(dead_code)]
 fn renumber_distinct_lms_suffixes_32s_4k_omp(
     sa: &mut [SaSint],
     m: SaSint,
@@ -6849,7 +6801,6 @@ fn renumber_distinct_lms_suffixes_32s_4k_omp(
     count - 1
 }
 
-#[allow(dead_code)]
 fn mark_distinct_lms_suffixes_32s_omp(sa: &mut [SaSint], n: SaSint, m: SaSint, threads: SaSint) {
     let half_n = n >> 1;
     if threads == 1 || n < 131_072 {
@@ -6870,7 +6821,6 @@ fn mark_distinct_lms_suffixes_32s_omp(sa: &mut [SaSint], n: SaSint, m: SaSint, t
     }
 }
 
-#[allow(dead_code)]
 fn clamp_lms_suffixes_length_32s_omp(sa: &mut [SaSint], n: SaSint, m: SaSint, threads: SaSint) {
     let half_n = n >> 1;
     if threads == 1 || n < 131_072 {
@@ -6891,7 +6841,6 @@ fn clamp_lms_suffixes_length_32s_omp(sa: &mut [SaSint], n: SaSint, m: SaSint, th
     }
 }
 
-#[allow(dead_code)]
 fn renumber_and_mark_distinct_lms_suffixes_32s_4k_omp(
     sa: &mut [SaSint],
     n: SaSint,
@@ -6911,7 +6860,6 @@ fn renumber_and_mark_distinct_lms_suffixes_32s_4k_omp(
     name
 }
 
-#[allow(dead_code)]
 fn renumber_and_mark_distinct_lms_suffixes_32s_1k_omp(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -7028,7 +6976,6 @@ fn renumber_and_mark_distinct_lms_suffixes_32s_1k_omp(
     name - 1
 }
 
-#[allow(dead_code)]
 fn renumber_unique_and_nonunique_lms_suffixes_32s(
     t: &mut [SaSint],
     sa: &mut [SaSint],
@@ -7076,7 +7023,6 @@ fn renumber_unique_and_nonunique_lms_suffixes_32s(
     f
 }
 
-#[allow(dead_code)]
 fn compact_unique_and_nonunique_lms_suffixes_32s(
     sa: &mut [SaSint],
     m: SaSint,
@@ -7108,7 +7054,6 @@ fn compact_unique_and_nonunique_lms_suffixes_32s(
     *pr = r + 1;
 }
 
-#[allow(dead_code)]
 fn count_unique_suffixes(
     sa: &[SaSint],
     m: SaSint,
@@ -7125,7 +7070,6 @@ fn count_unique_suffixes(
     count
 }
 
-#[allow(dead_code)]
 fn renumber_unique_and_nonunique_lms_suffixes_32s_omp(
     t: &mut [SaSint],
     sa: &mut [SaSint],
@@ -7172,7 +7116,6 @@ fn renumber_unique_and_nonunique_lms_suffixes_32s_omp(
     f
 }
 
-#[allow(dead_code)]
 fn compact_unique_and_nonunique_lms_suffixes_32s_omp(
     sa: &mut [SaSint],
     n: SaSint,
@@ -7251,7 +7194,6 @@ fn compact_unique_and_nonunique_lms_suffixes_32s_omp(
     sa.copy_within(src..src + f as usize, dst);
 }
 
-#[allow(dead_code)]
 fn compact_lms_suffixes_32s_omp(
     t: &mut [SaSint],
     sa: &mut [SaSint],
@@ -7265,7 +7207,6 @@ fn compact_lms_suffixes_32s_omp(
     f
 }
 
-#[allow(dead_code)]
 fn merge_unique_lms_suffixes_32s(
     t: &mut [SaSint],
     sa: &mut [SaSint],
@@ -7337,7 +7278,6 @@ fn merge_unique_lms_suffixes_32s(
     }
 }
 
-#[allow(dead_code)]
 fn merge_nonunique_lms_suffixes_32s(
     sa: &mut [SaSint],
     n: SaSint,
@@ -7387,7 +7327,6 @@ fn merge_nonunique_lms_suffixes_32s(
     }
 }
 
-#[allow(dead_code)]
 fn merge_unique_lms_suffixes_32s_omp(
     t: &mut [SaSint],
     sa: &mut [SaSint],
@@ -7435,7 +7374,6 @@ fn merge_unique_lms_suffixes_32s_omp(
     }
 }
 
-#[allow(dead_code)]
 fn merge_nonunique_lms_suffixes_32s_omp(
     sa: &mut [SaSint],
     n: SaSint,
@@ -7482,7 +7420,6 @@ fn merge_nonunique_lms_suffixes_32s_omp(
     }
 }
 
-#[allow(dead_code)]
 fn merge_compacted_lms_suffixes_32s_omp(
     t: &mut [SaSint],
     sa: &mut [SaSint],
@@ -7495,7 +7432,6 @@ fn merge_compacted_lms_suffixes_32s_omp(
     merge_nonunique_lms_suffixes_32s_omp(sa, n, m, f, threads);
 }
 
-#[allow(dead_code)]
 fn reconstruct_compacted_lms_suffixes_32s_2k_omp(
     t: &mut [SaSint],
     sa: &mut [SaSint],
@@ -7537,7 +7473,6 @@ fn reconstruct_compacted_lms_suffixes_32s_2k_omp(
     }
 }
 
-#[allow(dead_code)]
 fn reconstruct_compacted_lms_suffixes_32s_1k_omp(
     t: &mut [SaSint],
     sa: &mut [SaSint],
@@ -7566,7 +7501,6 @@ fn reconstruct_compacted_lms_suffixes_32s_1k_omp(
     }
 }
 
-#[allow(dead_code)]
 fn place_lms_suffixes_interval_16u(
     sa: &mut [SaSint],
     n: SaSint,
@@ -7606,7 +7540,6 @@ fn place_lms_suffixes_interval_16u(
     }
 }
 
-#[allow(dead_code)]
 fn place_lms_suffixes_interval_32s_4k(
     sa: &mut [SaSint],
     n: SaSint,
@@ -7638,7 +7571,6 @@ fn place_lms_suffixes_interval_32s_4k(
     sa[..j].fill(0);
 }
 
-#[allow(dead_code)]
 fn place_lms_suffixes_interval_32s_2k(
     sa: &mut [SaSint],
     n: SaSint,
@@ -7670,7 +7602,6 @@ fn place_lms_suffixes_interval_32s_2k(
     sa[..j].fill(0);
 }
 
-#[allow(dead_code)]
 fn place_lms_suffixes_interval_32s_1k(
     t: &[SaSint],
     sa: &mut [SaSint],
@@ -7700,7 +7631,6 @@ fn place_lms_suffixes_interval_32s_1k(
     sa[..l].fill(0);
 }
 
-#[allow(dead_code)]
 fn place_lms_suffixes_histogram_32s_6k(
     sa: &mut [SaSint],
     n: SaSint,
@@ -7728,7 +7658,6 @@ fn place_lms_suffixes_histogram_32s_6k(
     sa[..j].fill(0);
 }
 
-#[allow(dead_code)]
 fn place_lms_suffixes_histogram_32s_4k(
     sa: &mut [SaSint],
     n: SaSint,
@@ -7756,7 +7685,6 @@ fn place_lms_suffixes_histogram_32s_4k(
     sa[..j].fill(0);
 }
 
-#[allow(dead_code)]
 fn place_lms_suffixes_histogram_32s_2k(
     sa: &mut [SaSint],
     n: SaSint,
@@ -7786,7 +7714,6 @@ fn place_lms_suffixes_histogram_32s_2k(
     sa[..j].fill(0);
 }
 
-#[allow(dead_code)]
 fn final_bwt_scan_left_to_right_16u_block_prepare(
     t: &[u16],
     sa: &mut [SaSint],
@@ -7816,7 +7743,6 @@ fn final_bwt_scan_left_to_right_16u_block_prepare(
     count as SaSint
 }
 
-#[allow(dead_code)]
 fn final_sorting_scan_left_to_right_16u_block_prepare(
     t: &[u16],
     sa: &mut [SaSint],
@@ -7845,7 +7771,6 @@ fn final_sorting_scan_left_to_right_16u_block_prepare(
     count as SaSint
 }
 
-#[allow(dead_code)]
 fn final_order_scan_left_to_right_16u_block_place(
     sa: &mut [SaSint],
     buckets: &mut [SaSint],
@@ -7860,7 +7785,6 @@ fn final_order_scan_left_to_right_16u_block_place(
     }
 }
 
-#[allow(dead_code)]
 fn final_bwt_aux_scan_left_to_right_16u_block_place(
     sa: &mut [SaSint],
     rm: SaSint,
@@ -7881,7 +7805,6 @@ fn final_bwt_aux_scan_left_to_right_16u_block_place(
     }
 }
 
-#[allow(dead_code)]
 fn final_bwt_scan_left_to_right_16u_block_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -7944,7 +7867,6 @@ fn final_bwt_scan_left_to_right_16u_block_omp(
     }
 }
 
-#[allow(dead_code)]
 fn final_bwt_aux_scan_left_to_right_16u_block_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -8019,7 +7941,6 @@ fn final_bwt_aux_scan_left_to_right_16u_block_omp(
     }
 }
 
-#[allow(dead_code)]
 fn final_sorting_scan_left_to_right_16u_block_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -8082,7 +8003,6 @@ fn final_sorting_scan_left_to_right_16u_block_omp(
     }
 }
 
-#[allow(dead_code)]
 fn final_bwt_scan_left_to_right_16u_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -8157,7 +8077,6 @@ fn final_bwt_scan_left_to_right_16u_omp(
     }
 }
 
-#[allow(dead_code)]
 fn final_bwt_aux_scan_left_to_right_16u_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -8243,7 +8162,6 @@ fn final_bwt_aux_scan_left_to_right_16u_omp(
     }
 }
 
-#[allow(dead_code)]
 fn final_sorting_scan_left_to_right_16u_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -8317,7 +8235,6 @@ fn final_sorting_scan_left_to_right_16u_omp(
     }
 }
 
-#[allow(dead_code)]
 fn final_bwt_scan_right_to_left_16u_block_prepare(
     t: &[u16],
     sa: &mut [SaSint],
@@ -8350,7 +8267,6 @@ fn final_bwt_scan_right_to_left_16u_block_prepare(
     count as SaSint
 }
 
-#[allow(dead_code)]
 fn final_bwt_aux_scan_right_to_left_16u_block_prepare(
     t: &[u16],
     sa: &mut [SaSint],
@@ -8384,7 +8300,6 @@ fn final_bwt_aux_scan_right_to_left_16u_block_prepare(
     count as SaSint
 }
 
-#[allow(dead_code)]
 fn final_sorting_scan_right_to_left_16u_block_prepare(
     t: &[u16],
     sa: &mut [SaSint],
@@ -8413,7 +8328,6 @@ fn final_sorting_scan_right_to_left_16u_block_prepare(
     count as SaSint
 }
 
-#[allow(dead_code)]
 fn final_order_scan_right_to_left_16u_block_place(
     sa: &mut [SaSint],
     buckets: &mut [SaSint],
@@ -8427,7 +8341,6 @@ fn final_order_scan_right_to_left_16u_block_place(
     }
 }
 
-#[allow(dead_code)]
 fn final_gsa_scan_right_to_left_16u_block_place(
     sa: &mut [SaSint],
     buckets: &mut [SaSint],
@@ -8443,7 +8356,6 @@ fn final_gsa_scan_right_to_left_16u_block_place(
     }
 }
 
-#[allow(dead_code)]
 fn final_bwt_aux_scan_right_to_left_16u_block_place(
     sa: &mut [SaSint],
     rm: SaSint,
@@ -8465,7 +8377,6 @@ fn final_bwt_aux_scan_right_to_left_16u_block_place(
     }
 }
 
-#[allow(dead_code)]
 fn final_bwt_scan_right_to_left_16u_block_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -8529,7 +8440,6 @@ fn final_bwt_scan_right_to_left_16u_block_omp(
     -1
 }
 
-#[allow(dead_code)]
 fn final_bwt_aux_scan_right_to_left_16u_block_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -8604,7 +8514,6 @@ fn final_bwt_aux_scan_right_to_left_16u_block_omp(
     }
 }
 
-#[allow(dead_code)]
 fn final_sorting_scan_right_to_left_16u_block_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -8667,7 +8576,6 @@ fn final_sorting_scan_right_to_left_16u_block_omp(
     }
 }
 
-#[allow(dead_code)]
 fn final_gsa_scan_right_to_left_16u_block_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -8730,7 +8638,6 @@ fn final_gsa_scan_right_to_left_16u_block_omp(
     }
 }
 
-#[allow(dead_code)]
 fn final_bwt_scan_right_to_left_16u_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -8798,7 +8705,6 @@ fn final_bwt_scan_right_to_left_16u_omp(
     index
 }
 
-#[allow(dead_code)]
 fn final_bwt_aux_scan_right_to_left_16u_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -8869,7 +8775,6 @@ fn final_bwt_aux_scan_right_to_left_16u_omp(
     }
 }
 
-#[allow(dead_code)]
 fn final_sorting_scan_right_to_left_16u_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -8939,7 +8844,6 @@ fn final_sorting_scan_right_to_left_16u_omp(
     }
 }
 
-#[allow(dead_code)]
 fn final_gsa_scan_right_to_left_16u_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -9003,7 +8907,6 @@ fn final_gsa_scan_right_to_left_16u_omp(
     }
 }
 
-#[allow(dead_code)]
 fn induce_final_order_16u_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -9091,7 +8994,6 @@ fn induce_final_order_16u_omp(
     }
 }
 
-#[allow(dead_code)]
 fn bwt_copy_16u(u: &mut [u16], a: &[SaSint], n: SaSint) {
     let mut i = 0isize;
     let mut j = n as isize - 7;
@@ -9180,7 +9082,6 @@ fn convert_inplace_32u_to_64u_omp(v: &mut [u32], n: SaSint, threads: SaSint) {
     convert_inplace_32u_to_64u(v, 0, n);
 }
 
-#[allow(dead_code)]
 fn final_bwt_ltr_step(t: &[u16], sa: &mut [SaSint], induction_bucket: &mut [SaSint], index: usize) {
     let mut p = sa[index];
     sa[index] = p & SAINT_MAX;
@@ -9199,7 +9100,6 @@ fn final_bwt_ltr_step(t: &[u16], sa: &mut [SaSint], induction_bucket: &mut [SaSi
     }
 }
 
-#[allow(dead_code)]
 fn final_bwt_rtl_step(
     t: &[u16],
     sa: &mut [SaSint],
@@ -9227,7 +9127,6 @@ fn final_bwt_rtl_step(
     }
 }
 
-#[allow(dead_code)]
 fn final_bwt_aux_ltr_step(
     t: &[u16],
     sa: &mut [SaSint],
@@ -9256,7 +9155,6 @@ fn final_bwt_aux_ltr_step(
     }
 }
 
-#[allow(dead_code)]
 fn final_bwt_aux_rtl_step(
     t: &[u16],
     sa: &mut [SaSint],
@@ -9285,7 +9183,6 @@ fn final_bwt_aux_rtl_step(
     }
 }
 
-#[allow(dead_code)]
 fn main_32s_recursion(
     t_ptr: *mut SaSint,
     sa_ptr: *mut SaSint,
@@ -9948,7 +9845,6 @@ fn main_32s_recursion(
     }
 }
 
-#[allow(dead_code)]
 fn main_32s_entry(
     t_ptr: *mut SaSint,
     sa: &mut [SaSint],
@@ -9972,7 +9868,6 @@ fn main_32s_entry(
     )
 }
 
-#[allow(dead_code)]
 fn main_16u(
     t: &[u16],
     sa: &mut [SaSint],
@@ -10055,7 +9950,6 @@ fn main_16u(
     induce_final_order_16u_omp(t, sa, n, k, flags, r, i_out, buckets, threads, thread_state)
 }
 
-#[allow(dead_code)]
 fn main_16u_alloc(
     t: &[u16],
     sa: &mut [SaSint],
@@ -10205,12 +10099,15 @@ fn main_long(
 
 /// Constructs the suffix array of a given 16-bit string.
 ///
-/// - `t` (`[0..n-1]`): the input 16-bit string.
-/// - `sa` (`[0..n-1+fs]`): the output array of suffixes.
-/// - `fs`: extra space available at the end of `sa` (0 should be enough for most cases).
-/// - `freq` (`[0..65535]`): optional output symbol frequency table.
+/// # Arguments
+/// - `T` `[0..n-1]`: The input 16-bit string.
+/// - `SA` `[0..n-1+fs]`: The output array of suffixes.
+/// - `n`: The length of the given 16-bit string.
+/// - `fs`: The extra space available at the end of SA array (0 should be enough for most cases).
+/// - `freq` `[0..65535]`: The output 16-bit symbol frequency table (can be NULL).
 ///
-/// Returns 0 on success, -1 or -2 on error.
+/// # Returns
+/// 0 if no error occurred, -1 or -2 otherwise.
 pub fn libsais16x64(
     t: &[u16],
     sa: &mut [SaSint],
@@ -10222,12 +10119,15 @@ pub fn libsais16x64(
 
 /// Constructs the generalized suffix array (GSA) of a given 16-bit string set.
 ///
-/// - `t` (`[0..n-1]`): the input 16-bit string set using 0 as separators (`t[n-1]` must be 0).
-/// - `sa` (`[0..n-1+fs]`): the output array of suffixes.
-/// - `fs`: extra space available at the end of `sa` (0 should be enough for most cases).
-/// - `freq` (`[0..65535]`): optional output symbol frequency table.
+/// # Arguments
+/// - `T` `[0..n-1]`: The input 16-bit string set using 0 as separators (T[n-1] must be 0).
+/// - `SA` `[0..n-1+fs]`: The output array of suffixes.
+/// - `n`: The length of the given 16-bit string set.
+/// - `fs`: The extra space available at the end of SA array (0 should be enough for most cases).
+/// - `freq` `[0..65535]`: The output 16-bit symbol frequency table (can be NULL).
 ///
-/// Returns 0 on success, -1 or -2 on error.
+/// # Returns
+/// 0 if no error occurred, -1 or -2 otherwise.
 pub fn libsais16x64_gsa(
     t: &[u16],
     sa: &mut [SaSint],
@@ -10259,14 +10159,17 @@ pub fn libsais16x64_int(t: &mut [SaSint], sa: &mut [SaSint], k: SaSint, fs: SaSi
 
 /// Constructs the suffix array of a given integer array.
 ///
-/// During construction the input array is modified, but restored at the end if no error occurred.
+/// Note, during construction input array will be modified, but restored at the end if no errors occurred.
 ///
-/// - `t` (`[0..n-1]`): the input integer array.
-/// - `sa` (`[0..n-1+fs]`): the output array of suffixes.
-/// - `k`: the alphabet size of the input integer array.
-/// - `fs`: extra space available at the end of `sa` (can be 0, but 4k or better 6k is recommended for optimal performance).
+/// # Arguments
+/// - `T` `[0..n-1]`: The input integer array.
+/// - `SA` `[0..n-1+fs]`: The output array of suffixes.
+/// - `n`: The length of the integer array.
+/// - `k`: The alphabet size of the input integer array.
+/// - `fs`: Extra space available at the end of SA array (can be 0, but 4k or better 6k is recommended for optimal performance).
 ///
-/// Returns 0 on success, -1 or -2 on error.
+/// # Returns
+/// 0 if no error occurred, -1 or -2 otherwise.
 pub fn libsais16x64_long(t: &mut [SaSint], sa: &mut [SaSint], k: SaSint, fs: SaSint) -> SaSint {
     libsais16x64_int(t, sa, k, fs)
 }
@@ -10309,15 +10212,18 @@ pub fn libsais16x64_gsa_ctx(
     main_16u_ctx(ctx, t, sa, LIBSAIS_FLAGS_GSA, 0, None, fs, freq)
 }
 
-/// Constructs the suffix array of a given 16-bit string in parallel using OpenMP-style threading.
+/// Constructs the suffix array of a given 16-bit string in parallel using OpenMP.
 ///
-/// - `t` (`[0..n-1]`): the input 16-bit string.
-/// - `sa` (`[0..n-1+fs]`): the output array of suffixes.
-/// - `fs`: extra space available at the end of `sa` (0 should be enough for most cases).
-/// - `freq` (`[0..65535]`): optional output symbol frequency table.
-/// - `threads`: number of worker threads (can be 0 for the implementation default).
+/// # Arguments
+/// - `T` `[0..n-1]`: The input 16-bit string.
+/// - `SA` `[0..n-1+fs]`: The output array of suffixes.
+/// - `n`: The length of the given 16-bit string.
+/// - `fs`: The extra space available at the end of SA array (0 should be enough for most cases).
+/// - `freq` `[0..65535]`: The output 16-bit symbol frequency table (can be NULL).
+/// - `threads`: The number of OpenMP threads to use (can be 0 for OpenMP default).
 ///
-/// Returns 0 on success, -1 or -2 on error.
+/// # Returns
+/// 0 if no error occurred, -1 or -2 otherwise.
 pub fn libsais16x64_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -10332,15 +10238,18 @@ pub fn libsais16x64_omp(
     }
 }
 
-/// Constructs the generalized suffix array (GSA) of a given 16-bit string set in parallel using OpenMP-style threading.
+/// Constructs the generalized suffix array (GSA) of a given 16-bit string set in parallel using OpenMP.
 ///
-/// - `t` (`[0..n-1]`): the input 16-bit string set using 0 as separators (`t[n-1]` must be 0).
-/// - `sa` (`[0..n-1+fs]`): the output array of suffixes.
-/// - `fs`: extra space available at the end of `sa` (0 should be enough for most cases).
-/// - `freq` (`[0..65535]`): optional output symbol frequency table.
-/// - `threads`: number of worker threads (can be 0 for the implementation default).
+/// # Arguments
+/// - `T` `[0..n-1]`: The input 16-bit string set using 0 as separators (T[n-1] must be 0).
+/// - `SA` `[0..n-1+fs]`: The output array of suffixes.
+/// - `n`: The length of the given 16-bit string set.
+/// - `fs`: The extra space available at the end of SA array (0 should be enough for most cases).
+/// - `freq` `[0..65535]`: The output 16-bit symbol frequency table (can be NULL).
+/// - `threads`: The number of OpenMP threads to use (can be 0 for OpenMP default).
 ///
-/// Returns 0 on success, -1 or -2 on error.
+/// # Returns
+/// 0 if no error occurred, -1 or -2 otherwise.
 pub fn libsais16x64_gsa_omp(
     t: &[u16],
     sa: &mut [SaSint],
@@ -10382,17 +10291,20 @@ pub fn libsais16x64_int_omp(
     main_long(t, sa, k, fs, threads)
 }
 
-/// Constructs the suffix array of a given integer array in parallel using OpenMP-style threading.
+/// Constructs the suffix array of a given integer array in parallel using OpenMP.
 ///
-/// During construction the input array is modified, but restored at the end if no error occurred.
+/// Note, during construction input array will be modified, but restored at the end if no errors occurred.
 ///
-/// - `t` (`[0..n-1]`): the input integer array.
-/// - `sa` (`[0..n-1+fs]`): the output array of suffixes.
-/// - `k`: the alphabet size of the input integer array.
-/// - `fs`: extra space available at the end of `sa` (can be 0, but 4k or better 6k is recommended for optimal performance).
-/// - `threads`: number of worker threads (can be 0 for the implementation default).
+/// # Arguments
+/// - `T` `[0..n-1]`: The input integer array.
+/// - `SA` `[0..n-1+fs]`: The output array of suffixes.
+/// - `n`: The length of the integer array.
+/// - `k`: The alphabet size of the input integer array.
+/// - `fs`: Extra space available at the end of SA array (can be 0, but 4k or better 6k is recommended for optimal performance).
+/// - `threads`: The number of OpenMP threads to use (can be 0 for OpenMP default).
 ///
-/// Returns 0 on success, -1 or -2 on error.
+/// # Returns
+/// 0 if no error occurred, -1 or -2 otherwise.
 pub fn libsais16x64_long_omp(
     t: &mut [SaSint],
     sa: &mut [SaSint],
@@ -10444,15 +10356,18 @@ fn build_bwt(
     index
 }
 
-/// Constructs the Burrows-Wheeler transformed 16-bit string (BWT) of a given 16-bit string.
+/// Constructs the burrows-wheeler transformed 16-bit string (BWT) of a given 16-bit string.
 ///
-/// - `t` (`[0..n-1]`): the input 16-bit string.
-/// - `u` (`[0..n-1]`): the output 16-bit string (can alias `t`).
-/// - `a` (`[0..n-1+fs]`): the temporary array.
-/// - `fs`: extra space available at the end of `a` (0 should be enough for most cases).
-/// - `freq` (`[0..65535]`): optional output symbol frequency table.
+/// # Arguments
+/// - `T` `[0..n-1]`: The input 16-bit string.
+/// - `U` `[0..n-1]`: The output 16-bit string (can be T).
+/// - `A` `[0..n-1+fs]`: The temporary array.
+/// - `n`: The length of the given 16-bit string.
+/// - `fs`: The extra space available at the end of A array (0 should be enough for most cases).
+/// - `freq` `[0..65535]`: The output 16-bit symbol frequency table (can be NULL).
 ///
-/// Returns the primary index on success, -1 or -2 on error.
+/// # Returns
+/// The primary index if no error occurred, -1 or -2 otherwise.
 pub fn libsais16x64_bwt(
     t: &[u16],
     u: &mut [u16],
@@ -10507,17 +10422,20 @@ fn build_bwt_aux(
     index
 }
 
-/// Constructs the Burrows-Wheeler transformed 16-bit string (BWT) of a given 16-bit string with auxiliary indexes.
+/// Constructs the burrows-wheeler transformed 16-bit string (BWT) of a given 16-bit string with auxiliary indexes.
 ///
-/// - `t` (`[0..n-1]`): the input 16-bit string.
-/// - `u` (`[0..n-1]`): the output 16-bit string (can alias `t`).
-/// - `a` (`[0..n-1+fs]`): the temporary array.
-/// - `fs`: extra space available at the end of `a` (0 should be enough for most cases).
-/// - `freq` (`[0..65535]`): optional output symbol frequency table.
-/// - `r`: sampling rate for the auxiliary indexes (must be a power of two).
-/// - `i` (`[0..(n-1)/r]`): output auxiliary indexes.
+/// # Arguments
+/// - `T` `[0..n-1]`: The input 16-bit string.
+/// - `U` `[0..n-1]`: The output 16-bit string (can be T).
+/// - `A` `[0..n-1+fs]`: The temporary array.
+/// - `n`: The length of the given 16-bit string.
+/// - `fs`: The extra space available at the end of A array (0 should be enough for most cases).
+/// - `freq` `[0..65535]`: The output 16-bit symbol frequency table (can be NULL).
+/// - `r`: The sampling rate for auxiliary indexes (must be power of 2).
+/// - `I` `[0..(n-1)/r]`: The output auxiliary indexes.
 ///
-/// Returns 0 on success, -1 or -2 on error.
+/// # Returns
+/// 0 if no error occurred, -1 or -2 otherwise.
 pub fn libsais16x64_bwt_aux(
     t: &[u16],
     u: &mut [u16],
@@ -10642,16 +10560,19 @@ pub fn libsais16x64_bwt_aux_ctx(
     index
 }
 
-/// Constructs the Burrows-Wheeler transformed 16-bit string (BWT) of a given 16-bit string in parallel using OpenMP-style threading.
+/// Constructs the burrows-wheeler transformed 16-bit string (BWT) of a given 16-bit string in parallel using OpenMP.
 ///
-/// - `t` (`[0..n-1]`): the input 16-bit string.
-/// - `u` (`[0..n-1]`): the output 16-bit string (can alias `t`).
-/// - `a` (`[0..n-1+fs]`): the temporary array.
-/// - `fs`: extra space available at the end of `a` (0 should be enough for most cases).
-/// - `freq` (`[0..65535]`): optional output symbol frequency table.
-/// - `threads`: number of worker threads (can be 0 for the implementation default).
+/// # Arguments
+/// - `T` `[0..n-1]`: The input 16-bit string.
+/// - `U` `[0..n-1]`: The output 16-bit string (can be T).
+/// - `A` `[0..n-1+fs]`: The temporary array.
+/// - `n`: The length of the given 16-bit string.
+/// - `fs`: The extra space available at the end of A array (0 should be enough for most cases).
+/// - `freq` `[0..65535]`: The output 16-bit symbol frequency table (can be NULL).
+/// - `threads`: The number of OpenMP threads to use (can be 0 for OpenMP default).
 ///
-/// Returns the primary index on success, -1 or -2 on error.
+/// # Returns
+/// The primary index if no error occurred, -1 or -2 otherwise.
 pub fn libsais16x64_bwt_omp(
     t: &[u16],
     u: &mut [u16],
@@ -10667,18 +10588,21 @@ pub fn libsais16x64_bwt_omp(
     }
 }
 
-/// Constructs the BWT of a given 16-bit string with auxiliary indexes in parallel using OpenMP-style threading.
+/// Constructs the burrows-wheeler transformed 16-bit string (BWT) of a given 16-bit string with auxiliary indexes in parallel using OpenMP.
 ///
-/// - `t` (`[0..n-1]`): the input 16-bit string.
-/// - `u` (`[0..n-1]`): the output 16-bit string (can alias `t`).
-/// - `a` (`[0..n-1+fs]`): the temporary array.
-/// - `fs`: extra space available at the end of `a` (0 should be enough for most cases).
-/// - `freq` (`[0..65535]`): optional output symbol frequency table.
-/// - `r`: sampling rate for the auxiliary indexes (must be a power of two).
-/// - `i` (`[0..(n-1)/r]`): output auxiliary indexes.
-/// - `threads`: number of worker threads (can be 0 for the implementation default).
+/// # Arguments
+/// - `T` `[0..n-1]`: The input 16-bit string.
+/// - `U` `[0..n-1]`: The output 16-bit string (can be T).
+/// - `A` `[0..n-1+fs]`: The temporary array.
+/// - `n`: The length of the given 16-bit string.
+/// - `fs`: The extra space available at the end of A array (0 should be enough for most cases).
+/// - `freq` `[0..65535]`: The output 16-bit symbol frequency table (can be NULL).
+/// - `r`: The sampling rate for auxiliary indexes (must be power of 2).
+/// - `I` `[0..(n-1)/r]`: The output auxiliary indexes.
+/// - `threads`: The number of OpenMP threads to use (can be 0 for OpenMP default).
 ///
-/// Returns 0 on success, -1 or -2 on error.
+/// # Returns
+/// 0 if no error occurred, -1 or -2 otherwise.
 pub fn libsais16x64_bwt_aux_omp(
     t: &[u16],
     u: &mut [u16],
@@ -11325,7 +11249,6 @@ fn unbwt_decode_blocks(
     }
 }
 
-#[allow(dead_code)]
 fn unbwt_decode_omp(
     u: &mut [u16],
     p: &[usize],
@@ -11477,15 +11400,18 @@ fn inverse_bwt(
     unbwt_core(t, u, a, freq, n as SaSint, &i)
 }
 
-/// Reconstructs the original 16-bit string from a given BWT and primary index.
+/// Constructs the original 16-bit string from a given burrows-wheeler transformed 16-bit string (BWT) with primary index.
 ///
-/// - `t` (`[0..n-1]`): the input 16-bit string.
-/// - `u` (`[0..n-1]`): the output 16-bit string (can alias `t`).
-/// - `a` (`[0..n]`): the temporary array (must have length `n + 1`).
-/// - `freq` (`[0..65535]`): optional input symbol frequency table.
-/// - `i`: the primary index.
+/// # Arguments
+/// - `T` `[0..n-1]`: The input 16-bit string.
+/// - `U` `[0..n-1]`: The output 16-bit string (can be T).
+/// - `A` `[0..n]`: The temporary array (NOTE, temporary array must be n + 1 size).
+/// - `n`: The length of the given 16-bit string.
+/// - `freq` `[0..65535]`: The input 16-bit symbol frequency table (can be NULL).
+/// - `i`: The primary index.
 ///
-/// Returns 0 on success, -1 or -2 on error.
+/// # Returns
+/// 0 if no error occurred, -1 or -2 otherwise.
 pub fn libsais16x64_unbwt(
     t: &[u16],
     u: &mut [u16],
@@ -11517,16 +11443,19 @@ pub fn libsais16x64_unbwt_ctx(
     libsais16x64_unbwt_aux_ctx(ctx, t, u, a, freq, t.len() as SaSint, &[i])
 }
 
-/// Reconstructs the original 16-bit string from a given BWT with auxiliary indexes.
+/// Constructs the original 16-bit string from a given burrows-wheeler transformed 16-bit string (BWT) with auxiliary indexes.
 ///
-/// - `t` (`[0..n-1]`): the input 16-bit string.
-/// - `u` (`[0..n-1]`): the output 16-bit string (can alias `t`).
-/// - `a` (`[0..n]`): the temporary array (must have length `n + 1`).
-/// - `freq` (`[0..65535]`): optional input symbol frequency table.
-/// - `r`: sampling rate for the auxiliary indexes (must be a power of two).
-/// - `i` (`[0..(n-1)/r]`): input auxiliary indexes.
+/// # Arguments
+/// - `T` `[0..n-1]`: The input 16-bit string.
+/// - `U` `[0..n-1]`: The output 16-bit string (can be T).
+/// - `A` `[0..n]`: The temporary array (NOTE, temporary array must be n + 1 size).
+/// - `n`: The length of the given 16-bit string.
+/// - `freq` `[0..65535]`: The input 16-bit symbol frequency table (can be NULL).
+/// - `r`: The sampling rate for auxiliary indexes (must be power of 2).
+/// - `I` `[0..(n-1)/r]`: The input auxiliary indexes.
 ///
-/// Returns 0 on success, -1 or -2 on error.
+/// # Returns
+/// 0 if no error occurred, -1 or -2 otherwise.
 pub fn libsais16x64_unbwt_aux(
     t: &[u16],
     u: &mut [u16],
@@ -11591,16 +11520,19 @@ pub fn libsais16x64_unbwt_aux_ctx(
     )
 }
 
-/// Reconstructs the original 16-bit string from a given BWT and primary index in parallel using OpenMP-style threading.
+/// Constructs the original 16-bit string from a given burrows-wheeler transformed 16-bit string (BWT) with primary index in parallel using OpenMP.
 ///
-/// - `t` (`[0..n-1]`): the input 16-bit string.
-/// - `u` (`[0..n-1]`): the output 16-bit string (can alias `t`).
-/// - `a` (`[0..n]`): the temporary array (must have length `n + 1`).
-/// - `freq` (`[0..65535]`): optional input symbol frequency table.
-/// - `i`: the primary index.
-/// - `threads`: number of worker threads (can be 0 for the implementation default).
+/// # Arguments
+/// - `T` `[0..n-1]`: The input 16-bit string.
+/// - `U` `[0..n-1]`: The output 16-bit string (can be T).
+/// - `A` `[0..n]`: The temporary array (NOTE, temporary array must be n + 1 size).
+/// - `n`: The length of the given 16-bit string.
+/// - `freq` `[0..65535]`: The input 16-bit symbol frequency table (can be NULL).
+/// - `i`: The primary index.
+/// - `threads`: The number of OpenMP threads to use (can be 0 for OpenMP default).
 ///
-/// Returns 0 on success, -1 or -2 on error.
+/// # Returns
+/// 0 if no error occurred, -1 or -2 otherwise.
 pub fn libsais16x64_unbwt_omp(
     t: &[u16],
     u: &mut [u16],
@@ -11617,17 +11549,20 @@ pub fn libsais16x64_unbwt_omp(
     }
 }
 
-/// Reconstructs the original 16-bit string from a given BWT with auxiliary indexes in parallel using OpenMP-style threading.
+/// Constructs the original 16-bit string from a given burrows-wheeler transformed 16-bit string (BWT) with auxiliary indexes in parallel using OpenMP.
 ///
-/// - `t` (`[0..n-1]`): the input 16-bit string.
-/// - `u` (`[0..n-1]`): the output 16-bit string (can alias `t`).
-/// - `a` (`[0..n]`): the temporary array (must have length `n + 1`).
-/// - `freq` (`[0..65535]`): optional input symbol frequency table.
-/// - `r`: sampling rate for the auxiliary indexes (must be a power of two).
-/// - `i` (`[0..(n-1)/r]`): input auxiliary indexes.
-/// - `threads`: number of worker threads (can be 0 for the implementation default).
+/// # Arguments
+/// - `T` `[0..n-1]`: The input 16-bit string.
+/// - `U` `[0..n-1]`: The output 16-bit string (can be T).
+/// - `A` `[0..n]`: The temporary array (NOTE, temporary array must be n + 1 size).
+/// - `n`: The length of the given 16-bit string.
+/// - `freq` `[0..65535]`: The input 16-bit symbol frequency table (can be NULL).
+/// - `r`: The sampling rate for auxiliary indexes (must be power of 2).
+/// - `I` `[0..(n-1)/r]`: The input auxiliary indexes.
+/// - `threads`: The number of OpenMP threads to use (can be 0 for OpenMP default).
 ///
-/// Returns 0 on success, -1 or -2 on error.
+/// # Returns
+/// 0 if no error occurred, -1 or -2 otherwise.
 pub fn libsais16x64_unbwt_aux_omp(
     t: &[u16],
     u: &mut [u16],
@@ -11668,24 +11603,30 @@ pub fn libsais16x64_unbwt_aux_omp(
     }
 }
 
-/// Constructs the permuted longest common prefix array (PLCP) of a given 16-bit string and suffix array.
+/// Constructs the permuted longest common prefix array (PLCP) of a given 16-bit string and a suffix array.
 ///
-/// - `t` (`[0..n-1]`): the input 16-bit string.
-/// - `sa` (`[0..n-1]`): the input suffix array.
-/// - `plcp` (`[0..n-1]`): the output permuted longest common prefix array.
+/// # Arguments
+/// - `T` `[0..n-1]`: The input 16-bit string.
+/// - `SA` `[0..n-1]`: The input suffix array.
+/// - `PLCP` `[0..n-1]`: The output permuted longest common prefix array.
+/// - `n`: The length of the 16-bit string and the suffix array.
 ///
-/// Returns 0 on success, -1 on error.
+/// # Returns
+/// 0 if no error occurred, -1 otherwise.
 pub fn libsais16x64_plcp(t: &[u16], sa: &[SaSint], plcp: &mut [SaSint]) -> SaSint {
     compute_plcp(t, sa, plcp, false)
 }
 
-/// Constructs the PLCP of a given 16-bit string set and generalized suffix array (GSA).
+/// Constructs the permuted longest common prefix array (PLCP) of a given 16-bit string set and a generalized suffix array (GSA).
 ///
-/// - `t` (`[0..n-1]`): the input 16-bit string set using 0 as separators (`t[n-1]` must be 0).
-/// - `sa` (`[0..n-1]`): the input generalized suffix array.
-/// - `plcp` (`[0..n-1]`): the output permuted longest common prefix array.
+/// # Arguments
+/// - `T` `[0..n-1]`: The input 16-bit string set using 0 as separators (T[n-1] must be 0).
+/// - `SA` `[0..n-1]`: The input generalized suffix array.
+/// - `PLCP` `[0..n-1]`: The output permuted longest common prefix array.
+/// - `n`: The length of the string set and the generalized suffix array.
 ///
-/// Returns 0 on success, -1 on error.
+/// # Returns
+/// 0 if no error occurred, -1 otherwise.
 pub fn libsais16x64_plcp_gsa(t: &[u16], sa: &[SaSint], plcp: &mut [SaSint]) -> SaSint {
     if t.last().copied().unwrap_or(0) != 0 {
         -1
@@ -11753,7 +11694,6 @@ fn compute_plcp_from_phi(t: &[u16], plcp: &mut [SaSint], gsa: bool) -> SaSint {
     0
 }
 
-#[allow(dead_code)]
 fn compute_phi_omp(sa: &[SaSint], plcp: &mut [SaSint], n: SaSint, threads: SaSint) -> SaSint {
     let n_usize = n as usize;
     if threads == 1 || n < 65_536 {
@@ -11782,7 +11722,6 @@ fn compute_phi_omp(sa: &[SaSint], plcp: &mut [SaSint], n: SaSint, threads: SaSin
     0
 }
 
-#[allow(dead_code)]
 fn compute_plcp_omp(t: &[u16], plcp: &mut [SaSint], n: SaSint, threads: SaSint) -> SaSint {
     if threads == 1 || n < 65_536 {
         let n = n as usize;
@@ -11847,7 +11786,6 @@ fn compute_plcp_range(
     0
 }
 
-#[allow(dead_code)]
 fn compute_plcp_gsa(
     t: &[u16],
     plcp: &mut [SaSint],
@@ -11878,7 +11816,6 @@ fn compute_plcp_gsa(
     0
 }
 
-#[allow(dead_code)]
 fn compute_plcp_gsa_omp(t: &[u16], plcp: &mut [SaSint], n: SaSint, threads: SaSint) -> SaSint {
     if threads == 1 || n < 65_536 {
         return compute_plcp_gsa(t, plcp, 0, n as isize);
@@ -11900,7 +11837,6 @@ fn compute_plcp_gsa_omp(t: &[u16], plcp: &mut [SaSint], n: SaSint, threads: SaSi
     0
 }
 
-#[allow(dead_code)]
 fn compute_lcp(
     plcp: &[SaSint],
     sa: &[SaSint],
@@ -11918,7 +11854,6 @@ fn compute_lcp(
     0
 }
 
-#[allow(dead_code)]
 fn compute_lcp_omp(
     plcp: &[SaSint],
     sa: &[SaSint],
@@ -11946,13 +11881,16 @@ fn compute_lcp_omp(
     0
 }
 
-/// Constructs the longest common prefix array (LCP) from a PLCP and suffix array.
+/// Constructs the longest common prefix array (LCP) of a given permuted longest common prefix array (PLCP) and a suffix array.
 ///
-/// - `plcp` (`[0..n-1]`): the input permuted longest common prefix array.
-/// - `sa` (`[0..n-1]`): the input suffix array or generalized suffix array (GSA).
-/// - `lcp` (`[0..n-1]`): the output longest common prefix array (can alias `sa`).
+/// # Arguments
+/// - `PLCP` `[0..n-1]`: The input permuted longest common prefix array.
+/// - `SA` `[0..n-1]`: The input suffix array or generalized suffix array (GSA).
+/// - `LCP` `[0..n-1]`: The output longest common prefix array (can be SA).
+/// - `n`: The length of the permuted longest common prefix array and the suffix array.
 ///
-/// Returns 0 on success, -1 on error.
+/// # Returns
+/// 0 if no error occurred, -1 otherwise.
 pub fn libsais16x64_lcp(plcp: &[SaSint], sa: &[SaSint], lcp: &mut [SaSint]) -> SaSint {
     if plcp.len() != sa.len() || lcp.len() != sa.len() {
         return -1;
@@ -11970,14 +11908,17 @@ fn suffix_index(value: SaSint, len: usize) -> Option<usize> {
     usize::try_from(value).ok().filter(|&index| index < len)
 }
 
-/// Constructs the PLCP of a given 16-bit string and suffix array in parallel using OpenMP-style threading.
+/// Constructs the permuted longest common prefix array (PLCP) of a given 16-bit string and a suffix array in parallel using OpenMP.
 ///
-/// - `t` (`[0..n-1]`): the input 16-bit string.
-/// - `sa` (`[0..n-1]`): the input suffix array.
-/// - `plcp` (`[0..n-1]`): the output permuted longest common prefix array.
-/// - `threads`: number of worker threads (can be 0 for the implementation default).
+/// # Arguments
+/// - `T` `[0..n-1]`: The input 16-bit string.
+/// - `SA` `[0..n-1]`: The input suffix array.
+/// - `PLCP` `[0..n-1]`: The output permuted longest common prefix array.
+/// - `n`: The length of the 16-bit string and the suffix array.
+/// - `threads`: The number of OpenMP threads to use (can be 0 for OpenMP default).
 ///
-/// Returns 0 on success, -1 on error.
+/// # Returns
+/// 0 if no error occurred, -1 otherwise.
 pub fn libsais16x64_plcp_omp(
     t: &[u16],
     sa: &[SaSint],
@@ -12005,14 +11946,17 @@ pub fn libsais16x64_plcp_omp(
     compute_plcp_omp(t, plcp, n, threads)
 }
 
-/// Constructs the PLCP of a given 16-bit string set and GSA in parallel using OpenMP-style threading.
+/// Constructs the permuted longest common prefix array (PLCP) of a given 16-bit string set and a generalized suffix array (GSA) in parallel using OpenMP.
 ///
-/// - `t` (`[0..n-1]`): the input 16-bit string set using 0 as separators (`t[n-1]` must be 0).
-/// - `sa` (`[0..n-1]`): the input generalized suffix array.
-/// - `plcp` (`[0..n-1]`): the output permuted longest common prefix array.
-/// - `threads`: number of worker threads (can be 0 for the implementation default).
+/// # Arguments
+/// - `T` `[0..n-1]`: The input 16-bit string set using 0 as separators (T[n-1] must be 0).
+/// - `SA` `[0..n-1]`: The input generalized suffix array.
+/// - `PLCP` `[0..n-1]`: The output permuted longest common prefix array.
+/// - `n`: The length of the string set and the generalized suffix array.
+/// - `threads`: The number of OpenMP threads to use (can be 0 for OpenMP default).
 ///
-/// Returns 0 on success, -1 on error.
+/// # Returns
+/// 0 if no error occurred, -1 otherwise.
 pub fn libsais16x64_plcp_gsa_omp(
     t: &[u16],
     sa: &[SaSint],
@@ -12043,14 +11987,17 @@ pub fn libsais16x64_plcp_gsa_omp(
     compute_plcp_gsa_omp(t, plcp, n, threads)
 }
 
-/// Constructs the LCP from a PLCP and suffix array in parallel using OpenMP-style threading.
+/// Constructs the longest common prefix array (LCP) of a given permuted longest common prefix array (PLCP) and a suffix array in parallel using OpenMP.
 ///
-/// - `plcp` (`[0..n-1]`): the input permuted longest common prefix array.
-/// - `sa` (`[0..n-1]`): the input suffix array or generalized suffix array (GSA).
-/// - `lcp` (`[0..n-1]`): the output longest common prefix array (can alias `sa`).
-/// - `threads`: number of worker threads (can be 0 for the implementation default).
+/// # Arguments
+/// - `PLCP` `[0..n-1]`: The input permuted longest common prefix array.
+/// - `SA` `[0..n-1]`: The input suffix array or generalized suffix array (GSA).
+/// - `LCP` `[0..n-1]`: The output longest common prefix array (can be SA).
+/// - `n`: The length of the permuted longest common prefix array and the suffix array.
+/// - `threads`: The number of OpenMP threads to use (can be 0 for OpenMP default).
 ///
-/// Returns 0 on success, -1 on error.
+/// # Returns
+/// 0 if no error occurred, -1 otherwise.
 pub fn libsais16x64_lcp_omp(
     plcp: &[SaSint],
     sa: &[SaSint],
