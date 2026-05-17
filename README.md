@@ -4,7 +4,7 @@
 
 This crate currently tracks upstream `libsais` version `2.10.4`. 
 
-* 2026-05-15: OpenMP/threading audit landed. Every `*_omp` helper across all four modules (`lib.rs`, `libsais64.rs`, `libsais16.rs`, `libsais16x64.rs`) that previously walked the OMP partition with a sequential `for omp_thread_num in 0..n` loop now dispatches through `rayon::par_iter`, with disjoint per-thread `sa`/`workspace`/`cache` regions shared via an internal `SyncMutPtr` helper that upholds the same disjoint-write invariant OpenMP relies on in upstream C. The `run_rayon_with_threads` helper (lib.rs:43) now actually installs a rayon pool sized to `threads`, and detects nested invocation via `rayon::current_thread_index()` to reuse the ambient pool and avoid the futex deadlock previously seen by downstream callers running libsais inside their own rayon pool. Differential tests against upstream C are unchanged at 637 passing; new regression tests cover `threads=2`/`threads=4` SA equality and "called from inside a rayon worker" for both the 32-bit and 64-bit paths.
+* 2026-05-17: parallelization audit, work on 64bit. Appears to be functional
 * 2026-05-15: Feature complete and seemingly tested
 * 2026-04-24: Appears to be a functional translation on par with speed. More testing needed, compare with original version before you consider swapping it out
 
