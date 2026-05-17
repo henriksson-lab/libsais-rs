@@ -14646,25 +14646,29 @@ pub fn unbwt_decode_omp(
         usize::try_from(blocks).expect("blocks must be non-negative") % max_threads;
     let r_usize = usize::try_from(r).expect("r must be non-negative");
 
-    for thread in 0..max_threads {
-        let block_size = block_stride + usize::from(thread < block_remainder);
-        let block_start = block_stride * thread + thread.min(block_remainder);
-        unbwt_decode(
-            &mut u[r_usize * block_start..],
-            p,
-            n,
-            r,
-            &i[block_start..],
-            bucket2,
-            fastbits,
-            block_size as FastSint,
-            if thread + 1 < max_threads {
-                r_usize
-            } else {
-                remainder
-            },
-        );
-    }
+    let u_ptr = SyncMutPtr::new(u);
+    run_rayon_with_threads(max_threads, || {
+        (0..max_threads).into_par_iter().for_each(|thread| {
+            let block_size = block_stride + usize::from(thread < block_remainder);
+            let block_start = block_stride * thread + thread.min(block_remainder);
+            let u = unsafe { u_ptr.as_slice() };
+            unbwt_decode(
+                &mut u[r_usize * block_start..],
+                p,
+                n,
+                r,
+                &i[block_start..],
+                bucket2,
+                fastbits,
+                block_size as FastSint,
+                if thread + 1 < max_threads {
+                    r_usize
+                } else {
+                    remainder
+                },
+            );
+        });
+    });
     u[usize::try_from(n).expect("n must be non-negative") - 1] = lastc;
 }
 

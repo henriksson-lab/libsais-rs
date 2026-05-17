@@ -11153,26 +11153,30 @@ fn unbwt_decode_omp(
     let shift = unbwt_shift(n);
     let block_stride = blocks / num_threads;
     let block_remainder = blocks % num_threads;
-    for thread in 0..num_threads {
-        let block_count = block_stride + usize::from(thread < block_remainder);
-        let block_start = block_stride * thread + thread.min(block_remainder);
-        let tail = if thread + 1 < num_threads {
-            r
-        } else {
-            remainder
-        };
-        unbwt_decode_blocks(
-            &mut u[r * block_start..],
-            p,
-            r,
-            &i[block_start..],
-            bucket2,
-            fastbits,
-            shift,
-            block_count,
-            tail,
-        );
-    }
+    let u_ptr = SyncMutPtr::new(u);
+    run_rayon_with_threads(num_threads, || {
+        (0..num_threads).into_par_iter().for_each(|thread| {
+            let block_count = block_stride + usize::from(thread < block_remainder);
+            let block_start = block_stride * thread + thread.min(block_remainder);
+            let tail = if thread + 1 < num_threads {
+                r
+            } else {
+                remainder
+            };
+            let u = unsafe { u_ptr.as_slice() };
+            unbwt_decode_blocks(
+                &mut u[r * block_start..],
+                p,
+                r,
+                &i[block_start..],
+                bucket2,
+                fastbits,
+                shift,
+                block_count,
+                tail,
+            );
+        });
+    });
 }
 
 fn unbwt_decode_lanes<const LANES: usize>(
