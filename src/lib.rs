@@ -30,6 +30,36 @@ pub const SAINT_MIN: SaSint = i32::MIN;
 pub const ALPHABET_SIZE: usize = 1usize << 8;
 pub const UNBWT_FASTBITS: usize = 17;
 
+/// Software prefetch for read. Mirrors C `__builtin_prefetch(p, 0, 3)` /
+/// `_mm_prefetch(p, _MM_HINT_T0)`. Hint-only: passing a pointer outside an
+/// allocation (or null) is safe, the CPU just ignores the hint.
+#[inline(always)]
+pub(crate) fn libsais_prefetchr<T>(ptr: *const T) {
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        std::arch::x86_64::_mm_prefetch(ptr as *const i8, std::arch::x86_64::_MM_HINT_T0);
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        let _ = ptr;
+    }
+}
+
+/// Software prefetch for write. Same backing as `_mm_prefetch(_MM_HINT_T0)`
+/// since `prefetchw` requires an extension not always present; the T0 hint is
+/// adequate for the libsais usage and keeps behavior portable across CPUs.
+#[inline(always)]
+pub(crate) fn libsais_prefetchw<T>(ptr: *const T) {
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        std::arch::x86_64::_mm_prefetch(ptr as *const i8, std::arch::x86_64::_MM_HINT_T0);
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        let _ = ptr;
+    }
+}
+
 pub const SUFFIX_GROUP_BIT: u32 = SAINT_BIT - 1;
 pub const SUFFIX_GROUP_MARKER: SaSint = 1_i32 << (SUFFIX_GROUP_BIT - 1);
 
@@ -2974,7 +3004,19 @@ pub fn partial_sorting_scan_left_to_right_8u(
         omp_block_start
     };
 
+    let sa_ptr = sa.as_ptr();
+    let t_ptr = t.as_ptr();
+    let prefetch_distance_us = prefetch_distance as usize;
     while i < j {
+        let i_us = i as usize;
+        libsais_prefetchr(sa_ptr.wrapping_add(i_us + 2 * prefetch_distance_us));
+        let pf0 = (sa[i_us + prefetch_distance_us] & SAINT_MAX) as usize;
+        libsais_prefetchr(t_ptr.wrapping_add(pf0).wrapping_sub(1));
+        libsais_prefetchr(t_ptr.wrapping_add(pf0).wrapping_sub(2));
+        let pf1 = (sa[i_us + prefetch_distance_us + 1] & SAINT_MAX) as usize;
+        libsais_prefetchr(t_ptr.wrapping_add(pf1).wrapping_sub(1));
+        libsais_prefetchr(t_ptr.wrapping_add(pf1).wrapping_sub(2));
+
         let mut p0 = sa[i as usize];
         d += SaSint::from(p0 < 0);
         p0 &= SAINT_MAX;
@@ -3129,7 +3171,26 @@ pub fn partial_sorting_scan_left_to_right_32s_6k(
 
     let mut i = omp_block_start;
     let mut j = omp_block_start + omp_block_size - 2 * prefetch_distance - 1;
+    let sa_ptr = sa.as_ptr();
+    let t_ptr = t.as_ptr();
+    let buckets_ptr = buckets.as_ptr();
+    let prefetch_distance_us = prefetch_distance as usize;
     while i < j {
+        let i_us = i as usize;
+        libsais_prefetchr(sa_ptr.wrapping_add(i_us + 3 * prefetch_distance_us));
+        let pa = (sa[i_us + 2 * prefetch_distance_us] & SAINT_MAX) as usize;
+        libsais_prefetchr(t_ptr.wrapping_add(pa).wrapping_sub(1));
+        libsais_prefetchr(t_ptr.wrapping_add(pa).wrapping_sub(2));
+        let pb = (sa[i_us + 2 * prefetch_distance_us + 1] & SAINT_MAX) as usize;
+        libsais_prefetchr(t_ptr.wrapping_add(pb).wrapping_sub(1));
+        libsais_prefetchr(t_ptr.wrapping_add(pb).wrapping_sub(2));
+        let pc = (sa[i_us + prefetch_distance_us] & SAINT_MAX) as usize;
+        let vc = buckets_index4(t[pc - usize::from(pc > 0)] as usize, 0);
+        libsais_prefetchw(buckets_ptr.wrapping_add(vc));
+        let pd = (sa[i_us + prefetch_distance_us + 1] & SAINT_MAX) as usize;
+        let vd = buckets_index4(t[pd - usize::from(pd > 0)] as usize, 0);
+        libsais_prefetchw(buckets_ptr.wrapping_add(vd));
+
         let mut p0 = sa[i as usize];
         d += SaSint::from(p0 < 0);
         p0 &= SAINT_MAX;
@@ -3968,7 +4029,17 @@ pub fn partial_sorting_scan_right_to_left_8u(
     let mut i = start + size - 1;
     let mut j = start + prefetch_distance + 1;
 
+    let sa_ptr = sa.as_ptr();
+    let t_ptr = t.as_ptr();
     while i >= j {
+        libsais_prefetchr(sa_ptr.wrapping_add(i.wrapping_sub(2 * prefetch_distance)));
+        let pf0 = (sa[i - prefetch_distance] & SAINT_MAX) as usize;
+        libsais_prefetchr(t_ptr.wrapping_add(pf0).wrapping_sub(1));
+        libsais_prefetchr(t_ptr.wrapping_add(pf0).wrapping_sub(2));
+        let pf1 = (sa[i - prefetch_distance - 1] & SAINT_MAX) as usize;
+        libsais_prefetchr(t_ptr.wrapping_add(pf1).wrapping_sub(1));
+        libsais_prefetchr(t_ptr.wrapping_add(pf1).wrapping_sub(2));
+
         let mut p0 = sa[i];
         d += SaSint::from(p0 < 0);
         p0 &= SAINT_MAX;
@@ -4651,7 +4722,26 @@ pub fn partial_sorting_scan_right_to_left_32s_6k(
     let mut i = omp_block_start + omp_block_size - 1;
     let mut j = omp_block_start + 2 * prefetch_distance + 1;
 
+    let sa_ptr = sa.as_ptr();
+    let t_ptr = t.as_ptr();
+    let buckets_ptr = buckets.as_ptr();
+    let prefetch_distance_us = prefetch_distance as usize;
     while i >= j {
+        let i_us = i as usize;
+        libsais_prefetchr(sa_ptr.wrapping_add(i_us.wrapping_sub(3 * prefetch_distance_us)));
+        let pa = (sa[i_us - 2 * prefetch_distance_us] & SAINT_MAX) as usize;
+        libsais_prefetchr(t_ptr.wrapping_add(pa).wrapping_sub(1));
+        libsais_prefetchr(t_ptr.wrapping_add(pa).wrapping_sub(2));
+        let pb = (sa[i_us - 2 * prefetch_distance_us - 1] & SAINT_MAX) as usize;
+        libsais_prefetchr(t_ptr.wrapping_add(pb).wrapping_sub(1));
+        libsais_prefetchr(t_ptr.wrapping_add(pb).wrapping_sub(2));
+        let pc = (sa[i_us - prefetch_distance_us] & SAINT_MAX) as usize;
+        let vc = buckets_index4(t[pc - usize::from(pc > 0)] as usize, 0);
+        libsais_prefetchw(buckets_ptr.wrapping_add(vc));
+        let pd = (sa[i_us - prefetch_distance_us - 1] & SAINT_MAX) as usize;
+        let vd = buckets_index4(t[pd - usize::from(pd > 0)] as usize, 0);
+        libsais_prefetchw(buckets_ptr.wrapping_add(vd));
+
         let mut p0 = sa[i as usize];
         d += SaSint::from(p0 < 0);
         p0 &= SAINT_MAX;
@@ -7744,7 +7834,19 @@ pub fn final_sorting_scan_left_to_right_8u(
     } else {
         start
     };
+    let sa_ptr = sa.as_ptr();
+    let t_ptr = t.as_ptr();
     while i < j {
+        libsais_prefetchw(sa_ptr.wrapping_add(i + 2 * prefetch_distance));
+        let s0 = sa[i + prefetch_distance];
+        let ts0 = if s0 > 0 { s0 as usize } else { 2 };
+        libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(1));
+        libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(2));
+        let s1 = sa[i + prefetch_distance + 1];
+        let ts1 = if s1 > 0 { s1 as usize } else { 2 };
+        libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(1));
+        libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(2));
+
         let mut p0 = sa[i];
         sa[i] = p0 ^ SAINT_MIN;
         if p0 > 0 {
@@ -7809,7 +7911,31 @@ pub fn final_sorting_scan_left_to_right_32s(
     let mut i = omp_block_start;
     let mut j = omp_block_start + omp_block_size - 2 * prefetch_distance - 1;
 
+    let sa_ptr = sa.as_ptr();
+    let t_ptr = t.as_ptr();
+    let prefetch_distance_us = prefetch_distance as usize;
     while i < j {
+        let i_us = i as usize;
+        libsais_prefetchw(sa_ptr.wrapping_add(i_us + 3 * prefetch_distance_us));
+        let s0 = sa[i_us + 2 * prefetch_distance_us];
+        let ts0 = if s0 > 0 { s0 as usize } else { 1 };
+        libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(1));
+        let s1 = sa[i_us + 2 * prefetch_distance_us + 1];
+        let ts1 = if s1 > 0 { s1 as usize } else { 1 };
+        libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(1));
+        let s2 = sa[i_us + prefetch_distance_us];
+        if s2 > 0 {
+            let s2u = s2 as usize;
+            libsais_prefetchw(induction_bucket.as_ptr().wrapping_add(t[s2u - 1] as usize));
+            libsais_prefetchr(t_ptr.wrapping_add(s2u).wrapping_sub(2));
+        }
+        let s3 = sa[i_us + prefetch_distance_us + 1];
+        if s3 > 0 {
+            let s3u = s3 as usize;
+            libsais_prefetchw(induction_bucket.as_ptr().wrapping_add(t[s3u - 1] as usize));
+            libsais_prefetchr(t_ptr.wrapping_add(s3u).wrapping_sub(2));
+        }
+
         let i0 = i as usize;
         let mut p0 = sa[i0];
         sa[i0] = p0 ^ SAINT_MIN;
@@ -7917,10 +8043,59 @@ pub fn final_sorting_scan_left_to_right_8u_block_prepare(
     let k_usize = usize::try_from(k).expect("k must be non-negative");
     buckets[..k_usize].fill(0);
 
+    let prefetch_distance = 64usize;
     let start = usize::try_from(omp_block_start).expect("omp_block_start must be non-negative");
     let size = usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
     let mut count = 0usize;
-    for i in start..start + size {
+    let mut i = start;
+    let end = start + size;
+    let unroll_end = if size > prefetch_distance + 1 {
+        end - (prefetch_distance + 1)
+    } else {
+        start
+    };
+    let sa_ptr = sa.as_ptr();
+    let t_ptr = t.as_ptr();
+    while i < unroll_end {
+        libsais_prefetchw(sa_ptr.wrapping_add(i + 2 * prefetch_distance));
+        let s0 = sa[i + prefetch_distance];
+        let ts0 = if s0 > 0 { s0 as usize } else { 2 };
+        libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(1));
+        libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(2));
+        let s1 = sa[i + prefetch_distance + 1];
+        let ts1 = if s1 > 0 { s1 as usize } else { 2 };
+        libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(1));
+        libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(2));
+
+        let mut p0 = sa[i];
+        sa[i] = p0 ^ SAINT_MIN;
+        if p0 > 0 {
+            p0 -= 1;
+            let p0u = p0 as usize;
+            let symbol = t[p0u] as usize;
+            buckets[symbol] += 1;
+            cache[count].symbol = symbol as SaSint;
+            cache[count].index = p0
+                | ((usize::from(t[p0u - usize::from(p0 > 0)] < t[p0u]) as SaSint)
+                    << (SAINT_BIT - 1));
+            count += 1;
+        }
+        let mut p1 = sa[i + 1];
+        sa[i + 1] = p1 ^ SAINT_MIN;
+        if p1 > 0 {
+            p1 -= 1;
+            let p1u = p1 as usize;
+            let symbol = t[p1u] as usize;
+            buckets[symbol] += 1;
+            cache[count].symbol = symbol as SaSint;
+            cache[count].index = p1
+                | ((usize::from(t[p1u - usize::from(p1 > 0)] < t[p1u]) as SaSint)
+                    << (SAINT_BIT - 1));
+            count += 1;
+        }
+        i += 2;
+    }
+    while i < end {
         let mut p = sa[i];
         sa[i] = p ^ SAINT_MIN;
         if p > 0 {
@@ -7934,6 +8109,7 @@ pub fn final_sorting_scan_left_to_right_8u_block_prepare(
                     << (SAINT_BIT - 1));
             count += 1;
         }
+        i += 1;
     }
 
     count as FastSint
@@ -8847,7 +9023,19 @@ pub fn final_sorting_scan_right_to_left_8u(
     let mut i = start + size - 1;
     let mut j = start + prefetch_distance + 1;
 
+    let sa_ptr = sa.as_ptr();
+    let t_ptr = t.as_ptr();
     while i >= j {
+        libsais_prefetchw(sa_ptr.wrapping_add(i.wrapping_sub(2 * prefetch_distance)));
+        let s0 = sa[i - prefetch_distance];
+        let ts0 = if s0 > 0 { s0 as usize } else { 2 };
+        libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(1));
+        libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(2));
+        let s1 = sa[i - prefetch_distance - 1];
+        let ts1 = if s1 > 0 { s1 as usize } else { 2 };
+        libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(1));
+        libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(2));
+
         let mut p0 = sa[i];
         sa[i] = p0 & SAINT_MAX;
         if p0 > 0 {
@@ -8954,7 +9142,31 @@ pub fn final_sorting_scan_right_to_left_32s(
     let mut i = omp_block_start + omp_block_size - 1;
     let mut j = omp_block_start + 2 * prefetch_distance + 1;
 
+    let sa_ptr = sa.as_ptr();
+    let t_ptr = t.as_ptr();
+    let prefetch_distance_us = prefetch_distance as usize;
     while i >= j {
+        let i_us = i as usize;
+        libsais_prefetchw(sa_ptr.wrapping_add(i_us.wrapping_sub(3 * prefetch_distance_us)));
+        let s0 = sa[i_us - 2 * prefetch_distance_us];
+        let ts0 = if s0 > 0 { s0 as usize } else { 1 };
+        libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(1));
+        let s1 = sa[i_us - 2 * prefetch_distance_us - 1];
+        let ts1 = if s1 > 0 { s1 as usize } else { 1 };
+        libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(1));
+        let s2 = sa[i_us - prefetch_distance_us];
+        if s2 > 0 {
+            let s2u = s2 as usize;
+            libsais_prefetchw(induction_bucket.as_ptr().wrapping_add(t[s2u - 1] as usize));
+            libsais_prefetchr(t_ptr.wrapping_add(s2u).wrapping_sub(2));
+        }
+        let s3 = sa[i_us - prefetch_distance_us - 1];
+        if s3 > 0 {
+            let s3u = s3 as usize;
+            libsais_prefetchw(induction_bucket.as_ptr().wrapping_add(t[s3u - 1] as usize));
+            libsais_prefetchr(t_ptr.wrapping_add(s3u).wrapping_sub(2));
+        }
+
         let i0 = i as usize;
         let mut p0 = sa[i0];
         sa[i0] = p0 & SAINT_MAX;
@@ -9100,21 +9312,35 @@ pub fn final_sorting_scan_right_to_left_8u_block_prepare(
     let k_usize = usize::try_from(k).expect("k must be non-negative");
     buckets[..k_usize].fill(0);
 
+    let prefetch_distance = 64usize;
     let start =
         usize::try_from(omp_block_start).expect("omp_block_start must be non-negative") as FastSint;
+    let start_us = start as usize;
     let mut i = omp_block_start + omp_block_size - 1;
-    let mut j = start + 1;
     let mut count = 0usize;
 
-    while i >= j {
-        let i0 = usize::try_from(i).expect("loop index must be non-negative");
-        let i1 = usize::try_from(i - 1).expect("loop index must be non-negative");
+    let sa_ptr = sa.as_ptr();
+    let t_ptr = t.as_ptr();
+    let j_pf = (start_us + prefetch_distance + 1) as FastSint;
+    while i >= j_pf {
+        let i0 = i as usize;
+        let i1 = (i - 1) as usize;
+
+        libsais_prefetchw(sa_ptr.wrapping_add(i0.wrapping_sub(2 * prefetch_distance)));
+        let s0 = sa[i0 - prefetch_distance];
+        let ts0 = if s0 > 0 { s0 as usize } else { 2 };
+        libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(1));
+        libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(2));
+        let s1 = sa[i0 - prefetch_distance - 1];
+        let ts1 = if s1 > 0 { s1 as usize } else { 2 };
+        libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(1));
+        libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(2));
 
         let mut p0 = sa[i0];
         sa[i0] = p0 & SAINT_MAX;
         if p0 > 0 {
             p0 -= 1;
-            let p0_usize = usize::try_from(p0).expect("suffix index must be non-negative");
+            let p0_usize = p0 as usize;
             let c0 = t[p0_usize] as SaSint;
             buckets[c0 as usize] += 1;
             cache[count].symbol = c0;
@@ -9128,7 +9354,7 @@ pub fn final_sorting_scan_right_to_left_8u_block_prepare(
         sa[i1] = p1 & SAINT_MAX;
         if p1 > 0 {
             p1 -= 1;
-            let p1_usize = usize::try_from(p1).expect("suffix index must be non-negative");
+            let p1_usize = p1 as usize;
             let c1 = t[p1_usize] as SaSint;
             buckets[c1 as usize] += 1;
             cache[count].symbol = c1;
@@ -9141,14 +9367,13 @@ pub fn final_sorting_scan_right_to_left_8u_block_prepare(
         i -= 2;
     }
 
-    j -= 1;
-    while i >= j {
-        let idx = usize::try_from(i).expect("loop index must be non-negative");
+    while i >= start {
+        let idx = i as usize;
         let mut p = sa[idx];
         sa[idx] = p & SAINT_MAX;
         if p > 0 {
             p -= 1;
-            let p_usize = usize::try_from(p).expect("suffix index must be non-negative");
+            let p_usize = p as usize;
             let c = t[p_usize] as SaSint;
             buckets[c as usize] += 1;
             cache[count].symbol = c;
@@ -9158,6 +9383,9 @@ pub fn final_sorting_scan_right_to_left_8u_block_prepare(
             count += 1;
         }
 
+        if i == 0 {
+            break;
+        }
         i -= 1;
     }
 
