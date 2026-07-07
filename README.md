@@ -102,18 +102,18 @@ The repository includes [`examples/bench_vs_c.rs`](examples/bench_vs_c.rs), whic
 Latest local snapshot:
 
 ```text
-README.md                     len=    6797 iter=200  rust=   0.284 ms  c=   0.295 ms  ratio= 0.96x
-libsais/src/libsais.c         len=  388397 iter= 40  rust=  11.770 ms  c=  11.213 ms  ratio= 1.05x
-generated/mixed-1MiB          len= 1048576 iter= 10  rust=  40.196 ms  c=  38.582 ms  ratio= 1.04x
+README.md                            len=    8756 iter=200  rust=   0.768 ms  c=   0.742 ms  ratio= 1.04x  rust_rss=    2560 KiB  c_rss=    2240 KiB  rss_ratio= 1.14x
+libsais/src/libsais.c                len=  388397 iter= 40  rust=  27.798 ms  c=  18.359 ms  ratio= 1.51x  rust_rss=    4480 KiB  c_rss=    4160 KiB  rss_ratio= 1.08x
+generated/mixed-1MiB                 len= 1048576 iter= 10  rust=  87.024 ms  c=  57.586 ms  ratio= 1.51x  rust_rss=    8320 KiB  c_rss=    7040 KiB  rss_ratio= 1.18x
 ```
 
 Command used:
 
 ```bash
-cargo run --release --example bench_vs_c
+cargo run --release --features upstream-c --example bench_vs_c
 ```
 
-These numbers are a local snapshot, not a stability guarantee. Repeated runs can move by a few percent depending on machine, compiler, and system load.
+These numbers are a local snapshot, not a stability guarantee. Repeated runs can move by a few percent depending on machine, compiler, and system load. RSS is measured as Linux `VmHWM` from separate child processes for the Rust and C implementations.
 
 ## Upstream Sources
 
