@@ -4,6 +4,7 @@
 
 This crate currently tracks upstream `libsais` version `2.10.4`. 
 
+* 2026-08-01: Added CI
 * 2026-05-17: parallelization audit, work on 64bit. Appears to be functional
 * 2026-05-15: Feature complete and seemingly tested
 * 2026-04-24: Appears to be a functional translation on par with speed. More testing needed, compare with original version before you consider swapping it out
@@ -97,15 +98,25 @@ Default (no `upstream-c`) end users do not need GCC, OpenMP, or any C source —
 
 ## Performance
 
+Original benchmark baseline: the upstream C source used through the
+`upstream-c` feature is commit `b6e52ef33fe1` (`git describe`:
+`v2.10.4-1-gb6e52ef`).
+
 The repository includes [`examples/bench_vs_c.rs`](examples/bench_vs_c.rs), which compares the current Rust translation against the upstream C implementation in a single-threaded suffix-array-construction configuration. Requires the `upstream-c` feature (see prerequisites above).
 
-Latest local snapshot:
+Latest local snapshot, rerun 2026-07-14 at Rust repo commit
+`7ef8966377ab23341ac7a967f614034ca18b1017`:
 
 ```text
-README.md                            len=    8756 iter=200  rust=   0.768 ms  c=   0.742 ms  ratio= 1.04x  rust_rss=    2560 KiB  c_rss=    2240 KiB  rss_ratio= 1.14x
-libsais/src/libsais.c                len=  388397 iter= 40  rust=  27.798 ms  c=  18.359 ms  ratio= 1.51x  rust_rss=    4480 KiB  c_rss=    4160 KiB  rss_ratio= 1.08x
-generated/mixed-1MiB                 len= 1048576 iter= 10  rust=  87.024 ms  c=  57.586 ms  ratio= 1.51x  rust_rss=    8320 KiB  c_rss=    7040 KiB  rss_ratio= 1.18x
+README.md                            len=    8911 iter=200  rust=   0.351 ms  c=   0.286 ms  ratio= 1.23x  rust_rss=    2560 KiB  c_rss=    2240 KiB  rss_ratio= 1.14x
+libsais/src/libsais.c                len=  388397 iter= 40  rust=  10.486 ms  c=   8.316 ms  ratio= 1.26x  rust_rss=    4800 KiB  c_rss=    4160 KiB  rss_ratio= 1.15x
+generated/mixed-1MiB                 len= 1048576 iter= 10  rust=  33.932 ms  c=  28.836 ms  ratio= 1.18x  rust_rss=    8320 KiB  c_rss=    7360 KiB  rss_ratio= 1.13x
 ```
+
+For the rustification roll-up, the raw rows are tracked in
+`pres_rustification/benchmarks/libsais.tsv`; the aggregate uses C/Rust time
+(speedup 0.82x) and Rust/C RSS ratio (1.14x), while this README table prints
+Rust/C time as `ratio`.
 
 Command used:
 
