@@ -1,6 +1,6 @@
 [package]
 name = "libsais-rs"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
 license = "Apache-2.0"
 description = "Rust translation of libsais for suffix array construction and related transforms"
@@ -12,6 +12,7 @@ keywords = ["suffix-array", "bwt", "text", "bioinformatics"]
 categories = ["algorithms", "science"]
 include = [
     "/Cargo.toml",
+    "/CHANGELOG.md",
     "/README.md",
     "/LICENSE",
     "/build.rs",
@@ -38,6 +39,10 @@ default = []
 # has `./libsais/` populated (see README). Requires GCC with OpenMP
 # (libgomp); other toolchains are not supported.
 upstream-c = ["dep:cc"]
+# Developer-only: accumulate per-phase wall-clock time and rayon pool build
+# counts, printed via `libsais_rs::profile::report()`. Adds timing overhead;
+# never enable it in a release dependency.
+profile = []
 
 [dependencies]
 rayon = "1.10"
