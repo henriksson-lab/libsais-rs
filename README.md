@@ -96,6 +96,58 @@ Practical consequence: the feature only works from a source checkout of this cra
 
 Default (no `upstream-c`) end users do not need GCC, OpenMP, or any C source — the default build is pure Rust + rayon.
 
+## Threading
+
+The `*_omp` entry points take a `threads` argument mirroring the OpenMP
+`num_threads` clause upstream. The rule, since 0.2.3:
+
+* `threads >= 1` gives exactly that many rayon workers. This holds even when you
+  call from inside your own rayon pool: the requested count wins, and a pool of
+  that size is entered for the duration of the call. An ambient pool that
+  already has exactly that many workers is reused rather than rebuilt.
+* `threads == 0` uses `std::thread::available_parallelism()`.
+* `threads < 0` is an error (`-1`).
+
+**Behaviour change in 0.2.3.** Before 0.2.3 a call made from inside an existing
+rayon pool silently ignored `threads` and used the ambient pool instead. If you
+are a downstream tool that already builds its own pool, you were getting the
+ambient thread count rather than the one you asked for; you now get what you
+asked for.
+
+The pool is entered once per top-level call, and pools are cached per thread
+count, so neither a large single construction nor many small ones pay per-region
+or per-call setup.
+
+## Parallel scaling
+
+80.2 MB of DNA (hg38 chr21 forward ++ reverse complement, one byte per base over
+`0..=3`, prepared by [`tools/prepare_chr21.sh`](tools/prepare_chr21.sh)). Apple
+Mac16,5, arm64, 16 cores, macOS Darwin 25.6.0, `--release`. Median of three
+runs; every run verifies the parallel suffix array against the serial one
+produced in the same process.
+
+| path | serial | 4 threads | 8 threads | 16 threads |
+|---|---|---|---|---|
+| 0.2.2 | 1.94 s | 1.77 s | 1.68 s | 1.71 s |
+| after #1 | 2.01 s | 0.93 s | 0.71 s | 0.73 s |
+| 0.2.3 | 1.31 s | 0.84 s | **0.67 s** | 0.69 s |
+| upstream C 2.10.4 | 1.21 s | 0.72 s | 0.60 s | 0.59 s |
+
+Reproduce with:
+
+```bash
+tools/prepare_chr21.sh /tmp/libsais-bench
+cargo run --release --example scaling_report -- /tmp/libsais-bench/chr21.0123 4 8 16
+```
+
+Add `--features upstream-c` for the C rows and `--features profile` for a
+per-phase breakdown.
+
+Two caveats. The single-threaded gain is arm64-specific: it comes from restoring
+software prefetches that were only ever emitted on x86_64, so on x86_64 that
+path was already correct and this changes nothing there. And 16 threads is no
+faster than 8 on this machine, which has 12 performance and 4 efficiency cores.
+
 ## Performance
 
 Original benchmark baseline: the upstream C source used through the
