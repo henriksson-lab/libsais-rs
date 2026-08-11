@@ -20934,3 +20934,154 @@ mod tests {
         assert!(results.iter().all(|&rc| rc == 0));
     }
 }
+/// Thread-count identity and pool-nesting tests for the `*_omp` entry points.
+///
+/// Deliberately gated on `test` alone, not on `upstream-c`: these check the
+/// parallel paths against this crate's own serial paths, so they must stay
+/// runnable on a machine with no C toolchain.
+#[cfg(test)]
+mod omp_scaling_tests {
+    /// Repetitive small-alphabet text: the case libsais is built for, and the
+    /// case where a mismerged per-thread bucket actually shows up.
+    fn dna_like(n: usize, seed: u64) -> Vec<u8> {
+        let mut state = seed | 1;
+        (0..n)
+            .map(|i| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                // Long exact repeats every so often, which is what drives the
+                // deeper recursion levels.
+                if (i / 4096) % 3 == 0 {
+                    (i % 4) as u8
+                } else {
+                    (state >> 33) as u8 & 3
+                }
+            })
+            .collect()
+    }
+
+    const THREAD_COUNTS: [i32; 3] = [4, 8, 16];
+
+    #[test]
+    fn libsais_omp_thread_sweep_matches_single_thread_on_large_input() {
+        let text = dna_like(4_000_000, 0x2545_F491_4F6C_DD1D);
+        let mut expected = vec![0i32; text.len()];
+        assert_eq!(crate::libsais(&text, &mut expected, 0, None), 0);
+
+        for threads in THREAD_COUNTS {
+            let mut sa = vec![0i32; text.len()];
+            assert_eq!(crate::libsais_omp(&text, &mut sa, 0, None, threads), 0);
+            assert_eq!(sa, expected, "libsais_omp diverged at {threads} threads");
+        }
+    }
+
+    #[test]
+    fn libsais64_omp_thread_sweep_matches_single_thread_on_large_input() {
+        let text = dna_like(4_000_000, 0x9E37_79B9_7F4A_7C15);
+        let mut expected = vec![0i64; text.len()];
+        assert_eq!(crate::libsais64::libsais64(&text, &mut expected, 0, None), 0);
+
+        for threads in THREAD_COUNTS {
+            let mut sa = vec![0i64; text.len()];
+            assert_eq!(
+                crate::libsais64::libsais64_omp(&text, &mut sa, 0, None, threads as i64),
+                0
+            );
+            assert_eq!(sa, expected, "libsais64_omp diverged at {threads} threads");
+        }
+    }
+
+    /// Full-scale identity check on a real 10 to 100 MB genome.
+    ///
+    /// Ignored by default: it needs an input prepared by
+    /// `tools/prepare_chr21.sh` and pointed at by `LIBSAIS_BENCH_INPUT`. Skips
+    /// cleanly when absent so `cargo test -- --ignored` still runs elsewhere.
+    #[test]
+    #[ignore = "needs LIBSAIS_BENCH_INPUT, see tools/prepare_chr21.sh"]
+    fn libsais64_omp_thread_sweep_matches_single_thread_on_genome_scale_input() {
+        let Ok(path) = std::env::var("LIBSAIS_BENCH_INPUT") else {
+            eprintln!("LIBSAIS_BENCH_INPUT unset, skipping");
+            return;
+        };
+        let Ok(text) = std::fs::read(&path) else {
+            eprintln!("{path} unreadable, skipping");
+            return;
+        };
+        assert!(
+            text.len() >= 10_000_000,
+            "genome-scale input must be at least 10 MB, got {}",
+            text.len()
+        );
+
+        let mut expected = vec![0i64; text.len()];
+        assert_eq!(crate::libsais64::libsais64(&text, &mut expected, 0, None), 0);
+
+        for threads in THREAD_COUNTS {
+            let mut sa = vec![0i64; text.len()];
+            assert_eq!(
+                crate::libsais64::libsais64_omp(&text, &mut sa, 0, None, threads as i64),
+                0
+            );
+            assert_eq!(sa, expected, "diverged at {threads} threads on {path}");
+        }
+    }
+
+    /// The requested thread count must win over an ambient pool, and installing
+    /// into a foreign pool must not deadlock at any outer size.
+    #[test]
+    fn omp_honours_requested_threads_inside_a_foreign_pool() {
+        for outer_threads in [1usize, 2, 16] {
+            let outer = rayon::ThreadPoolBuilder::new()
+                .num_threads(outer_threads)
+                .build()
+                .expect("outer pool must build");
+            for requested in [4usize, 8, 16] {
+                let observed =
+                    outer.install(|| crate::install_pool(requested, rayon::current_num_threads));
+                assert_eq!(
+                    observed, requested,
+                    "outer={outer_threads} requested={requested}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn install_pool_reuses_an_ambient_pool_of_matching_size() {
+        let outer = rayon::ThreadPoolBuilder::new()
+            .num_threads(4)
+            .build()
+            .expect("outer pool must build");
+        let (inner_id, outer_id) = outer.install(|| {
+            let outer_id = rayon::current_thread_index();
+            let inner_id = crate::install_pool(4, rayon::current_thread_index);
+            (inner_id, outer_id)
+        });
+        assert_eq!(
+            inner_id, outer_id,
+            "a matching ambient pool must be reused, not rebuilt"
+        );
+    }
+
+    #[test]
+    fn libsais_omp_matches_serial_when_called_from_inside_a_rayon_pool() {
+        let text = dna_like(400_000, 0xDEAD_BEEF_CAFE_1234);
+        let mut expected = vec![0i32; text.len()];
+        assert_eq!(crate::libsais(&text, &mut expected, 0, None), 0);
+
+        for outer_threads in [1usize, 2, 16] {
+            let outer = rayon::ThreadPoolBuilder::new()
+                .num_threads(outer_threads)
+                .build()
+                .expect("outer pool must build");
+            for threads in THREAD_COUNTS {
+                let mut sa = vec![0i32; text.len()];
+                let rc =
+                    outer.install(|| crate::libsais_omp(&text, &mut sa, 0, None, threads));
+                assert_eq!(rc, 0, "outer={outer_threads} inner={threads}");
+                assert_eq!(sa, expected, "outer={outer_threads} inner={threads}");
+            }
+        }
+    }
+}
