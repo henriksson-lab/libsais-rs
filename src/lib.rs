@@ -6,8 +6,10 @@
 //! (`libsais64`) and 16-bit/64-bit (`libsais16x64`) variants live in the
 //! sibling modules.
 
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::mem;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use rayon::prelude::*;
 
@@ -83,10 +85,36 @@ pub(crate) fn run_rayon_with_threads<R: Send>(threads: usize, f: impl FnOnce() -
     if threads <= 1 || rayon::current_thread_index().is_some() {
         return f();
     }
-    match rayon::ThreadPoolBuilder::new().num_threads(threads).build() {
-        Ok(pool) => pool.install(f),
-        Err(_) => f(),
+
+    if let Some(pool) = rayon_pool_for_threads(threads) {
+        pool.install(f)
+    } else {
+        f()
     }
+}
+
+fn rayon_pool_for_threads(threads: usize) -> Option<Arc<rayon::ThreadPool>> {
+    static POOLS: OnceLock<Mutex<HashMap<usize, Arc<rayon::ThreadPool>>>> = OnceLock::new();
+
+    let pools = POOLS.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(guard) = pools.lock() {
+        if let Some(pool) = guard.get(&threads) {
+            return Some(Arc::clone(pool));
+        }
+    } else {
+        return None;
+    }
+
+    let pool = Arc::new(
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .ok()?,
+    );
+
+    let mut guard = pools.lock().ok()?;
+    let pool = guard.entry(threads).or_insert_with(|| Arc::clone(&pool));
+    Some(Arc::clone(pool))
 }
 
 /// Raw `*mut T` wrapper that is `Send + Sync` so it can be moved into rayon
@@ -344,15 +372,21 @@ pub fn compact_and_place_cached_suffixes(
     let read_end = read_start + len;
 
     let mut write = read_start;
-    for read in read_start..read_end {
-        let entry = cache[read];
-        if entry.symbol >= 0 {
-            cache[write] = entry;
-            write += 1;
+    let sa_ptr = sa.as_mut_ptr();
+    let cache_ptr = cache.as_mut_ptr();
+
+    // SAFETY: read/write stay inside the selected cache range. Non-negative
+    // symbols are suffix-array slots produced by preceding libsais stages.
+    unsafe {
+        for read in read_start..read_end {
+            let entry = *cache_ptr.add(read);
+            if entry.symbol >= 0 {
+                *cache_ptr.add(write) = entry;
+                *sa_ptr.add(entry.symbol as usize) = entry.index;
+                write += 1;
+            }
         }
     }
-
-    place_cached_suffixes(sa, cache, block_start, (write - read_start) as FastSint);
 }
 
 /// Internal helper: flip suffix markers (OpenMP variant).
@@ -428,22 +462,22 @@ pub fn gather_lms_suffixes_8u(
     while i >= limit {
         c1 = t[i] as FastSint;
         f1 = usize::from(c1 > (c0 - f0 as FastSint));
-        sa[usize::try_from(m).expect("m must be non-negative")] = (i + 1) as SaSint;
+        sa[m as usize] = (i + 1) as SaSint;
         m -= (f1 & !f0) as FastSint;
 
         c0 = t[i - 1] as FastSint;
         f0 = usize::from(c0 > (c1 - f1 as FastSint));
-        sa[usize::try_from(m).expect("m must be non-negative")] = i as SaSint;
+        sa[m as usize] = i as SaSint;
         m -= (f0 & !f1) as FastSint;
 
         c1 = t[i - 2] as FastSint;
         f1 = usize::from(c1 > (c0 - f0 as FastSint));
-        sa[usize::try_from(m).expect("m must be non-negative")] = (i - 1) as SaSint;
+        sa[m as usize] = (i - 1) as SaSint;
         m -= (f1 & !f0) as FastSint;
 
         c0 = t[i - 3] as FastSint;
         f0 = usize::from(c0 > (c1 - f1 as FastSint));
-        sa[usize::try_from(m).expect("m must be non-negative")] = (i - 2) as SaSint;
+        sa[m as usize] = (i - 2) as SaSint;
         m -= (f0 & !f1) as FastSint;
 
         if i < 4 {
@@ -458,7 +492,7 @@ pub fn gather_lms_suffixes_8u(
         c0 = t[i] as FastSint;
         f1 = f0;
         f0 = usize::from(c0 > (c1 - f1 as FastSint));
-        sa[usize::try_from(m).expect("m must be non-negative")] = (i + 1) as SaSint;
+        sa[m as usize] = (i + 1) as SaSint;
         m -= (f0 & !f1) as FastSint;
         if i == 0 {
             break;
@@ -466,7 +500,7 @@ pub fn gather_lms_suffixes_8u(
         i -= 1;
     }
 
-    sa[usize::try_from(m).expect("m must be non-negative")] = (i + 1) as SaSint;
+    sa[m as usize] = (i + 1) as SaSint;
 }
 
 /// Internal helper: gather lms suffixes 8u (OpenMP variant).
@@ -3586,56 +3620,77 @@ pub fn partial_sorting_scan_left_to_right_8u_block_prepare(
     buckets[..2 * k_usize].fill(0);
     buckets[2 * k_usize..4 * k_usize].fill(0);
 
+    let prefetch_distance = 64usize;
+    let sa_ptr = sa.as_ptr();
+    let t_ptr = t.as_ptr();
+    let buckets_ptr = buckets.as_mut_ptr();
+    let cache_ptr = cache.as_mut_ptr();
     let mut i = omp_block_start;
-    let mut j = omp_block_start + omp_block_size - 65;
+    let mut j = omp_block_start + omp_block_size - (prefetch_distance as FastSint) - 1;
     let mut count = 0usize;
     let mut d: SaSint = 1;
 
-    while i < j {
-        let mut p0 = sa[i as usize];
-        cache[count].index = p0;
-        d += SaSint::from(p0 < 0);
-        p0 &= SAINT_MAX;
-        let v0 = buckets_index2(
-            t[(p0 - 1) as usize] as usize,
-            usize::from(t[(p0 - 2) as usize] >= t[(p0 - 1) as usize]),
-        );
-        cache[count].symbol = v0 as SaSint;
-        count += 1;
-        buckets[v0] += 1;
-        buckets[2 * k_usize + v0] = d;
+    // SAFETY: SA positions in this block are valid suffix indexes greater than
+    // one for this induction phase. Buckets cover the 2*k symbol space.
+    unsafe {
+        while i < j {
+            let i_usize = i as usize;
+            libsais_prefetchr(sa_ptr.wrapping_add(i_usize + 2 * prefetch_distance));
+            let s0 = (*sa_ptr.add(i_usize + prefetch_distance) & SAINT_MAX) as usize;
+            libsais_prefetchr(t_ptr.wrapping_add(s0).wrapping_sub(1));
+            libsais_prefetchr(t_ptr.wrapping_add(s0).wrapping_sub(2));
+            let s1 = (*sa_ptr.add(i_usize + prefetch_distance + 1) & SAINT_MAX) as usize;
+            libsais_prefetchr(t_ptr.wrapping_add(s1).wrapping_sub(1));
+            libsais_prefetchr(t_ptr.wrapping_add(s1).wrapping_sub(2));
 
-        let mut p1 = sa[(i + 1) as usize];
-        cache[count].index = p1;
-        d += SaSint::from(p1 < 0);
-        p1 &= SAINT_MAX;
-        let v1 = buckets_index2(
-            t[(p1 - 1) as usize] as usize,
-            usize::from(t[(p1 - 2) as usize] >= t[(p1 - 1) as usize]),
-        );
-        cache[count].symbol = v1 as SaSint;
-        count += 1;
-        buckets[v1] += 1;
-        buckets[2 * k_usize + v1] = d;
+            let mut p0 = *sa_ptr.add(i_usize);
+            (*cache_ptr.add(count)).index = p0;
+            d += SaSint::from(p0 < 0);
+            p0 &= SAINT_MAX;
+            let p0u = p0 as usize;
+            let v0 = buckets_index2(
+                *t_ptr.add(p0u - 1) as usize,
+                usize::from(*t_ptr.add(p0u - 2) >= *t_ptr.add(p0u - 1)),
+            );
+            (*cache_ptr.add(count)).symbol = v0 as SaSint;
+            count += 1;
+            *buckets_ptr.add(v0) += 1;
+            *buckets_ptr.add(2 * k_usize + v0) = d;
 
-        i += 2;
-    }
+            let mut p1 = *sa_ptr.add(i_usize + 1);
+            (*cache_ptr.add(count)).index = p1;
+            d += SaSint::from(p1 < 0);
+            p1 &= SAINT_MAX;
+            let p1u = p1 as usize;
+            let v1 = buckets_index2(
+                *t_ptr.add(p1u - 1) as usize,
+                usize::from(*t_ptr.add(p1u - 2) >= *t_ptr.add(p1u - 1)),
+            );
+            (*cache_ptr.add(count)).symbol = v1 as SaSint;
+            count += 1;
+            *buckets_ptr.add(v1) += 1;
+            *buckets_ptr.add(2 * k_usize + v1) = d;
 
-    j += 65;
-    while i < j {
-        let mut p = sa[i as usize];
-        cache[count].index = p;
-        d += SaSint::from(p < 0);
-        p &= SAINT_MAX;
-        let v = buckets_index2(
-            t[(p - 1) as usize] as usize,
-            usize::from(t[(p - 2) as usize] >= t[(p - 1) as usize]),
-        );
-        cache[count].symbol = v as SaSint;
-        count += 1;
-        buckets[v] += 1;
-        buckets[2 * k_usize + v] = d;
-        i += 1;
+            i += 2;
+        }
+
+        j += (prefetch_distance as FastSint) + 1;
+        while i < j {
+            let mut p = *sa_ptr.add(i as usize);
+            (*cache_ptr.add(count)).index = p;
+            d += SaSint::from(p < 0);
+            p &= SAINT_MAX;
+            let pu = p as usize;
+            let v = buckets_index2(
+                *t_ptr.add(pu - 1) as usize,
+                usize::from(*t_ptr.add(pu - 2) >= *t_ptr.add(pu - 1)),
+            );
+            (*cache_ptr.add(count)).symbol = v as SaSint;
+            count += 1;
+            *buckets_ptr.add(v) += 1;
+            *buckets_ptr.add(2 * k_usize + v) = d;
+            i += 1;
+        }
     }
 
     (d as FastSint - 1, count as FastSint)
@@ -4211,28 +4266,90 @@ pub fn partial_sorting_scan_right_to_left_8u_block_prepare(
 
     let start = usize::try_from(omp_block_start).expect("omp_block_start must be non-negative");
     let size = usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
+    if size == 0 {
+        return (0, 0);
+    }
+    let prefetch_distance = 64usize;
+    let sa_ptr = sa.as_ptr();
+    let t_ptr = t.as_ptr();
+    let induction_ptr = induction_bucket.as_mut_ptr();
+    let distinct_ptr = distinct_names.as_mut_ptr();
+    let cache_ptr = cache.as_mut_ptr();
     let mut count = 0usize;
     let mut d = 1;
 
-    let mut i = start + size;
-    while i > start {
-        i -= 1;
+    let mut i = start + size - 1;
+    let j_pf = start + prefetch_distance + 1;
+    // SAFETY: SA positions in this block are valid suffix indexes greater than
+    // one for this induction phase. Buckets cover the 2*k symbol space.
+    unsafe {
+        while i >= j_pf {
+            libsais_prefetchr(sa_ptr.wrapping_add(i.wrapping_sub(2 * prefetch_distance)));
+            let s0 = (*sa_ptr.add(i - prefetch_distance) & SAINT_MAX) as usize;
+            libsais_prefetchr(t_ptr.wrapping_add(s0).wrapping_sub(1));
+            libsais_prefetchr(t_ptr.wrapping_add(s0).wrapping_sub(2));
+            let s1 = (*sa_ptr.add(i - prefetch_distance - 1) & SAINT_MAX) as usize;
+            libsais_prefetchr(t_ptr.wrapping_add(s1).wrapping_sub(1));
+            libsais_prefetchr(t_ptr.wrapping_add(s1).wrapping_sub(2));
 
-        let mut p = sa[i];
-        cache[count].index = p;
-        d += SaSint::from(p < 0);
-        p &= SAINT_MAX;
+            let mut p = *sa_ptr.add(i);
+            (*cache_ptr.add(count)).index = p;
+            d += SaSint::from(p < 0);
+            p &= SAINT_MAX;
 
-        let p_usize = usize::try_from(p).expect("suffix index must be non-negative");
-        let v = buckets_index2(
-            t[p_usize - 1] as usize,
-            usize::from(t[p_usize - 2] > t[p_usize - 1]),
-        );
+            let p_usize = p as usize;
+            let v = buckets_index2(
+                *t_ptr.add(p_usize - 1) as usize,
+                usize::from(*t_ptr.add(p_usize - 2) > *t_ptr.add(p_usize - 1)),
+            );
 
-        cache[count].symbol = v as SaSint;
-        induction_bucket[v] += 1;
-        distinct_names[v] = d;
-        count += 1;
+            (*cache_ptr.add(count)).symbol = v as SaSint;
+            *induction_ptr.add(v) += 1;
+            *distinct_ptr.add(v) = d;
+            count += 1;
+
+            let i1 = i - 1;
+            let mut p = *sa_ptr.add(i1);
+            (*cache_ptr.add(count)).index = p;
+            d += SaSint::from(p < 0);
+            p &= SAINT_MAX;
+
+            let p_usize = p as usize;
+            let v = buckets_index2(
+                *t_ptr.add(p_usize - 1) as usize,
+                usize::from(*t_ptr.add(p_usize - 2) > *t_ptr.add(p_usize - 1)),
+            );
+
+            (*cache_ptr.add(count)).symbol = v as SaSint;
+            *induction_ptr.add(v) += 1;
+            *distinct_ptr.add(v) = d;
+            count += 1;
+
+            i -= 2;
+        }
+
+        while i >= start {
+            let mut p = *sa_ptr.add(i);
+            (*cache_ptr.add(count)).index = p;
+            d += SaSint::from(p < 0);
+            p &= SAINT_MAX;
+
+            let p_usize = p as usize;
+            let v = buckets_index2(
+                *t_ptr.add(p_usize - 1) as usize,
+                usize::from(*t_ptr.add(p_usize - 2) > *t_ptr.add(p_usize - 1)),
+            );
+
+            (*cache_ptr.add(count)).symbol = v as SaSint;
+            *induction_ptr.add(v) += 1;
+            *distinct_ptr.add(v) = d;
+            count += 1;
+
+            if i == 0 {
+                break;
+            }
+            i -= 1;
+        }
     }
 
     ((d - 1) as FastSint, count as FastSint)
@@ -4966,11 +5083,8 @@ pub fn partial_sorting_scan_right_to_left_32s_6k_block_gather(
         let mut symbol = 0usize;
         p &= SAINT_MAX;
         if p != 0 {
-            let p_usize = usize::try_from(p).expect("suffix index must be non-negative");
-            symbol = buckets_index4(
-                usize::try_from(t[p_usize - 1]).expect("bucket symbol must be non-negative"),
-                usize::from(t[p_usize - 2] > t[p_usize - 1]),
-            );
+            let p = p as usize;
+            symbol = buckets_index4(t[p - 1] as usize, usize::from(t[p - 2] > t[p - 1]));
         }
         cache[offset].index = sa[i];
         cache[offset].symbol = symbol as SaSint;
@@ -5522,10 +5636,8 @@ pub fn partial_sorting_scan_left_to_right_32s_6k_block_gather(
         cache[offset].index = p;
         let q = p & SAINT_MAX;
         cache[offset].symbol = if q != 0 {
-            buckets_index4(
-                usize::try_from(t[q as usize - 1]).expect("bucket symbol must be non-negative"),
-                usize::from(t[q as usize - 2] >= t[q as usize - 1]),
-            ) as SaSint
+            let q = q as usize;
+            buckets_index4(t[q - 1] as usize, usize::from(t[q - 2] >= t[q - 1])) as SaSint
         } else {
             0
         };
@@ -8054,62 +8166,76 @@ pub fn final_sorting_scan_left_to_right_8u_block_prepare(
     } else {
         start
     };
-    let sa_ptr = sa.as_ptr();
+    let sa_ptr = sa.as_mut_ptr();
     let t_ptr = t.as_ptr();
-    while i < unroll_end {
-        libsais_prefetchw(sa_ptr.wrapping_add(i + 2 * prefetch_distance));
-        let s0 = sa[i + prefetch_distance];
-        let ts0 = if s0 > 0 { s0 as usize } else { 2 };
-        libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(1));
-        libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(2));
-        let s1 = sa[i + prefetch_distance + 1];
-        let ts1 = if s1 > 0 { s1 as usize } else { 2 };
-        libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(1));
-        libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(2));
+    let buckets_ptr = buckets.as_mut_ptr();
+    let cache_ptr = cache.as_mut_ptr();
 
-        let mut p0 = sa[i];
-        sa[i] = p0 ^ SAINT_MIN;
-        if p0 > 0 {
-            p0 -= 1;
-            let p0u = p0 as usize;
-            let symbol = t[p0u] as usize;
-            buckets[symbol] += 1;
-            cache[count].symbol = symbol as SaSint;
-            cache[count].index = p0
-                | ((usize::from(t[p0u - usize::from(p0 > 0)] < t[p0u]) as SaSint)
-                    << (SAINT_BIT - 1));
-            count += 1;
+    // SAFETY: The suffix-array algorithm only stores positive suffix positions
+    // within T for entries processed here. Buckets are indexed by byte symbols
+    // below k, and cache has at least one entry per block position.
+    unsafe {
+        while i < unroll_end {
+            libsais_prefetchw(sa_ptr.wrapping_add(i + 2 * prefetch_distance));
+            let s0 = *sa_ptr.add(i + prefetch_distance);
+            let ts0 = if s0 > 0 { s0 as usize } else { 2 };
+            libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(1));
+            libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(2));
+            let s1 = *sa_ptr.add(i + prefetch_distance + 1);
+            let ts1 = if s1 > 0 { s1 as usize } else { 2 };
+            libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(1));
+            libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(2));
+
+            let mut p0 = *sa_ptr.add(i);
+            *sa_ptr.add(i) = p0 ^ SAINT_MIN;
+            if p0 > 0 {
+                p0 -= 1;
+                let p0u = p0 as usize;
+                let symbol = *t_ptr.add(p0u) as usize;
+                *buckets_ptr.add(symbol) += 1;
+                let entry = cache_ptr.add(count);
+                (*entry).symbol = symbol as SaSint;
+                (*entry).index = p0
+                    | ((usize::from(*t_ptr.add(p0u - usize::from(p0 > 0)) < *t_ptr.add(p0u))
+                        as SaSint)
+                        << (SAINT_BIT - 1));
+                count += 1;
+            }
+            let mut p1 = *sa_ptr.add(i + 1);
+            *sa_ptr.add(i + 1) = p1 ^ SAINT_MIN;
+            if p1 > 0 {
+                p1 -= 1;
+                let p1u = p1 as usize;
+                let symbol = *t_ptr.add(p1u) as usize;
+                *buckets_ptr.add(symbol) += 1;
+                let entry = cache_ptr.add(count);
+                (*entry).symbol = symbol as SaSint;
+                (*entry).index = p1
+                    | ((usize::from(*t_ptr.add(p1u - usize::from(p1 > 0)) < *t_ptr.add(p1u))
+                        as SaSint)
+                        << (SAINT_BIT - 1));
+                count += 1;
+            }
+            i += 2;
         }
-        let mut p1 = sa[i + 1];
-        sa[i + 1] = p1 ^ SAINT_MIN;
-        if p1 > 0 {
-            p1 -= 1;
-            let p1u = p1 as usize;
-            let symbol = t[p1u] as usize;
-            buckets[symbol] += 1;
-            cache[count].symbol = symbol as SaSint;
-            cache[count].index = p1
-                | ((usize::from(t[p1u - usize::from(p1 > 0)] < t[p1u]) as SaSint)
-                    << (SAINT_BIT - 1));
-            count += 1;
+        while i < end {
+            let mut p = *sa_ptr.add(i);
+            *sa_ptr.add(i) = p ^ SAINT_MIN;
+            if p > 0 {
+                p -= 1;
+                let p_usize = p as usize;
+                let symbol = *t_ptr.add(p_usize) as usize;
+                *buckets_ptr.add(symbol) += 1;
+                let entry = cache_ptr.add(count);
+                (*entry).symbol = symbol as SaSint;
+                (*entry).index = p
+                    | ((usize::from(*t_ptr.add(p_usize - usize::from(p > 0)) < *t_ptr.add(p_usize))
+                        as SaSint)
+                        << (SAINT_BIT - 1));
+                count += 1;
+            }
+            i += 1;
         }
-        i += 2;
-    }
-    while i < end {
-        let mut p = sa[i];
-        sa[i] = p ^ SAINT_MIN;
-        if p > 0 {
-            p -= 1;
-            let p_usize = usize::try_from(p).expect("suffix index must be non-negative");
-            let symbol = t[p_usize] as usize;
-            buckets[symbol] += 1;
-            cache[count].symbol = symbol as SaSint;
-            cache[count].index = p
-                | ((usize::from(t[p_usize - usize::from(p > 0)] < t[p_usize]) as SaSint)
-                    << (SAINT_BIT - 1));
-            count += 1;
-        }
-        i += 1;
     }
 
     count as FastSint
@@ -8178,20 +8304,81 @@ pub fn final_sorting_scan_left_to_right_32s_block_gather(
     }
     let start = usize::try_from(omp_block_start).expect("omp_block_start must be non-negative");
     let size = usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
-    for offset in 0..size {
-        let i = start + offset;
+    let prefetch_distance = 64usize;
+    let block_end = start + size;
+    let sa_ptr = sa.as_mut_ptr();
+    let t_ptr = t.as_ptr();
+    let cache_ptr = cache.as_mut_ptr();
+    let mut i = start;
+    let mut j = if size > prefetch_distance + 1 {
+        block_end - prefetch_distance - 1
+    } else {
+        start
+    };
+
+    while i < j {
+        libsais_prefetchw(sa_ptr.wrapping_add(i + 2 * prefetch_distance));
+
+        let s0 = sa[i + prefetch_distance];
+        let ts0 = if s0 > 0 { s0 as usize } else { 2 };
+        libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(1));
+        libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(2));
+
+        let s1 = sa[i + prefetch_distance + 1];
+        let ts1 = if s1 > 0 { s1 as usize } else { 2 };
+        libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(1));
+        libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(2));
+
+        libsais_prefetchw(cache_ptr.wrapping_add(i - start + prefetch_distance));
+
+        let ci0 = i - start;
+        let mut symbol0 = SAINT_MIN;
+        let mut p0 = sa[i];
+        sa[i] = p0 ^ SAINT_MIN;
+        if p0 > 0 {
+            p0 -= 1;
+            let p0_usize = p0 as usize;
+            cache[ci0].index = p0
+                | ((usize::from(t[p0_usize - usize::from(p0 > 0)] < t[p0_usize]) as SaSint)
+                    << (SAINT_BIT - 1));
+            symbol0 = t[p0_usize];
+        }
+        cache[ci0].symbol = symbol0;
+
+        let i1 = i + 1;
+        let ci1 = i1 - start;
+        let mut symbol1 = SAINT_MIN;
+        let mut p1 = sa[i1];
+        sa[i1] = p1 ^ SAINT_MIN;
+        if p1 > 0 {
+            p1 -= 1;
+            let p1_usize = p1 as usize;
+            cache[ci1].index = p1
+                | ((usize::from(t[p1_usize - usize::from(p1 > 0)] < t[p1_usize]) as SaSint)
+                    << (SAINT_BIT - 1));
+            symbol1 = t[p1_usize];
+        }
+        cache[ci1].symbol = symbol1;
+
+        i += 2;
+    }
+
+    j = block_end;
+    while i < j {
+        let ci = i - start;
         let mut symbol = SAINT_MIN;
         let mut p = sa[i];
         sa[i] = p ^ SAINT_MIN;
         if p > 0 {
             p -= 1;
             let p_usize = p as usize;
-            cache[offset].index = p
+            cache[ci].index = p
                 | ((usize::from(t[p_usize - usize::from(p > 0)] < t[p_usize]) as SaSint)
                     << (SAINT_BIT - 1));
             symbol = t[p_usize];
         }
-        cache[offset].symbol = symbol;
+        cache[ci].symbol = symbol;
+        i += 1;
     }
 }
 
@@ -8478,24 +8665,35 @@ pub fn final_sorting_scan_left_to_right_8u_block_omp(
         return;
     }
 
-    let block_start_usize = usize::try_from(block_start).expect("block_start must be non-negative");
     let omp_block_stride = (block_size_usize / omp_num_threads) & !15usize;
-    for (thread_num, state) in thread_state.iter_mut().take(omp_num_threads).enumerate() {
-        let relative_start = thread_num * omp_block_stride;
-        let size = if thread_num + 1 < omp_num_threads {
-            omp_block_stride
-        } else {
-            block_size_usize - relative_start
-        };
-        state.count = final_sorting_scan_left_to_right_8u_block_prepare(
-            t,
-            sa,
-            k,
-            &mut state.buckets,
-            &mut state.cache,
-            (block_start_usize + relative_start) as FastSint,
-            size as FastSint,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        let state_ptr = SyncMutPtr::new(thread_state);
+        run_rayon_with_threads(omp_num_threads, || {
+            (0..omp_num_threads).into_par_iter().for_each(|thread_num| {
+                let relative_start = thread_num * omp_block_stride;
+                let size = if thread_num + 1 < omp_num_threads {
+                    omp_block_stride
+                } else {
+                    block_size_usize - relative_start
+                };
+                // SAFETY: each worker mutates one ThreadState slot and its
+                // matching SA subrange, following the upstream OpenMP
+                // block partitioning.
+                let sa = unsafe { sa_ptr.as_slice() };
+                let states = unsafe { state_ptr.as_slice() };
+                let state = &mut states[thread_num];
+                state.count = final_sorting_scan_left_to_right_8u_block_prepare(
+                    t,
+                    sa,
+                    k,
+                    &mut state.buckets,
+                    &mut state.cache,
+                    block_start + relative_start as FastSint,
+                    size as FastSint,
+                );
+            });
+        });
     }
 
     for state in thread_state.iter_mut().take(omp_num_threads) {
@@ -8507,13 +8705,25 @@ pub fn final_sorting_scan_left_to_right_8u_block_omp(
         }
     }
 
-    for state in thread_state.iter_mut().take(omp_num_threads) {
-        final_order_scan_left_to_right_8u_block_place(
-            sa,
-            &mut state.buckets,
-            &state.cache,
-            state.count,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        let state_ptr = SyncMutPtr::new(thread_state);
+        run_rayon_with_threads(omp_num_threads, || {
+            (0..omp_num_threads).into_par_iter().for_each(|thread_num| {
+                // SAFETY: bucket prefixing assigns disjoint SA slots to
+                // each thread's cache entries, matching the C OpenMP
+                // barrier before placement.
+                let sa = unsafe { sa_ptr.as_slice() };
+                let states = unsafe { state_ptr.as_slice() };
+                let state = &mut states[thread_num];
+                final_order_scan_left_to_right_8u_block_place(
+                    sa,
+                    &mut state.buckets,
+                    &state.cache,
+                    state.count,
+                );
+            });
+        });
     }
 }
 
@@ -8533,12 +8743,43 @@ pub fn final_sorting_scan_left_to_right_32s_block_omp(
         return;
     }
 
-    final_sorting_scan_left_to_right_32s_block_gather(t, sa, cache, block_start, block_size);
-    final_sorting_scan_left_to_right_32s_block_sort(t, buckets, cache, block_start, block_size);
     let block_size_usize = usize::try_from(block_size).expect("block_size must be non-negative");
     let threads_usize = usize::try_from(threads.max(1)).expect("threads must be positive");
     let omp_num_threads = threads_usize.min(block_size_usize);
     let omp_block_stride = (block_size_usize / omp_num_threads) & !15usize;
+    if omp_num_threads <= 1 || omp_block_stride == 0 {
+        final_sorting_scan_left_to_right_32s(t, sa, buckets, block_start, block_size);
+        return;
+    }
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        let cache_ptr = SyncMutPtr::new(cache);
+        run_rayon_with_threads(omp_num_threads, || {
+            (0..omp_num_threads)
+                .into_par_iter()
+                .for_each(|omp_thread_num| {
+                    let omp_block_start = omp_thread_num * omp_block_stride;
+                    let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
+                        omp_block_stride
+                    } else {
+                        block_size_usize - omp_block_start
+                    };
+                    // SAFETY: each worker gathers a disjoint SA range into the
+                    // matching disjoint cache range. The full cache remains
+                    // block-relative for the later serial sort stage.
+                    let sa = unsafe { sa_ptr.as_slice() };
+                    let cache = unsafe { cache_ptr.as_slice() };
+                    final_sorting_scan_left_to_right_32s_block_gather(
+                        t,
+                        sa,
+                        &mut cache[omp_block_start..omp_block_start + omp_block_size],
+                        block_start + omp_block_start as FastSint,
+                        omp_block_size as FastSint,
+                    );
+                });
+        });
+    }
+    final_sorting_scan_left_to_right_32s_block_sort(t, buckets, cache, block_start, block_size);
     {
         let sa_ptr = SyncMutPtr::new(sa);
         let cache_ptr = SyncMutPtr::new(cache);
@@ -9319,74 +9560,89 @@ pub fn final_sorting_scan_right_to_left_8u_block_prepare(
     let mut i = omp_block_start + omp_block_size - 1;
     let mut count = 0usize;
 
-    let sa_ptr = sa.as_ptr();
+    let sa_ptr = sa.as_mut_ptr();
     let t_ptr = t.as_ptr();
+    let buckets_ptr = buckets.as_mut_ptr();
+    let cache_ptr = cache.as_mut_ptr();
     let j_pf = (start_us + prefetch_distance + 1) as FastSint;
-    while i >= j_pf {
-        let i0 = i as usize;
-        let i1 = (i - 1) as usize;
+    // SAFETY: The suffix-array algorithm only stores positive suffix positions
+    // within T for entries processed here. Buckets are indexed by byte symbols
+    // below k, and cache has at least one entry per block position.
+    unsafe {
+        while i >= j_pf {
+            let i0 = i as usize;
+            let i1 = (i - 1) as usize;
 
-        libsais_prefetchw(sa_ptr.wrapping_add(i0.wrapping_sub(2 * prefetch_distance)));
-        let s0 = sa[i0 - prefetch_distance];
-        let ts0 = if s0 > 0 { s0 as usize } else { 2 };
-        libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(1));
-        libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(2));
-        let s1 = sa[i0 - prefetch_distance - 1];
-        let ts1 = if s1 > 0 { s1 as usize } else { 2 };
-        libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(1));
-        libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(2));
+            libsais_prefetchw(sa_ptr.wrapping_add(i0.wrapping_sub(2 * prefetch_distance)));
+            let s0 = *sa_ptr.add(i0 - prefetch_distance);
+            let ts0 = if s0 > 0 { s0 as usize } else { 2 };
+            libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(1));
+            libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(2));
+            let s1 = *sa_ptr.add(i0 - prefetch_distance - 1);
+            let ts1 = if s1 > 0 { s1 as usize } else { 2 };
+            libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(1));
+            libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(2));
 
-        let mut p0 = sa[i0];
-        sa[i0] = p0 & SAINT_MAX;
-        if p0 > 0 {
-            p0 -= 1;
-            let p0_usize = p0 as usize;
-            let c0 = t[p0_usize] as SaSint;
-            buckets[c0 as usize] += 1;
-            cache[count].symbol = c0;
-            cache[count].index = p0
-                | ((usize::from(t[p0_usize - usize::from(p0 > 0)] > t[p0_usize]) as SaSint)
-                    << (SAINT_BIT - 1));
-            count += 1;
+            let mut p0 = *sa_ptr.add(i0);
+            *sa_ptr.add(i0) = p0 & SAINT_MAX;
+            if p0 > 0 {
+                p0 -= 1;
+                let p0_usize = p0 as usize;
+                let c0 = *t_ptr.add(p0_usize) as SaSint;
+                *buckets_ptr.add(c0 as usize) += 1;
+                let entry = cache_ptr.add(count);
+                (*entry).symbol = c0;
+                (*entry).index = p0
+                    | ((usize::from(
+                        *t_ptr.add(p0_usize - usize::from(p0 > 0)) > *t_ptr.add(p0_usize),
+                    ) as SaSint)
+                        << (SAINT_BIT - 1));
+                count += 1;
+            }
+
+            let mut p1 = *sa_ptr.add(i1);
+            *sa_ptr.add(i1) = p1 & SAINT_MAX;
+            if p1 > 0 {
+                p1 -= 1;
+                let p1_usize = p1 as usize;
+                let c1 = *t_ptr.add(p1_usize) as SaSint;
+                *buckets_ptr.add(c1 as usize) += 1;
+                let entry = cache_ptr.add(count);
+                (*entry).symbol = c1;
+                (*entry).index = p1
+                    | ((usize::from(
+                        *t_ptr.add(p1_usize - usize::from(p1 > 0)) > *t_ptr.add(p1_usize),
+                    ) as SaSint)
+                        << (SAINT_BIT - 1));
+                count += 1;
+            }
+
+            i -= 2;
         }
 
-        let mut p1 = sa[i1];
-        sa[i1] = p1 & SAINT_MAX;
-        if p1 > 0 {
-            p1 -= 1;
-            let p1_usize = p1 as usize;
-            let c1 = t[p1_usize] as SaSint;
-            buckets[c1 as usize] += 1;
-            cache[count].symbol = c1;
-            cache[count].index = p1
-                | ((usize::from(t[p1_usize - usize::from(p1 > 0)] > t[p1_usize]) as SaSint)
-                    << (SAINT_BIT - 1));
-            count += 1;
-        }
+        while i >= start {
+            let idx = i as usize;
+            let mut p = *sa_ptr.add(idx);
+            *sa_ptr.add(idx) = p & SAINT_MAX;
+            if p > 0 {
+                p -= 1;
+                let p_usize = p as usize;
+                let c = *t_ptr.add(p_usize) as SaSint;
+                *buckets_ptr.add(c as usize) += 1;
+                let entry = cache_ptr.add(count);
+                (*entry).symbol = c;
+                (*entry).index = p
+                    | ((usize::from(*t_ptr.add(p_usize - usize::from(p > 0)) > *t_ptr.add(p_usize))
+                        as SaSint)
+                        << (SAINT_BIT - 1));
+                count += 1;
+            }
 
-        i -= 2;
-    }
-
-    while i >= start {
-        let idx = i as usize;
-        let mut p = sa[idx];
-        sa[idx] = p & SAINT_MAX;
-        if p > 0 {
-            p -= 1;
-            let p_usize = p as usize;
-            let c = t[p_usize] as SaSint;
-            buckets[c as usize] += 1;
-            cache[count].symbol = c;
-            cache[count].index = p
-                | ((usize::from(t[p_usize - usize::from(p > 0)] > t[p_usize]) as SaSint)
-                    << (SAINT_BIT - 1));
-            count += 1;
+            if i == 0 {
+                break;
+            }
+            i -= 1;
         }
-
-        if i == 0 {
-            break;
-        }
-        i -= 1;
     }
 
     count as FastSint
@@ -9404,11 +9660,50 @@ pub fn final_order_scan_right_to_left_8u_block_place(
         return;
     }
     let count_usize = usize::try_from(count).expect("count must be non-negative");
-    for entry in &cache[..count_usize] {
-        let symbol = usize::try_from(entry.symbol).expect("cache symbol must be non-negative");
-        buckets[symbol] -= 1;
-        let slot = usize::try_from(buckets[symbol]).expect("bucket slot must be non-negative");
-        sa[slot] = entry.index;
+    let prefetch_distance = 64usize;
+    let cache_ptr = cache.as_ptr();
+    let buckets_ptr = buckets.as_mut_ptr();
+    let sa_ptr = sa.as_mut_ptr();
+    let mut i = 0usize;
+    let mut j = count_usize.saturating_sub(3);
+    // SAFETY: cache contains `count` entries produced by the matching prepare
+    // loop. Symbols are byte bucket indexes, and prefixed bucket slots are
+    // valid disjoint suffix-array positions.
+    unsafe {
+        while i < j {
+            libsais_prefetchr(cache_ptr.wrapping_add(i + prefetch_distance));
+
+            let entry0 = *cache_ptr.add(i);
+            let symbol0 = entry0.symbol as usize;
+            *buckets_ptr.add(symbol0) -= 1;
+            *sa_ptr.add(*buckets_ptr.add(symbol0) as usize) = entry0.index;
+
+            let entry1 = *cache_ptr.add(i + 1);
+            let symbol1 = entry1.symbol as usize;
+            *buckets_ptr.add(symbol1) -= 1;
+            *sa_ptr.add(*buckets_ptr.add(symbol1) as usize) = entry1.index;
+
+            let entry2 = *cache_ptr.add(i + 2);
+            let symbol2 = entry2.symbol as usize;
+            *buckets_ptr.add(symbol2) -= 1;
+            *sa_ptr.add(*buckets_ptr.add(symbol2) as usize) = entry2.index;
+
+            let entry3 = *cache_ptr.add(i + 3);
+            let symbol3 = entry3.symbol as usize;
+            *buckets_ptr.add(symbol3) -= 1;
+            *sa_ptr.add(*buckets_ptr.add(symbol3) as usize) = entry3.index;
+
+            i += 4;
+        }
+
+        j += 3;
+        while i < j {
+            let entry = *cache_ptr.add(i);
+            let symbol = entry.symbol as usize;
+            *buckets_ptr.add(symbol) -= 1;
+            *sa_ptr.add(*buckets_ptr.add(symbol) as usize) = entry.index;
+            i += 1;
+        }
     }
 }
 
@@ -9478,10 +9773,27 @@ pub fn final_sorting_scan_right_to_left_32s_block_gather(
     let prefetch_distance = 64usize;
     let start = omp_block_start as usize;
     let block_end = start + omp_block_size as usize;
+    let sa_ptr = sa.as_mut_ptr();
+    let t_ptr = t.as_ptr();
+    let cache_ptr = cache.as_mut_ptr();
     let mut i = start;
     let mut j = block_end.saturating_sub(prefetch_distance + 1);
 
     while i < j {
+        libsais_prefetchw(sa_ptr.wrapping_add(i + 2 * prefetch_distance));
+
+        let s0 = sa[i + prefetch_distance];
+        let ts0 = if s0 > 0 { s0 as usize } else { 2 };
+        libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(1));
+        libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(2));
+
+        let s1 = sa[i + prefetch_distance + 1];
+        let ts1 = if s1 > 0 { s1 as usize } else { 2 };
+        libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(1));
+        libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(2));
+
+        libsais_prefetchw(cache_ptr.wrapping_add(i - start + prefetch_distance));
+
         let ci = i - start;
         let mut symbol0 = SAINT_MIN;
         let mut p0 = sa[i];
@@ -9683,13 +9995,25 @@ pub fn final_bwt_scan_right_to_left_8u_block_omp(
             state.buckets[c] = a;
         }
     }
-    for state in thread_state.iter_mut().take(omp_num_threads) {
-        final_order_scan_right_to_left_8u_block_place(
-            sa,
-            &mut state.buckets,
-            &state.cache,
-            state.count,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        let state_ptr = SyncMutPtr::new(thread_state);
+        run_rayon_with_threads(omp_num_threads, || {
+            (0..omp_num_threads).into_par_iter().for_each(|thread_num| {
+                // SAFETY: bucket prefixing assigns disjoint SA slots to
+                // each thread's cache entries, matching the C OpenMP
+                // barrier before placement.
+                let sa = unsafe { sa_ptr.as_slice() };
+                let states = unsafe { state_ptr.as_slice() };
+                let state = &mut states[thread_num];
+                final_order_scan_right_to_left_8u_block_place(
+                    sa,
+                    &mut state.buckets,
+                    &state.cache,
+                    state.count,
+                );
+            });
+        });
     }
 }
 
@@ -9790,22 +10114,36 @@ pub fn final_sorting_scan_right_to_left_8u_block_omp(
     }
 
     let omp_block_stride = (block_size_usize / omp_num_threads) & !15usize;
-    for (omp_thread_num, state) in thread_state.iter_mut().take(omp_num_threads).enumerate() {
-        let omp_block_start = omp_thread_num * omp_block_stride;
-        let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
-            omp_block_stride
-        } else {
-            block_size_usize - omp_block_start
-        };
-        state.count = final_sorting_scan_right_to_left_8u_block_prepare(
-            t,
-            sa,
-            k,
-            &mut state.buckets,
-            &mut state.cache,
-            block_start + omp_block_start as FastSint,
-            omp_block_size as FastSint,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        let state_ptr = SyncMutPtr::new(thread_state);
+        run_rayon_with_threads(omp_num_threads, || {
+            (0..omp_num_threads)
+                .into_par_iter()
+                .for_each(|omp_thread_num| {
+                    let omp_block_start = omp_thread_num * omp_block_stride;
+                    let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
+                        omp_block_stride
+                    } else {
+                        block_size_usize - omp_block_start
+                    };
+                    // SAFETY: each worker mutates one ThreadState slot and its
+                    // matching SA subrange, following the upstream OpenMP
+                    // block partitioning.
+                    let sa = unsafe { sa_ptr.as_slice() };
+                    let states = unsafe { state_ptr.as_slice() };
+                    let state = &mut states[omp_thread_num];
+                    state.count = final_sorting_scan_right_to_left_8u_block_prepare(
+                        t,
+                        sa,
+                        k,
+                        &mut state.buckets,
+                        &mut state.cache,
+                        block_start + omp_block_start as FastSint,
+                        omp_block_size as FastSint,
+                    );
+                });
+        });
     }
     for state in thread_state.iter_mut().take(omp_num_threads).rev() {
         for c in 0..k_usize {
@@ -9901,12 +10239,43 @@ pub fn final_sorting_scan_right_to_left_32s_block_omp(
         return;
     }
 
-    final_sorting_scan_right_to_left_32s_block_gather(t, sa, cache, block_start, block_size);
-    final_sorting_scan_right_to_left_32s_block_sort(t, buckets, cache, block_start, block_size);
     let block_size_usize = usize::try_from(block_size).expect("block_size must be non-negative");
     let threads_usize = usize::try_from(threads.max(1)).expect("threads must be positive");
     let omp_num_threads = threads_usize.min(block_size_usize);
     let omp_block_stride = (block_size_usize / omp_num_threads) & !15usize;
+    if omp_num_threads <= 1 || omp_block_stride == 0 {
+        final_sorting_scan_right_to_left_32s(t, sa, buckets, block_start, block_size);
+        return;
+    }
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        let cache_ptr = SyncMutPtr::new(cache);
+        run_rayon_with_threads(omp_num_threads, || {
+            (0..omp_num_threads)
+                .into_par_iter()
+                .for_each(|omp_thread_num| {
+                    let omp_block_start = omp_thread_num * omp_block_stride;
+                    let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
+                        omp_block_stride
+                    } else {
+                        block_size_usize - omp_block_start
+                    };
+                    // SAFETY: each worker gathers a disjoint SA range into the
+                    // matching disjoint cache range. The full cache remains
+                    // block-relative for the later serial sort stage.
+                    let sa = unsafe { sa_ptr.as_slice() };
+                    let cache = unsafe { cache_ptr.as_slice() };
+                    final_sorting_scan_right_to_left_32s_block_gather(
+                        t,
+                        sa,
+                        &mut cache[omp_block_start..omp_block_start + omp_block_size],
+                        block_start + omp_block_start as FastSint,
+                        omp_block_size as FastSint,
+                    );
+                });
+        });
+    }
+    final_sorting_scan_right_to_left_32s_block_sort(t, buckets, cache, block_start, block_size);
     {
         let sa_ptr = SyncMutPtr::new(sa);
         let cache_ptr = SyncMutPtr::new(cache);
@@ -12825,16 +13194,10 @@ pub fn libsais_omp(
         return 0;
     }
 
-    libsais_main(
-        t,
-        sa,
-        LIBSAIS_FLAGS_NONE,
-        0,
-        None,
-        fs,
-        freq,
-        normalize_omp_threads(threads),
-    )
+    let threads = normalize_omp_threads(threads);
+    run_rayon_with_threads(threads as usize, || {
+        libsais_main(t, sa, LIBSAIS_FLAGS_NONE, 0, None, fs, freq, threads)
+    })
 }
 
 /// Constructs the generalized suffix array (GSA) of given string set in parallel using OpenMP.
@@ -18856,6 +19219,67 @@ mod tests {
     }
 
     #[test]
+    fn final_sorting_scan_left_to_right_32s_block_parallel_gather_matches_serial_gather() {
+        let block_start = 4_096usize;
+        let block_size = 4 * LIBSAIS_PER_THREAD_CACHE_SIZE;
+        let n = block_start + block_size + 16;
+        let t = vec![1; n];
+        let suffixes: Vec<SaSint> = (2..2 + block_size).map(|i| i as SaSint).collect();
+
+        let mut expected_sa = vec![0; n];
+        expected_sa[block_start..block_start + block_size].copy_from_slice(&suffixes);
+        let mut gathered_sa = expected_sa.clone();
+        let mut expected_cache = vec![ThreadCache::default(); block_size];
+        let mut gathered_cache = vec![ThreadCache::default(); block_size];
+
+        final_sorting_scan_left_to_right_32s_block_gather(
+            &t,
+            &mut expected_sa,
+            &mut expected_cache,
+            block_start as FastSint,
+            block_size as FastSint,
+        );
+
+        let sa_ptr = SyncMutPtr::new(&mut gathered_sa);
+        let cache_ptr = SyncMutPtr::new(&mut gathered_cache);
+        run_rayon_with_threads(4, || {
+            (0..4usize).into_par_iter().for_each(|thread_num| {
+                let relative_start = thread_num * LIBSAIS_PER_THREAD_CACHE_SIZE;
+                let sa = unsafe { sa_ptr.as_slice() };
+                let cache = unsafe { cache_ptr.as_slice() };
+                final_sorting_scan_left_to_right_32s_block_gather(
+                    &t,
+                    sa,
+                    &mut cache[relative_start..relative_start + LIBSAIS_PER_THREAD_CACHE_SIZE],
+                    (block_start + relative_start) as FastSint,
+                    LIBSAIS_PER_THREAD_CACHE_SIZE as FastSint,
+                );
+            });
+        });
+
+        let first_sa_diff = gathered_sa
+            .iter()
+            .zip(&expected_sa)
+            .position(|(a, b)| a != b);
+        if let Some(index) = first_sa_diff {
+            panic!(
+                "first SA mismatch at {index}: threaded={}, expected={}",
+                gathered_sa[index], expected_sa[index]
+            );
+        }
+        let first_cache_diff = gathered_cache
+            .iter()
+            .zip(&expected_cache)
+            .position(|(a, b)| a != b);
+        if let Some(index) = first_cache_diff {
+            panic!(
+                "first cache mismatch at {index}: threaded={:?}, expected={:?}",
+                gathered_cache[index], expected_cache[index]
+            );
+        }
+    }
+
+    #[test]
     fn final_sorting_scan_left_to_right_8u_omp_wraps_sequential_behavior() {
         let t = vec![0_u8, 1, 2, 1, 0];
         let mut sa = vec![0; t.len()];
@@ -18922,7 +19346,13 @@ mod tests {
             &mut thread_state,
         );
 
-        assert_eq!(threaded_sa, expected_sa);
+        assert_eq!(
+            threaded_sa
+                .iter()
+                .zip(&expected_sa)
+                .position(|(a, b)| a != b),
+            None
+        );
         assert_eq!(threaded_bucket, expected_bucket);
     }
 
@@ -18959,7 +19389,16 @@ mod tests {
             &mut thread_state,
         );
 
-        assert_eq!(threaded_sa, expected_sa);
+        let first_diff = threaded_sa
+            .iter()
+            .zip(&expected_sa)
+            .position(|(a, b)| a != b);
+        if let Some(index) = first_diff {
+            panic!(
+                "first SA mismatch at {index}: threaded={}, expected={}",
+                threaded_sa[index], expected_sa[index]
+            );
+        }
         assert_eq!(threaded_bucket, expected_bucket);
     }
 
@@ -19042,6 +19481,67 @@ mod tests {
 
         assert_eq!(sa, expected_sa);
         assert_eq!(induction_bucket, expected_bucket);
+    }
+
+    #[test]
+    fn final_sorting_scan_right_to_left_32s_block_parallel_gather_matches_serial_gather() {
+        let block_start = 4_096usize;
+        let block_size = 4 * LIBSAIS_PER_THREAD_CACHE_SIZE;
+        let n = block_start + block_size + 16;
+        let t = vec![1; n];
+        let suffixes: Vec<SaSint> = (2..2 + block_size).map(|i| i as SaSint).collect();
+
+        let mut expected_sa = vec![0; n];
+        expected_sa[block_start..block_start + block_size].copy_from_slice(&suffixes);
+        let mut gathered_sa = expected_sa.clone();
+        let mut expected_cache = vec![ThreadCache::default(); block_size];
+        let mut gathered_cache = vec![ThreadCache::default(); block_size];
+
+        final_sorting_scan_right_to_left_32s_block_gather(
+            &t,
+            &mut expected_sa,
+            &mut expected_cache,
+            block_start as FastSint,
+            block_size as FastSint,
+        );
+
+        let sa_ptr = SyncMutPtr::new(&mut gathered_sa);
+        let cache_ptr = SyncMutPtr::new(&mut gathered_cache);
+        run_rayon_with_threads(4, || {
+            (0..4usize).into_par_iter().for_each(|thread_num| {
+                let relative_start = thread_num * LIBSAIS_PER_THREAD_CACHE_SIZE;
+                let sa = unsafe { sa_ptr.as_slice() };
+                let cache = unsafe { cache_ptr.as_slice() };
+                final_sorting_scan_right_to_left_32s_block_gather(
+                    &t,
+                    sa,
+                    &mut cache[relative_start..relative_start + LIBSAIS_PER_THREAD_CACHE_SIZE],
+                    (block_start + relative_start) as FastSint,
+                    LIBSAIS_PER_THREAD_CACHE_SIZE as FastSint,
+                );
+            });
+        });
+
+        let first_sa_diff = gathered_sa
+            .iter()
+            .zip(&expected_sa)
+            .position(|(a, b)| a != b);
+        if let Some(index) = first_sa_diff {
+            panic!(
+                "first SA mismatch at {index}: threaded={}, expected={}",
+                gathered_sa[index], expected_sa[index]
+            );
+        }
+        let first_cache_diff = gathered_cache
+            .iter()
+            .zip(&expected_cache)
+            .position(|(a, b)| a != b);
+        if let Some(index) = first_cache_diff {
+            panic!(
+                "first cache mismatch at {index}: threaded={:?}, expected={:?}",
+                gathered_cache[index], expected_cache[index]
+            );
+        }
     }
 
     #[test]
@@ -20312,6 +20812,18 @@ mod tests {
         assert_eq!(libsais(&text, &mut sa_single, 0, None), 0);
         assert_eq!(libsais_omp(&text, &mut sa_omp, 0, None, 4), 0);
         assert_eq!(sa_single, sa_omp, "threads=4 SA must match threads=1 SA");
+    }
+
+    #[cfg(feature = "upstream-c")]
+    #[test]
+    fn libsais_omp_threads_4_matches_upstream_c_on_dna_input() {
+        let text = deterministic_large_input(0xD1A5_D1A5, 128_000, 5);
+        let mut rust_sa = vec![0 as SaSint; text.len()];
+        let mut c_sa = vec![0 as SaSint; text.len()];
+
+        assert_eq!(libsais_omp(&text, &mut rust_sa, 0, None, 4), 0);
+        assert_eq!(libsais_upstream_c_omp(&text, &mut c_sa, 0, None, 4), 0);
+        assert_eq!(rust_sa, c_sa, "threads=4 DNA SA must match upstream C");
     }
 
     /// Guard against the README's "futex deadlock when called from inside a

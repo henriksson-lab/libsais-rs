@@ -12686,12 +12686,14 @@ pub fn libsais64_omp(
     }
 
     let threads = normalize_omp_threads(threads);
-    if n <= i32::MAX as usize {
-        return libsais64_run_32bit_omp(t, sa, fs, freq, threads, false)
-            .expect("n <= INT32_MAX must have 32-bit workspace");
-    }
+    run_rayon_with_threads(threads as usize, || {
+        if n <= i32::MAX as usize {
+            return libsais64_run_32bit_omp(t, sa, fs, freq, threads, false)
+                .expect("n <= INT32_MAX must have 32-bit workspace");
+        }
 
-    libsais64_main(t, sa, LIBSAIS_FLAGS_NONE, 0, None, fs, freq, threads)
+        libsais64_main(t, sa, LIBSAIS_FLAGS_NONE, 0, None, fs, freq, threads)
+    })
 }
 
 /// Constructs the generalized suffix array (GSA) of given string set in parallel using OpenMP.
