@@ -8,7 +8,7 @@ use std::mem;
 
 use rayon::prelude::*;
 
-use crate::{run_rayon_with_threads, SyncMutPtr};
+use crate::{for_each_thread, run_rayon_with_threads, SyncMutPtr};
 
 pub type SaSint = i32;
 pub type SaUint = u32;
@@ -2327,8 +2327,7 @@ fn radix_sort_set_markers_32s_6k_omp(
 
     {
         let sa_ptr = SyncMutPtr::new(sa);
-        run_rayon_with_threads(threads_usize, || {
-            (0..threads_usize).into_par_iter().for_each(|thread| {
+        for_each_thread(threads_usize, |thread| {
                 let start = thread * stride;
                 let end = if thread + 1 == threads_usize {
                     last
@@ -2345,7 +2344,6 @@ fn radix_sort_set_markers_32s_6k_omp(
                     );
                 }
             });
-        });
     }
 }
 
@@ -2370,8 +2368,7 @@ fn radix_sort_set_markers_32s_4k_omp(
 
     {
         let sa_ptr = SyncMutPtr::new(sa);
-        run_rayon_with_threads(threads_usize, || {
-            (0..threads_usize).into_par_iter().for_each(|thread| {
+        for_each_thread(threads_usize, |thread| {
                 let start = thread * stride;
                 let end = if thread + 1 == threads_usize {
                     last
@@ -2388,7 +2385,6 @@ fn radix_sort_set_markers_32s_4k_omp(
                     );
                 }
             });
-        });
     }
 }
 
@@ -2435,8 +2431,7 @@ fn partial_sorting_shift_markers_32s_6k_omp(
         let sa_ptr = SyncMutPtr::new(sa);
         let buckets_ref: &[SaSint] = buckets;
         let temp_bucket_ref: &[SaSint] = temp_bucket;
-        run_rayon_with_threads(thread_count, || {
-            (0..thread_count).into_par_iter().for_each(|t| {
+        for_each_thread(thread_count, |t| {
                 let mut c = k_usize as isize - 1 - t as isize;
                 let sa = unsafe { sa_ptr.as_slice() };
                 while c >= 1 {
@@ -2481,7 +2476,6 @@ fn partial_sorting_shift_markers_32s_6k_omp(
                     c -= thread_count as isize;
                 }
             });
-        });
     }
 }
 
@@ -4574,10 +4568,7 @@ fn partial_sorting_scan_left_to_right_32s_6k_block_omp(
         let sa_ptr = SyncMutPtr::new(sa);
         let t_ro: &[SaSint] = t;
         let cache_ptr = SyncMutPtr::new(cache);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let mut omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
                     } else {
@@ -4598,7 +4589,6 @@ fn partial_sorting_scan_left_to_right_32s_6k_block_omp(
                         omp_block_size as SaSint,
                     );
                 });
-        });
     }
 
     let d = partial_sorting_scan_left_to_right_32s_6k_block_sort(
@@ -4651,10 +4641,7 @@ fn partial_sorting_scan_left_to_right_32s_4k_block_omp(
         let sa_ptr = SyncMutPtr::new(sa);
         let t_ro: &[SaSint] = t;
         let cache_ptr = SyncMutPtr::new(cache);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let mut omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
                     } else {
@@ -4675,7 +4662,6 @@ fn partial_sorting_scan_left_to_right_32s_4k_block_omp(
                         omp_block_size as SaSint,
                     );
                 });
-        });
     }
 
     let cache = &mut cache[..block_size_usize];
@@ -4725,10 +4711,7 @@ fn partial_sorting_scan_left_to_right_32s_1k_block_omp(
         let sa_ptr = SyncMutPtr::new(sa);
         let t_ro: &[SaSint] = t;
         let cache_ptr = SyncMutPtr::new(cache);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let mut omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
                     } else {
@@ -4749,7 +4732,6 @@ fn partial_sorting_scan_left_to_right_32s_1k_block_omp(
                         omp_block_size as SaSint,
                     );
                 });
-        });
     }
 
     let cache = &mut cache[..block_size_usize];
@@ -4799,10 +4781,7 @@ fn partial_sorting_scan_right_to_left_32s_6k_block_omp(
         let sa_ptr = SyncMutPtr::new(sa);
         let t_ro: &[SaSint] = t;
         let cache_ptr = SyncMutPtr::new(cache);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let mut omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
                     } else {
@@ -4823,7 +4802,6 @@ fn partial_sorting_scan_right_to_left_32s_6k_block_omp(
                         omp_block_size as SaSint,
                     );
                 });
-        });
     }
 
     d = partial_sorting_scan_right_to_left_32s_6k_block_sort(
@@ -4837,10 +4815,7 @@ fn partial_sorting_scan_right_to_left_32s_6k_block_omp(
     {
         let sa_ptr = SyncMutPtr::new(sa);
         let cache_ro: &[ThreadCache] = cache;
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let mut omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
                     } else {
@@ -4855,7 +4830,6 @@ fn partial_sorting_scan_right_to_left_32s_6k_block_omp(
                         sa[entry.symbol as usize] = entry.index;
                     }
                 });
-        });
     }
     d
 }
@@ -4898,10 +4872,7 @@ fn partial_sorting_scan_right_to_left_32s_4k_block_omp(
         let sa_ptr = SyncMutPtr::new(sa);
         let t_ro: &[SaSint] = t;
         let cache_ptr = SyncMutPtr::new(cache);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let mut omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
                     } else {
@@ -4922,7 +4893,6 @@ fn partial_sorting_scan_right_to_left_32s_4k_block_omp(
                         omp_block_size as SaSint,
                     );
                 });
-        });
     }
 
     d = partial_sorting_scan_right_to_left_32s_4k_block_sort(
@@ -4977,10 +4947,7 @@ fn partial_sorting_scan_right_to_left_32s_1k_block_omp(
         let sa_ptr = SyncMutPtr::new(sa);
         let t_ro: &[SaSint] = t;
         let cache_ptr = SyncMutPtr::new(cache);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let mut omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
                     } else {
@@ -5001,7 +4968,6 @@ fn partial_sorting_scan_right_to_left_32s_1k_block_omp(
                         omp_block_size as SaSint,
                     );
                 });
-        });
     }
 
     let cache = &mut cache[..block_size_usize];
@@ -5444,8 +5410,7 @@ fn partial_sorting_shift_markers_16u_omp(
     let c_max = buckets_index2(ALPHABET_SIZE - 1, 0) as isize;
     let sa_ptr = SyncMutPtr::new(sa);
     let buckets_ref: &[SaSint] = buckets;
-    run_rayon_with_threads(thread_count, || {
-        (0..thread_count).into_par_iter().for_each(|t| {
+    for_each_thread(thread_count, |t| {
             let mut c = c_max - (t as isize * c_step);
             let sa = unsafe { sa_ptr.as_slice() };
             while c >= c_min {
@@ -5489,7 +5454,6 @@ fn partial_sorting_shift_markers_16u_omp(
                 c -= c_step * thread_count as isize;
             }
         });
-    });
 }
 
 fn induce_partial_order_16u_omp(
@@ -5839,10 +5803,7 @@ fn final_sorting_scan_left_to_right_32s_block_omp(
     {
         let sa_ptr = SyncMutPtr::new(sa);
         let cache_ptr = SyncMutPtr::new(cache);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let omp_block_start = omp_thread_num * omp_block_stride;
                     let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
@@ -5858,7 +5819,6 @@ fn final_sorting_scan_left_to_right_32s_block_omp(
                         omp_block_size as SaSint,
                     );
                 });
-        });
     }
 }
 
@@ -6045,10 +6005,7 @@ fn final_sorting_scan_right_to_left_32s_block_omp(
     {
         let sa_ptr = SyncMutPtr::new(sa);
         let cache_ptr = SyncMutPtr::new(cache);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let omp_block_start = omp_thread_num * omp_block_stride;
                     let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
@@ -6064,7 +6021,6 @@ fn final_sorting_scan_right_to_left_32s_block_omp(
                         omp_block_size as SaSint,
                     );
                 });
-        });
     }
 }
 
@@ -6215,8 +6171,7 @@ fn clear_lms_suffixes_omp(
         let sa_ptr = SyncMutPtr::new(sa);
         let bucket_start_ref: &[SaSint] = bucket_start;
         let bucket_end_ref: &[SaSint] = bucket_end;
-        run_rayon_with_threads(thread_count, || {
-            (0..thread_count).into_par_iter().for_each(|t| {
+        for_each_thread(thread_count, |t| {
                 let mut c = t;
                 let sa = unsafe { sa_ptr.as_slice() };
                 while c < k_usize {
@@ -6228,7 +6183,6 @@ fn clear_lms_suffixes_omp(
                     c += thread_count;
                 }
             });
-        });
     }
 }
 
@@ -9925,19 +9879,21 @@ fn main_16u_alloc(
         Vec::new()
     };
 
-    main_16u(
-        t,
-        sa,
-        t.len() as SaSint,
-        &mut buckets,
-        flags,
-        r,
-        i_out,
-        fs,
-        None,
-        threads,
-        &mut thread_state,
-    )
+    crate::install_pool(threads.max(1) as usize, || {
+        main_16u(
+            t,
+            sa,
+            t.len() as SaSint,
+            &mut buckets,
+            flags,
+            r,
+            i_out,
+            fs,
+            None,
+            threads,
+            &mut thread_state,
+        )
+    })
 }
 
 fn main_16u_ctx(
@@ -9986,19 +9942,23 @@ fn main_16u_ctx(
         &mut empty_thread_state
     };
 
-    main_16u(
-        t,
-        sa,
-        t.len() as SaSint,
-        &mut ctx.buckets,
-        flags,
-        r,
-        i_out,
-        fs,
-        None,
-        ctx.threads,
-        thread_state,
-    )
+    let threads = ctx.threads;
+    let buckets = &mut ctx.buckets;
+    crate::install_pool(threads.max(1) as usize, || {
+        main_16u(
+            t,
+            sa,
+            t.len() as SaSint,
+            buckets,
+            flags,
+            r,
+            i_out,
+            fs,
+            None,
+            threads,
+            thread_state,
+        )
+    })
 }
 
 fn main_int(t: &mut [SaSint], sa: &mut [SaSint], k: SaSint, fs: SaSint, threads: SaSint) -> SaSint {
@@ -11154,8 +11114,7 @@ fn unbwt_decode_omp(
     let block_stride = blocks / num_threads;
     let block_remainder = blocks % num_threads;
     let u_ptr = SyncMutPtr::new(u);
-    run_rayon_with_threads(num_threads, || {
-        (0..num_threads).into_par_iter().for_each(|thread| {
+    for_each_thread(num_threads, |thread| {
             let block_count = block_stride + usize::from(thread < block_remainder);
             let block_start = block_stride * thread + thread.min(block_remainder);
             let tail = if thread + 1 < num_threads {
@@ -11176,7 +11135,6 @@ fn unbwt_decode_omp(
                 tail,
             );
         });
-    });
 }
 
 fn unbwt_decode_lanes<const LANES: usize>(
