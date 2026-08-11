@@ -491,7 +491,11 @@ pub fn gather_lms_suffixes_8u(
     let mut i = block_start + block_size - 2;
     let limit = block_start + 3;
 
+    // Upstream uses a prefetch distance of 256 in this gather loop.
+    let prefetch_distance = 256isize;
+    let t_ptr = t.as_ptr();
     while i >= limit {
+        libsais_prefetchr(t_ptr.wrapping_offset(i as isize - prefetch_distance));
         c1 = t[i] as FastSint;
         f1 = usize::from(c1 > (c0 - f0 as FastSint));
         sa[m as usize] = (i + 1) as SaSint;
@@ -877,8 +881,9 @@ pub fn count_and_gather_lms_suffixes_8u(
         let mut i = m - 1;
         let limit = omp_block_start + 3;
 
+        let t_ptr = t.as_ptr();
         while i >= limit {
-            let _prefetch_index = i - prefetch_distance;
+            libsais_prefetchr(t_ptr.wrapping_offset(i - prefetch_distance));
             c1 = t[i as usize] as FastSint;
             f1 = usize::from(c1 > (c0 - f0 as FastSint));
             sa[m as usize] = (i + 1) as SaSint;
@@ -1056,8 +1061,19 @@ pub fn count_and_gather_lms_suffixes_32s_4k(
         let mut i = m - 1;
         let limit = omp_block_start + prefetch_distance + 3;
 
+        let t_ptr = t.as_ptr();
+        let buckets_ptr = buckets.as_ptr();
         while i >= limit {
-            let _prefetch_index = i - 2 * prefetch_distance;
+            libsais_prefetchr(t_ptr.wrapping_offset(i - 2 * prefetch_distance));
+            for lookahead in 0..4 {
+                let idx = i - prefetch_distance - lookahead;
+                if idx >= 0 {
+                    let symbol = t[idx as usize] as SaSint & SAINT_MAX;
+                    libsais_prefetchw(
+                        buckets_ptr.wrapping_add(buckets_index4(symbol as usize, 0)),
+                    );
+                }
+            }
             c1 = t[i as usize] as FastSint;
             f1 = usize::from(c1 > (c0 - f0 as FastSint));
             sa[m as usize] = (i + 1) as SaSint;
@@ -1146,8 +1162,19 @@ pub fn count_and_gather_lms_suffixes_32s_2k(
         let mut i = m - 1;
         let limit = omp_block_start + prefetch_distance + 3;
 
+        let t_ptr = t.as_ptr();
+        let buckets_ptr = buckets.as_ptr();
         while i >= limit {
-            let _prefetch_index = i - 2 * prefetch_distance;
+            libsais_prefetchr(t_ptr.wrapping_offset(i - 2 * prefetch_distance));
+            for lookahead in 0..4 {
+                let idx = i - prefetch_distance - lookahead;
+                if idx >= 0 {
+                    let symbol = t[idx as usize] as SaSint & SAINT_MAX;
+                    libsais_prefetchw(
+                        buckets_ptr.wrapping_add(buckets_index4(symbol as usize, 0)),
+                    );
+                }
+            }
             c1 = t[i as usize] as FastSint;
             f1 = usize::from(c1 > (c0 - f0 as FastSint));
             sa[m as usize] = (i + 1) as SaSint;
@@ -2180,7 +2207,16 @@ pub fn radix_sort_lms_suffixes_8u(
     let mut i = omp_block_start + omp_block_size - 1;
     let mut j = omp_block_start + prefetch_distance + 3;
 
+    let sa_ptr_ro = sa.as_ptr();
+    let t_ptr = t.as_ptr();
     while i >= j {
+        libsais_prefetchr(sa_ptr_ro.wrapping_offset(i - 2 * prefetch_distance));
+        for lookahead in 0..4 {
+            let idx = i - prefetch_distance - lookahead;
+            if idx >= 0 {
+                libsais_prefetchr(t_ptr.wrapping_offset(sa[idx as usize] as isize));
+            }
+        }
         let p0 = sa[i as usize];
         let idx0 = buckets_index2(t[p0 as usize] as usize, 0);
         induction_bucket[idx0] -= 1;
@@ -6776,11 +6812,19 @@ pub fn renumber_lms_suffixes_8u(
 
     let m_usize = usize::try_from(m).expect("m must be non-negative");
     let (sa_head, sam) = sa.split_at_mut(m_usize);
+    let prefetch_distance = 64usize;
     let mut i = omp_block_start;
     let mut j = omp_block_start + omp_block_size - 64 - 3;
 
+    let sa_head_ptr = sa_head.as_ptr();
+    let sam_ptr = sam.as_ptr();
     while i < j {
         let i0 = i as usize;
+        libsais_prefetchr(sa_head_ptr.wrapping_add(i0 + 2 * prefetch_distance));
+        for lookahead in 0..4 {
+            let slot = (sa_head[i0 + prefetch_distance + lookahead] & SAINT_MAX) >> 1;
+            libsais_prefetchw(sam_ptr.wrapping_add(slot as usize));
+        }
         let p0 = sa_head[i0];
         let d0 = ((p0 & SAINT_MAX) >> 1) as usize;
         sam[d0] = name | SAINT_MIN;
@@ -6833,7 +6877,10 @@ pub fn gather_marked_lms_suffixes(
     let mut i = m as FastSint + omp_block_start + omp_block_size - 1;
     let mut j = m as FastSint + omp_block_start + 3;
 
+    let prefetch_distance = 64isize;
+    let sa_ptr_ro = sa.as_ptr();
     while i >= j {
+        libsais_prefetchr(sa_ptr_ro.wrapping_offset(i - prefetch_distance));
         let i0 = i as usize;
         let s0 = sa[i0];
         sa[l as usize] = s0 & SAINT_MAX;
@@ -7084,7 +7131,14 @@ pub fn renumber_distinct_lms_suffixes_32s_4k(
     let mut p2;
     let mut p3 = 0;
 
+    let sa_head_ptr = sa_head.as_ptr();
+    let sam_ptr = sam.as_ptr();
     while i < j {
+        libsais_prefetchw(sa_head_ptr.wrapping_add(i + 2 * prefetch_distance));
+        for lookahead in 0..4 {
+            let v = (sa_head[i + prefetch_distance + lookahead] & SAINT_MAX) >> 1;
+            libsais_prefetchw(sam_ptr.wrapping_add(v as usize));
+        }
         p0 = sa_head[i];
         sa_head[i] = p0 & SAINT_MAX;
         sam[(sa_head[i] >> 1) as usize] = name | (p0 & p3 & SAINT_MIN);
@@ -7560,7 +7614,14 @@ pub fn reconstruct_lms_suffixes(
     let mut i = omp_block_start;
     let mut j = omp_block_start + omp_block_size - prefetch_distance - 3;
 
+    let sa_ptr_ro = sa.as_ptr();
+    let sanm_base = (n - m) as isize;
     while i < j {
+        libsais_prefetchw(sa_ptr_ro.wrapping_offset(i + 2 * prefetch_distance));
+        for lookahead in 0..4 {
+            let v = sa[(i + prefetch_distance + lookahead) as usize] as isize;
+            libsais_prefetchr(sa_ptr_ro.wrapping_offset(sanm_base + v));
+        }
         let iu = i as usize;
         let s0 = sa[iu] as usize;
         let s1 = sa[iu + 1] as usize;
@@ -10893,7 +10954,14 @@ pub fn renumber_unique_and_nonunique_lms_suffixes_32s(
     let mut i = omp_block_start as SaSint;
     let mut j = omp_block_start as SaSint + omp_block_size as SaSint - 2 * prefetch_distance - 3;
 
+    let sa_head_ptr = sa_head.as_ptr();
+    let sam_ptr = sam.as_ptr();
     while i < j {
+        libsais_prefetchr(sa_head_ptr.wrapping_offset((i + 3 * prefetch_distance) as isize));
+        for lookahead in 0..4 {
+            let v = sa_head[(i + 2 * prefetch_distance + lookahead) as usize] as SaUint >> 1;
+            libsais_prefetchw(sam_ptr.wrapping_add(v as usize));
+        }
         let p0 = sa_head[i as usize] as SaUint;
         let p0_half = (p0 >> 1) as usize;
         let mut s0 = sam[p0_half];
@@ -11273,7 +11341,10 @@ pub fn merge_unique_lms_suffixes_32s(
     let block_end =
         i + usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
     let j = block_end.saturating_sub(6);
+    let prefetch_distance = 64usize;
+    let t_ptr = t.as_ptr();
     while i < j {
+        libsais_prefetchr(t_ptr.wrapping_add(i + prefetch_distance));
         let c0 = t[i];
         if c0 < 0 {
             t[i] = c0 & SAINT_MAX;
@@ -11350,7 +11421,10 @@ pub fn merge_nonunique_lms_suffixes_32s(
     let block_end =
         i + usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
     let j = block_end.saturating_sub(3);
+    let prefetch_distance = 64usize;
+    let sa_ptr_ro = sa.as_ptr();
     while i < j {
+        libsais_prefetchr(sa_ptr_ro.wrapping_add(i + prefetch_distance));
         if sa[i] == 0 {
             sa[i] = tmp;
             tmp = sa[src_index];
