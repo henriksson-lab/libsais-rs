@@ -16,6 +16,12 @@ use rayon::prelude::*;
 pub mod libsais16;
 pub mod libsais16x64;
 pub mod libsais64;
+// Public only when the developer-only `profile` feature is on, so a default
+// build adds no public API surface.
+#[cfg(feature = "profile")]
+pub mod profile;
+#[cfg(not(feature = "profile"))]
+pub(crate) mod profile;
 pub use libsais16::{libsais16, SaSint as SaSint16, SaUint as SaUint16};
 pub use libsais16x64::{libsais16x64, SaSint as SaSint16x64, SaUint as SaUint16x64};
 pub use libsais64::{libsais64, SaSint as SaSint64, SaUint as SaUint64};
@@ -41,7 +47,20 @@ pub(crate) fn libsais_prefetchr<T>(ptr: *const T) {
     unsafe {
         std::arch::x86_64::_mm_prefetch(ptr as *const i8, std::arch::x86_64::_MM_HINT_T0);
     }
-    #[cfg(not(target_arch = "x86_64"))]
+    // `core::arch::aarch64::_prefetch` is still unstable, so emit the
+    // instruction directly. `pldl1keep` is the aarch64 spelling of the
+    // `__builtin_prefetch` upstream compiles to on this target. A prefetch is a
+    // hint: it cannot fault, cannot change registers or memory, and cannot
+    // alter results, only when a cache line arrives.
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        std::arch::asm!(
+            "prfm pldl1keep, [{ptr}]",
+            ptr = in(reg) ptr,
+            options(nostack, readonly, preserves_flags),
+        );
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
         let _ = ptr;
     }
@@ -56,7 +75,20 @@ pub(crate) fn libsais_prefetchw<T>(ptr: *const T) {
     unsafe {
         std::arch::x86_64::_mm_prefetch(ptr as *const i8, std::arch::x86_64::_MM_HINT_T0);
     }
-    #[cfg(not(target_arch = "x86_64"))]
+    // `core::arch::aarch64::_prefetch` is still unstable, so emit the
+    // instruction directly. `pstl1keep` is the aarch64 spelling of the
+    // `__builtin_prefetch` upstream compiles to on this target. A prefetch is a
+    // hint: it cannot fault, cannot change registers or memory, and cannot
+    // alter results, only when a cache line arrives.
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        std::arch::asm!(
+            "prfm pstl1keep, [{ptr}]",
+            ptr = in(reg) ptr,
+            options(nostack, readonly, preserves_flags),
+        );
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
         let _ = ptr;
     }
