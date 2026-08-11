@@ -8606,22 +8606,35 @@ pub fn final_bwt_scan_left_to_right_8u_block_omp(
 
     let block_start_usize = usize::try_from(block_start).expect("block_start must be non-negative");
     let omp_block_stride = (block_size_usize / omp_num_threads) & !15usize;
-    for (thread_num, state) in thread_state.iter_mut().take(omp_num_threads).enumerate() {
-        let relative_start = thread_num * omp_block_stride;
-        let size = if thread_num + 1 < omp_num_threads {
-            omp_block_stride
-        } else {
-            block_size_usize - relative_start
-        };
-        state.count = final_bwt_scan_left_to_right_8u_block_prepare(
-            t,
-            sa,
-            k,
-            &mut state.buckets,
-            &mut state.cache,
-            (block_start_usize + relative_start) as FastSint,
-            size as FastSint,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        run_rayon_with_threads(omp_num_threads, || {
+            thread_state[..omp_num_threads]
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(thread_num, state)| {
+                    let relative_start = thread_num * omp_block_stride;
+                    let size = if thread_num + 1 < omp_num_threads {
+                        omp_block_stride
+                    } else {
+                        block_size_usize - relative_start
+                    };
+                    // SAFETY: each thread's prepare pass reads and writes only
+                    // sa within its own sub-block, and those ranges are disjoint
+                    // by construction of omp_block_stride. This is the invariant
+                    // the C original relies on inside `#pragma omp parallel`.
+                    let sa = unsafe { sa_ptr.as_slice() };
+                    state.count = final_bwt_scan_left_to_right_8u_block_prepare(
+                        t,
+                        sa,
+                        k,
+                        &mut state.buckets,
+                        &mut state.cache,
+                        (block_start_usize + relative_start) as FastSint,
+                        size as FastSint,
+                    );
+                });
+        });
     }
 
     for state in thread_state.iter_mut().take(omp_num_threads) {
@@ -8633,13 +8646,24 @@ pub fn final_bwt_scan_left_to_right_8u_block_omp(
         }
     }
 
-    for state in thread_state.iter_mut().take(omp_num_threads) {
-        final_order_scan_left_to_right_8u_block_place(
-            sa,
-            &mut state.buckets,
-            &state.cache,
-            state.count,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        run_rayon_with_threads(omp_num_threads, || {
+            thread_state[..omp_num_threads]
+                .par_iter_mut()
+                .for_each(|state| {
+                    // SAFETY: each thread writes only to sa positions drawn from
+                    // its own state.buckets, which the serial merge above
+                    // partitioned so distinct threads produce disjoint positions.
+                    let sa = unsafe { sa_ptr.as_slice() };
+                    final_order_scan_left_to_right_8u_block_place(
+                        sa,
+                        &mut state.buckets,
+                        &state.cache,
+                        state.count,
+                    );
+                });
+        });
     }
 }
 
@@ -8687,22 +8711,35 @@ pub fn final_bwt_aux_scan_left_to_right_8u_block_omp(
 
     let block_start_usize = usize::try_from(block_start).expect("block_start must be non-negative");
     let omp_block_stride = (block_size_usize / omp_num_threads) & !15usize;
-    for (thread_num, state) in thread_state.iter_mut().take(omp_num_threads).enumerate() {
-        let relative_start = thread_num * omp_block_stride;
-        let size = if thread_num + 1 < omp_num_threads {
-            omp_block_stride
-        } else {
-            block_size_usize - relative_start
-        };
-        state.count = final_bwt_scan_left_to_right_8u_block_prepare(
-            t,
-            sa,
-            k,
-            &mut state.buckets,
-            &mut state.cache,
-            (block_start_usize + relative_start) as FastSint,
-            size as FastSint,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        run_rayon_with_threads(omp_num_threads, || {
+            thread_state[..omp_num_threads]
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(thread_num, state)| {
+                    let relative_start = thread_num * omp_block_stride;
+                    let size = if thread_num + 1 < omp_num_threads {
+                        omp_block_stride
+                    } else {
+                        block_size_usize - relative_start
+                    };
+                    // SAFETY: each thread's prepare pass reads and writes only
+                    // sa within its own sub-block, and those ranges are disjoint
+                    // by construction of omp_block_stride. This is the invariant
+                    // the C original relies on inside `#pragma omp parallel`.
+                    let sa = unsafe { sa_ptr.as_slice() };
+                    state.count = final_bwt_scan_left_to_right_8u_block_prepare(
+                        t,
+                        sa,
+                        k,
+                        &mut state.buckets,
+                        &mut state.cache,
+                        (block_start_usize + relative_start) as FastSint,
+                        size as FastSint,
+                    );
+                });
+        });
     }
 
     for state in thread_state.iter_mut().take(omp_num_threads) {
@@ -8714,15 +8751,30 @@ pub fn final_bwt_aux_scan_left_to_right_8u_block_omp(
         }
     }
 
-    for state in thread_state.iter_mut().take(omp_num_threads) {
-        final_bwt_aux_scan_left_to_right_8u_block_place(
-            sa,
-            rm,
-            i_out,
-            &mut state.buckets,
-            &state.cache,
-            state.count,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        let i_out_ptr = SyncMutPtr::new(i_out);
+        run_rayon_with_threads(omp_num_threads, || {
+            thread_state[..omp_num_threads]
+                .par_iter_mut()
+                .for_each(|state| {
+                    // SAFETY: each thread writes only to sa positions drawn from
+                    // its own state.buckets, which the serial merge above
+                    // partitioned so distinct threads produce disjoint positions.
+                    // i_out is written only at index p / (rm + 1) for
+                    // suffix positions p distinct across threads.
+                    let sa = unsafe { sa_ptr.as_slice() };
+                    let i_out = unsafe { i_out_ptr.as_slice() };
+                    final_bwt_aux_scan_left_to_right_8u_block_place(
+                        sa,
+                        rm,
+                        i_out,
+                        &mut state.buckets,
+                        &state.cache,
+                        state.count,
+                    );
+                });
+        });
     }
 }
 
@@ -10145,22 +10197,35 @@ pub fn final_bwt_aux_scan_right_to_left_8u_block_omp(
     }
 
     let omp_block_stride = (block_size_usize / omp_num_threads) & !15usize;
-    for (omp_thread_num, state) in thread_state.iter_mut().take(omp_num_threads).enumerate() {
-        let omp_block_start = omp_thread_num * omp_block_stride;
-        let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
-            omp_block_stride
-        } else {
-            block_size_usize - omp_block_start
-        };
-        state.count = final_bwt_aux_scan_right_to_left_8u_block_prepare(
-            t,
-            sa,
-            k,
-            &mut state.buckets,
-            &mut state.cache,
-            block_start + omp_block_start as FastSint,
-            omp_block_size as FastSint,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        run_rayon_with_threads(omp_num_threads, || {
+            thread_state[..omp_num_threads]
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(omp_thread_num, state)| {
+                    let omp_block_start = omp_thread_num * omp_block_stride;
+                    let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
+                        omp_block_stride
+                    } else {
+                        block_size_usize - omp_block_start
+                    };
+                    // SAFETY: each thread's prepare pass reads and writes only
+                    // sa within its own sub-block, and those ranges are disjoint
+                    // by construction of omp_block_stride. This is the invariant
+                    // the C original relies on inside `#pragma omp parallel`.
+                    let sa = unsafe { sa_ptr.as_slice() };
+                    state.count = final_bwt_aux_scan_right_to_left_8u_block_prepare(
+                        t,
+                        sa,
+                        k,
+                        &mut state.buckets,
+                        &mut state.cache,
+                        block_start + omp_block_start as FastSint,
+                        omp_block_size as FastSint,
+                    );
+                });
+        });
     }
     for state in thread_state.iter_mut().take(omp_num_threads).rev() {
         for c in 0..k_usize {
@@ -10170,15 +10235,30 @@ pub fn final_bwt_aux_scan_right_to_left_8u_block_omp(
             state.buckets[c] = a;
         }
     }
-    for state in thread_state.iter_mut().take(omp_num_threads) {
-        final_bwt_aux_scan_right_to_left_8u_block_place(
-            sa,
-            rm,
-            i_out,
-            &mut state.buckets,
-            &state.cache,
-            state.count,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        let i_out_ptr = SyncMutPtr::new(i_out);
+        run_rayon_with_threads(omp_num_threads, || {
+            thread_state[..omp_num_threads]
+                .par_iter_mut()
+                .for_each(|state| {
+                    // SAFETY: each thread writes only to sa positions drawn from
+                    // its own state.buckets, which the serial merge above
+                    // partitioned so distinct threads produce disjoint positions.
+                    // i_out is written only at index p / (rm + 1) for
+                    // suffix positions p distinct across threads.
+                    let sa = unsafe { sa_ptr.as_slice() };
+                    let i_out = unsafe { i_out_ptr.as_slice() };
+                    final_bwt_aux_scan_right_to_left_8u_block_place(
+                        sa,
+                        rm,
+                        i_out,
+                        &mut state.buckets,
+                        &state.cache,
+                        state.count,
+                    );
+                });
+        });
     }
 }
 
@@ -10281,22 +10361,35 @@ pub fn final_gsa_scan_right_to_left_8u_block_omp(
     }
 
     let omp_block_stride = (block_size_usize / omp_num_threads) & !15usize;
-    for (omp_thread_num, state) in thread_state.iter_mut().take(omp_num_threads).enumerate() {
-        let omp_block_start = omp_thread_num * omp_block_stride;
-        let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
-            omp_block_stride
-        } else {
-            block_size_usize - omp_block_start
-        };
-        state.count = final_sorting_scan_right_to_left_8u_block_prepare(
-            t,
-            sa,
-            k,
-            &mut state.buckets,
-            &mut state.cache,
-            block_start + omp_block_start as FastSint,
-            omp_block_size as FastSint,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        run_rayon_with_threads(omp_num_threads, || {
+            thread_state[..omp_num_threads]
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(omp_thread_num, state)| {
+                    let omp_block_start = omp_thread_num * omp_block_stride;
+                    let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
+                        omp_block_stride
+                    } else {
+                        block_size_usize - omp_block_start
+                    };
+                    // SAFETY: each thread's prepare pass reads and writes only
+                    // sa within its own sub-block, and those ranges are disjoint
+                    // by construction of omp_block_stride. This is the invariant
+                    // the C original relies on inside `#pragma omp parallel`.
+                    let sa = unsafe { sa_ptr.as_slice() };
+                    state.count = final_sorting_scan_right_to_left_8u_block_prepare(
+                        t,
+                        sa,
+                        k,
+                        &mut state.buckets,
+                        &mut state.cache,
+                        block_start + omp_block_start as FastSint,
+                        omp_block_size as FastSint,
+                    );
+                });
+        });
     }
     for state in thread_state.iter_mut().take(omp_num_threads).rev() {
         for c in 0..k_usize {
@@ -10306,13 +10399,24 @@ pub fn final_gsa_scan_right_to_left_8u_block_omp(
             state.buckets[c] = a;
         }
     }
-    for state in thread_state.iter_mut().take(omp_num_threads) {
-        final_gsa_scan_right_to_left_8u_block_place(
-            sa,
-            &mut state.buckets,
-            &state.cache,
-            state.count,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        run_rayon_with_threads(omp_num_threads, || {
+            thread_state[..omp_num_threads]
+                .par_iter_mut()
+                .for_each(|state| {
+                    // SAFETY: each thread writes only to sa positions drawn from
+                    // its own state.buckets, which the serial merge above
+                    // partitioned so distinct threads produce disjoint positions.
+                    let sa = unsafe { sa_ptr.as_slice() };
+                    final_gsa_scan_right_to_left_8u_block_place(
+                        sa,
+                        &mut state.buckets,
+                        &state.cache,
+                        state.count,
+                    );
+                });
+        });
     }
 }
 
