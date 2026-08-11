@@ -16,6 +16,12 @@ use rayon::prelude::*;
 pub mod libsais16;
 pub mod libsais16x64;
 pub mod libsais64;
+// Public only when the developer-only `profile` feature is on, so a default
+// build adds no public API surface.
+#[cfg(feature = "profile")]
+pub mod profile;
+#[cfg(not(feature = "profile"))]
+pub(crate) mod profile;
 pub use libsais16::{libsais16, SaSint as SaSint16, SaUint as SaUint16};
 pub use libsais16x64::{libsais16x64, SaSint as SaSint16x64, SaUint as SaUint16x64};
 pub use libsais64::{libsais64, SaSint as SaSint64, SaUint as SaUint64};
@@ -41,7 +47,20 @@ pub(crate) fn libsais_prefetchr<T>(ptr: *const T) {
     unsafe {
         std::arch::x86_64::_mm_prefetch(ptr as *const i8, std::arch::x86_64::_MM_HINT_T0);
     }
-    #[cfg(not(target_arch = "x86_64"))]
+    // `core::arch::aarch64::_prefetch` is still unstable, so emit the
+    // instruction directly. `pldl1keep` is the aarch64 spelling of the
+    // `__builtin_prefetch` upstream compiles to on this target. A prefetch is a
+    // hint: it cannot fault, cannot change registers or memory, and cannot
+    // alter results, only when a cache line arrives.
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        std::arch::asm!(
+            "prfm pldl1keep, [{ptr}]",
+            ptr = in(reg) ptr,
+            options(nostack, readonly, preserves_flags),
+        );
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
         let _ = ptr;
     }
@@ -56,7 +75,20 @@ pub(crate) fn libsais_prefetchw<T>(ptr: *const T) {
     unsafe {
         std::arch::x86_64::_mm_prefetch(ptr as *const i8, std::arch::x86_64::_MM_HINT_T0);
     }
-    #[cfg(not(target_arch = "x86_64"))]
+    // `core::arch::aarch64::_prefetch` is still unstable, so emit the
+    // instruction directly. `pstl1keep` is the aarch64 spelling of the
+    // `__builtin_prefetch` upstream compiles to on this target. A prefetch is a
+    // hint: it cannot fault, cannot change registers or memory, and cannot
+    // alter results, only when a cache line arrives.
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        std::arch::asm!(
+            "prfm pstl1keep, [{ptr}]",
+            ptr = in(reg) ptr,
+            options(nostack, readonly, preserves_flags),
+        );
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
         let _ = ptr;
     }
@@ -81,16 +113,52 @@ pub const LIBSAIS_FLAGS_GSA: SaSint = 2;
 /// pool from inside a worker can deadlock on the rayon job queue (the
 /// futex-deadlock symptom previously seen by downstream callers running
 /// libsais inside their own rayon pool).
-pub(crate) fn run_rayon_with_threads<R: Send>(threads: usize, f: impl FnOnce() -> R + Send) -> R {
-    if threads <= 1 || rayon::current_thread_index().is_some() {
+pub(crate) fn install_pool<R: Send>(threads: usize, f: impl FnOnce() -> R + Send) -> R {
+    if threads <= 1 {
         return f();
     }
-
-    if let Some(pool) = rayon_pool_for_threads(threads) {
-        pool.install(f)
-    } else {
-        f()
+    // An ambient pool of exactly the right size is already what we want, which
+    // is what makes the libsais64 to libsais delegation free.
+    if rayon::current_thread_index().is_some() && rayon::current_num_threads() == threads {
+        return f();
     }
+    crate::profile::count_pool_build();
+    match rayon_pool_for_threads(threads) {
+        Some(pool) => pool.install(f),
+        None => f(),
+    }
+}
+
+/// Runs `f` in the ambient pool established by [`install_pool`].
+///
+/// Interior parallel regions call this. It deliberately installs nothing:
+/// entering a pool once per call rather than once per region is worth about 2%
+/// at 8 threads on a genome-sized input, because the induction block loops enter
+/// thousands of regions per call.
+///
+/// The `threads` argument is retained because call sites use it to size their
+/// own work partitioning, which must stay derived from the caller's request
+/// rather than from whatever pool happens to be ambient.
+pub(crate) fn run_rayon_with_threads<R: Send>(threads: usize, f: impl FnOnce() -> R + Send) -> R {
+    let _ = threads;
+    f()
+}
+
+/// Runs `f(thread_index)` for `omp_num_threads` OpenMP-style block indices.
+///
+/// At one thread this calls `f(0)` directly rather than going through rayon.
+/// The serial entry points install no pool, so a `(0..1).into_par_iter()` there
+/// would reach for rayon's *global* pool, spawning workers to run a single
+/// block: a pure-serial `libsais()` call ran with 17 OS threads on a 16-core
+/// machine. The C original simply calls the block function when
+/// `omp_num_threads == 1`.
+#[inline]
+pub(crate) fn for_each_thread(omp_num_threads: usize, f: impl Fn(usize) + Send + Sync) {
+    if omp_num_threads <= 1 {
+        f(0);
+        return;
+    }
+    (0..omp_num_threads).into_par_iter().for_each(f);
 }
 
 fn rayon_pool_for_threads(threads: usize) -> Option<Arc<rayon::ThreadPool>> {
@@ -459,7 +527,11 @@ pub fn gather_lms_suffixes_8u(
     let mut i = block_start + block_size - 2;
     let limit = block_start + 3;
 
+    // Upstream uses a prefetch distance of 256 in this gather loop.
+    let prefetch_distance = 256isize;
+    let t_ptr = t.as_ptr();
     while i >= limit {
+        libsais_prefetchr(t_ptr.wrapping_offset(i as isize - prefetch_distance));
         c1 = t[i] as FastSint;
         f1 = usize::from(c1 > (c0 - f0 as FastSint));
         sa[m as usize] = (i + 1) as SaSint;
@@ -547,10 +619,7 @@ pub fn gather_lms_suffixes_8u_omp(
         })
         .collect();
 
-    run_rayon_with_threads(omp_num_threads, || {
-        (0..omp_num_threads)
-            .into_par_iter()
-            .for_each(|omp_thread_num| {
+    for_each_thread(omp_num_threads, |omp_thread_num| {
                 let omp_block_start = omp_thread_num * omp_block_stride;
                 let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                     omp_block_stride
@@ -569,7 +638,6 @@ pub fn gather_lms_suffixes_8u_omp(
                     omp_block_size as FastSint,
                 );
             });
-    });
 
     for omp_thread_num in 0..omp_num_threads {
         if last_lms_suffixes[omp_thread_num] != FastSint::MIN {
@@ -845,8 +913,9 @@ pub fn count_and_gather_lms_suffixes_8u(
         let mut i = m - 1;
         let limit = omp_block_start + 3;
 
+        let t_ptr = t.as_ptr();
         while i >= limit {
-            let _prefetch_index = i - prefetch_distance;
+            libsais_prefetchr(t_ptr.wrapping_offset(i - prefetch_distance));
             c1 = t[i as usize] as FastSint;
             f1 = usize::from(c1 > (c0 - f0 as FastSint));
             sa[m as usize] = (i + 1) as SaSint;
@@ -1024,8 +1093,19 @@ pub fn count_and_gather_lms_suffixes_32s_4k(
         let mut i = m - 1;
         let limit = omp_block_start + prefetch_distance + 3;
 
+        let t_ptr = t.as_ptr();
+        let buckets_ptr = buckets.as_ptr();
         while i >= limit {
-            let _prefetch_index = i - 2 * prefetch_distance;
+            libsais_prefetchr(t_ptr.wrapping_offset(i - 2 * prefetch_distance));
+            for lookahead in 0..4 {
+                let idx = i - prefetch_distance - lookahead;
+                if idx >= 0 {
+                    let symbol = t[idx as usize] as SaSint & SAINT_MAX;
+                    libsais_prefetchw(
+                        buckets_ptr.wrapping_add(buckets_index4(symbol as usize, 0)),
+                    );
+                }
+            }
             c1 = t[i as usize] as FastSint;
             f1 = usize::from(c1 > (c0 - f0 as FastSint));
             sa[m as usize] = (i + 1) as SaSint;
@@ -1114,8 +1194,19 @@ pub fn count_and_gather_lms_suffixes_32s_2k(
         let mut i = m - 1;
         let limit = omp_block_start + prefetch_distance + 3;
 
+        let t_ptr = t.as_ptr();
+        let buckets_ptr = buckets.as_ptr();
         while i >= limit {
-            let _prefetch_index = i - 2 * prefetch_distance;
+            libsais_prefetchr(t_ptr.wrapping_offset(i - 2 * prefetch_distance));
+            for lookahead in 0..4 {
+                let idx = i - prefetch_distance - lookahead;
+                if idx >= 0 {
+                    let symbol = t[idx as usize] as SaSint & SAINT_MAX;
+                    libsais_prefetchw(
+                        buckets_ptr.wrapping_add(buckets_index4(symbol as usize, 0)),
+                    );
+                }
+            }
             c1 = t[i as usize] as FastSint;
             f1 = usize::from(c1 > (c0 - f0 as FastSint));
             sa[m as usize] = (i + 1) as SaSint;
@@ -1441,10 +1532,7 @@ pub fn count_and_gather_lms_suffixes_32s_4k_fs_omp(
     let omp_block_stride = (bucket_size_usize / omp_num_threads) & !15usize;
     {
         let ws_ptr = SyncMutPtr::new(&mut workspace);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let omp_block_start = omp_thread_num * omp_block_stride;
                     let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
@@ -1464,7 +1552,6 @@ pub fn count_and_gather_lms_suffixes_32s_4k_fs_omp(
                             .expect("thread count must fit FastSint"),
                     );
                 });
-        });
     }
 
     let accumulated_start = omp_num_threads * bucket_stride_usize;
@@ -1565,10 +1652,7 @@ pub fn count_and_gather_lms_suffixes_32s_2k_fs_omp(
     let omp_block_stride = (bucket_size_usize / omp_num_threads) & !15usize;
     {
         let ws_ptr = SyncMutPtr::new(&mut workspace);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let omp_block_start = omp_thread_num * omp_block_stride;
                     let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
@@ -1585,7 +1669,6 @@ pub fn count_and_gather_lms_suffixes_32s_2k_fs_omp(
                             .expect("thread count must fit FastSint"),
                     );
                 });
-        });
     }
 
     let accumulated_start = omp_num_threads * bucket_stride_usize;
@@ -1646,10 +1729,7 @@ pub fn count_and_gather_compacted_lms_suffixes_32s_2k_fs_omp(
         let sa_ptr = SyncMutPtr::new(sa);
         let ws_ptr = SyncMutPtr::new(&mut workspace);
         let state_ptr = SyncMutPtr::new(thread_state);
-        run_rayon_with_threads(thread_count, || {
-            (0..thread_count)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(thread_count, |omp_thread_num| {
                     let omp_block_start = omp_thread_num * omp_block_stride;
                     let omp_block_size = if omp_thread_num + 1 < thread_count {
                         omp_block_stride
@@ -1681,7 +1761,6 @@ pub fn count_and_gather_compacted_lms_suffixes_32s_2k_fs_omp(
                         states[omp_thread_num].count = count as FastSint;
                     }
                 });
-        });
     }
 
     let mut m = 0usize;
@@ -1703,10 +1782,7 @@ pub fn count_and_gather_compacted_lms_suffixes_32s_2k_fs_omp(
     let omp_block_stride = (bucket_size / accumulation_threads) & !15usize;
     {
         let ws_ptr = SyncMutPtr::new(&mut workspace);
-        run_rayon_with_threads(accumulation_threads, || {
-            (0..accumulation_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(accumulation_threads, |omp_thread_num| {
                     let omp_block_start = omp_thread_num * omp_block_stride;
                     let omp_block_size = if omp_thread_num + 1 < accumulation_threads {
                         omp_block_stride
@@ -1722,7 +1798,6 @@ pub fn count_and_gather_compacted_lms_suffixes_32s_2k_fs_omp(
                         FastSint::try_from(thread_count).expect("thread count must fit FastSint"),
                     );
                 });
-        });
     }
     let accumulated_start = (accumulation_threads - 1) * bucket_stride_usize;
     buckets[..bucket_size]
@@ -2148,7 +2223,16 @@ pub fn radix_sort_lms_suffixes_8u(
     let mut i = omp_block_start + omp_block_size - 1;
     let mut j = omp_block_start + prefetch_distance + 3;
 
+    let sa_ptr_ro = sa.as_ptr();
+    let t_ptr = t.as_ptr();
     while i >= j {
+        libsais_prefetchr(sa_ptr_ro.wrapping_offset(i - 2 * prefetch_distance));
+        for lookahead in 0..4 {
+            let idx = i - prefetch_distance - lookahead;
+            if idx >= 0 {
+                libsais_prefetchr(t_ptr.wrapping_offset(sa[idx as usize] as isize));
+            }
+        }
         let p0 = sa[i as usize];
         let idx0 = buckets_index2(t[p0 as usize] as usize, 0);
         induction_bucket[idx0] -= 1;
@@ -2488,10 +2572,7 @@ pub fn radix_sort_lms_suffixes_32s_6k_block_omp(
         let sa_ro: &[SaSint] = sa;
         let t_ro: &[SaSint] = t;
         let cache_ptr = SyncMutPtr::new(cache);
-        run_rayon_with_threads(threads_usize, || {
-            (0..threads_usize)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(threads_usize, |omp_thread_num| {
                     let omp_block_start = omp_thread_num * omp_block_stride;
                     let omp_block_size = if omp_thread_num + 1 < threads_usize {
                         omp_block_stride
@@ -2510,7 +2591,6 @@ pub fn radix_sort_lms_suffixes_32s_6k_block_omp(
                         );
                     }
                 });
-        });
     }
 
     radix_sort_lms_suffixes_32s_6k_block_sort(induction_bucket, cache, block_start, block_size);
@@ -2518,10 +2598,7 @@ pub fn radix_sort_lms_suffixes_32s_6k_block_omp(
     {
         let sa_ptr = SyncMutPtr::new(sa);
         let cache_ro: &[ThreadCache] = cache;
-        run_rayon_with_threads(threads_usize, || {
-            (0..threads_usize)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(threads_usize, |omp_thread_num| {
                     let omp_block_start = omp_thread_num * omp_block_stride;
                     let omp_block_size = if omp_thread_num + 1 < threads_usize {
                         omp_block_stride
@@ -2539,7 +2616,6 @@ pub fn radix_sort_lms_suffixes_32s_6k_block_omp(
                         );
                     }
                 });
-        });
     }
 }
 
@@ -2569,10 +2645,7 @@ pub fn radix_sort_lms_suffixes_32s_2k_block_omp(
         let sa_ro: &[SaSint] = sa;
         let t_ro: &[SaSint] = t;
         let cache_ptr = SyncMutPtr::new(cache);
-        run_rayon_with_threads(threads_usize, || {
-            (0..threads_usize)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(threads_usize, |omp_thread_num| {
                     let omp_block_start = omp_thread_num * omp_block_stride;
                     let omp_block_size = if omp_thread_num + 1 < threads_usize {
                         omp_block_stride
@@ -2591,7 +2664,6 @@ pub fn radix_sort_lms_suffixes_32s_2k_block_omp(
                         );
                     }
                 });
-        });
     }
 
     radix_sort_lms_suffixes_32s_2k_block_sort(induction_bucket, cache, block_start, block_size);
@@ -2599,10 +2671,7 @@ pub fn radix_sort_lms_suffixes_32s_2k_block_omp(
     {
         let sa_ptr = SyncMutPtr::new(sa);
         let cache_ro: &[ThreadCache] = cache;
-        run_rayon_with_threads(threads_usize, || {
-            (0..threads_usize)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(threads_usize, |omp_thread_num| {
                     let omp_block_start = omp_thread_num * omp_block_stride;
                     let omp_block_size = if omp_thread_num + 1 < threads_usize {
                         omp_block_stride
@@ -2620,7 +2689,6 @@ pub fn radix_sort_lms_suffixes_32s_2k_block_omp(
                         );
                     }
                 });
-        });
     }
 }
 
@@ -2865,8 +2933,7 @@ pub fn radix_sort_set_markers_32s_6k_omp(
 
     {
         let sa_ptr = SyncMutPtr::new(sa);
-        run_rayon_with_threads(threads_usize, || {
-            (0..threads_usize).into_par_iter().for_each(|thread| {
+        for_each_thread(threads_usize, |thread| {
                 let start = thread * stride;
                 let end = if thread + 1 == threads_usize {
                     last
@@ -2884,7 +2951,6 @@ pub fn radix_sort_set_markers_32s_6k_omp(
                     );
                 }
             });
-        });
     }
 }
 
@@ -2911,8 +2977,7 @@ pub fn radix_sort_set_markers_32s_4k_omp(
 
     {
         let sa_ptr = SyncMutPtr::new(sa);
-        run_rayon_with_threads(threads_usize, || {
-            (0..threads_usize).into_par_iter().for_each(|thread| {
+        for_each_thread(threads_usize, |thread| {
                 let start = thread * stride;
                 let end = if thread + 1 == threads_usize {
                     last
@@ -2930,7 +2995,6 @@ pub fn radix_sort_set_markers_32s_4k_omp(
                     );
                 }
             });
-        });
     }
 }
 
@@ -3883,8 +3947,7 @@ pub fn partial_sorting_shift_markers_8u_omp(
         let sa_ptr = SyncMutPtr::new(sa);
         let buckets_ref: &[SaSint] = buckets;
         let temp_bucket_ref: &[SaSint] = temp_bucket;
-        run_rayon_with_threads(thread_count, || {
-            (0..thread_count).into_par_iter().for_each(|t| {
+        for_each_thread(thread_count, |t| {
                 let mut c = c_max - (t as isize * c_step);
                 // SAFETY: different `c` values point to different bucket ranges; each
                 // thread iterates over c values stride `c_step*thread_count` apart, so
@@ -3932,7 +3995,6 @@ pub fn partial_sorting_shift_markers_8u_omp(
                     c -= c_step * thread_count as isize;
                 }
             });
-        });
     }
 }
 
@@ -3955,8 +4017,7 @@ pub fn partial_sorting_shift_markers_32s_6k_omp(
         let sa_ptr = SyncMutPtr::new(sa);
         let buckets_ref: &[SaSint] = buckets;
         let temp_bucket_ref: &[SaSint] = temp_bucket;
-        run_rayon_with_threads(thread_count, || {
-            (0..thread_count).into_par_iter().for_each(|t| {
+        for_each_thread(thread_count, |t| {
                 let mut c = k_usize as isize - 1 - t as isize;
                 // SAFETY: different `c` values map to different bucket-defined sa ranges.
                 let sa = unsafe { sa_ptr.as_slice() };
@@ -4002,7 +4063,6 @@ pub fn partial_sorting_shift_markers_32s_6k_omp(
                     c -= thread_count as isize;
                 }
             });
-        });
     }
 }
 
@@ -5338,10 +5398,7 @@ pub fn partial_sorting_scan_right_to_left_32s_6k_block_omp(
         let sa_ro: &[SaSint] = sa;
         let t_ro: &[SaSint] = t;
         let cache_ptr = SyncMutPtr::new(cache);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
                     } else {
@@ -5363,7 +5420,6 @@ pub fn partial_sorting_scan_right_to_left_32s_6k_block_omp(
                         );
                     }
                 });
-        });
     }
 
     d = partial_sorting_scan_right_to_left_32s_6k_block_sort(
@@ -5378,10 +5434,7 @@ pub fn partial_sorting_scan_right_to_left_32s_6k_block_omp(
     {
         let sa_ptr = SyncMutPtr::new(sa);
         let cache_ro: &[ThreadCache] = cache;
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
                     } else {
@@ -5401,7 +5454,6 @@ pub fn partial_sorting_scan_right_to_left_32s_6k_block_omp(
                         );
                     }
                 });
-        });
     }
 
     d
@@ -5446,10 +5498,7 @@ pub fn partial_sorting_scan_right_to_left_32s_4k_block_omp(
         let sa_ptr = SyncMutPtr::new(sa);
         let t_ro: &[SaSint] = t;
         let cache_ptr = SyncMutPtr::new(cache);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
                     } else {
@@ -5473,7 +5522,6 @@ pub fn partial_sorting_scan_right_to_left_32s_4k_block_omp(
                         );
                     }
                 });
-        });
     }
 
     d = partial_sorting_scan_right_to_left_32s_4k_block_sort(
@@ -5489,10 +5537,7 @@ pub fn partial_sorting_scan_right_to_left_32s_4k_block_omp(
     {
         let sa_ptr = SyncMutPtr::new(sa);
         let cache_ptr = SyncMutPtr::new(cache);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let omp_block_start = omp_thread_num * omp_block_stride;
                     let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
@@ -5513,7 +5558,6 @@ pub fn partial_sorting_scan_right_to_left_32s_4k_block_omp(
                         );
                     }
                 });
-        });
     }
 
     d
@@ -5550,10 +5594,7 @@ pub fn partial_sorting_scan_right_to_left_32s_1k_block_omp(
         let sa_ptr = SyncMutPtr::new(sa);
         let t_ro: &[SaSint] = t;
         let cache_ptr = SyncMutPtr::new(cache);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
                     } else {
@@ -5574,7 +5615,6 @@ pub fn partial_sorting_scan_right_to_left_32s_1k_block_omp(
                         );
                     }
                 });
-        });
     }
 
     let cache = &mut cache[..block_size_usize];
@@ -5588,10 +5628,7 @@ pub fn partial_sorting_scan_right_to_left_32s_1k_block_omp(
     {
         let sa_ptr = SyncMutPtr::new(sa);
         let cache_ptr = SyncMutPtr::new(cache);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let omp_block_start = omp_thread_num * omp_block_stride;
                     let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
@@ -5611,7 +5648,6 @@ pub fn partial_sorting_scan_right_to_left_32s_1k_block_omp(
                         );
                     }
                 });
-        });
     }
 }
 
@@ -5951,10 +5987,7 @@ pub fn partial_sorting_scan_left_to_right_32s_6k_block_omp(
         let sa_ptr = SyncMutPtr::new(sa);
         let t_ro: &[SaSint] = t;
         let cache_ptr = SyncMutPtr::new(cache);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
                     } else {
@@ -5975,7 +6008,6 @@ pub fn partial_sorting_scan_left_to_right_32s_6k_block_omp(
                         );
                     }
                 });
-        });
     }
 
     let d = partial_sorting_scan_left_to_right_32s_6k_block_sort(
@@ -5990,10 +6022,7 @@ pub fn partial_sorting_scan_left_to_right_32s_6k_block_omp(
     {
         let sa_ptr = SyncMutPtr::new(sa);
         let cache_ro: &[ThreadCache] = cache;
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
                     } else {
@@ -6010,7 +6039,6 @@ pub fn partial_sorting_scan_left_to_right_32s_6k_block_omp(
                         );
                     }
                 });
-        });
     }
     d
 }
@@ -6055,10 +6083,7 @@ pub fn partial_sorting_scan_left_to_right_32s_4k_block_omp(
         let sa_ptr = SyncMutPtr::new(sa);
         let t_ro: &[SaSint] = t;
         let cache_ptr = SyncMutPtr::new(cache);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
                     } else {
@@ -6079,7 +6104,6 @@ pub fn partial_sorting_scan_left_to_right_32s_4k_block_omp(
                         );
                     }
                 });
-        });
     }
 
     let cache = &mut cache[..block_size_usize];
@@ -6096,10 +6120,7 @@ pub fn partial_sorting_scan_left_to_right_32s_4k_block_omp(
     {
         let sa_ptr = SyncMutPtr::new(sa);
         let cache_ptr = SyncMutPtr::new(cache);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let omp_block_start = omp_thread_num * omp_block_stride;
                     let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
@@ -6118,7 +6139,6 @@ pub fn partial_sorting_scan_left_to_right_32s_4k_block_omp(
                         );
                     }
                 });
-        });
     }
 
     d
@@ -6155,10 +6175,7 @@ pub fn partial_sorting_scan_left_to_right_32s_1k_block_omp(
         let sa_ptr = SyncMutPtr::new(sa);
         let t_ro: &[SaSint] = t;
         let cache_ptr = SyncMutPtr::new(cache);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
                     } else {
@@ -6179,7 +6196,6 @@ pub fn partial_sorting_scan_left_to_right_32s_1k_block_omp(
                         );
                     }
                 });
-        });
     }
 
     let cache = &mut cache[..block_size_usize];
@@ -6193,10 +6209,7 @@ pub fn partial_sorting_scan_left_to_right_32s_1k_block_omp(
     {
         let sa_ptr = SyncMutPtr::new(sa);
         let cache_ptr = SyncMutPtr::new(cache);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let omp_block_start = omp_thread_num * omp_block_stride;
                     let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
@@ -6215,7 +6228,6 @@ pub fn partial_sorting_scan_left_to_right_32s_1k_block_omp(
                         );
                     }
                 });
-        });
     }
 }
 
@@ -6744,11 +6756,19 @@ pub fn renumber_lms_suffixes_8u(
 
     let m_usize = usize::try_from(m).expect("m must be non-negative");
     let (sa_head, sam) = sa.split_at_mut(m_usize);
+    let prefetch_distance = 64usize;
     let mut i = omp_block_start;
     let mut j = omp_block_start + omp_block_size - 64 - 3;
 
+    let sa_head_ptr = sa_head.as_ptr();
+    let sam_ptr = sam.as_ptr();
     while i < j {
         let i0 = i as usize;
+        libsais_prefetchr(sa_head_ptr.wrapping_add(i0 + 2 * prefetch_distance));
+        for lookahead in 0..4 {
+            let slot = (sa_head[i0 + prefetch_distance + lookahead] & SAINT_MAX) >> 1;
+            libsais_prefetchw(sam_ptr.wrapping_add(slot as usize));
+        }
         let p0 = sa_head[i0];
         let d0 = ((p0 & SAINT_MAX) >> 1) as usize;
         sam[d0] = name | SAINT_MIN;
@@ -6801,7 +6821,10 @@ pub fn gather_marked_lms_suffixes(
     let mut i = m as FastSint + omp_block_start + omp_block_size - 1;
     let mut j = m as FastSint + omp_block_start + 3;
 
+    let prefetch_distance = 64isize;
+    let sa_ptr_ro = sa.as_ptr();
     while i >= j {
+        libsais_prefetchr(sa_ptr_ro.wrapping_offset(i - prefetch_distance));
         let i0 = i as usize;
         let s0 = sa[i0];
         sa[l as usize] = s0 & SAINT_MAX;
@@ -6883,10 +6906,7 @@ pub fn renumber_lms_suffixes_8u_omp(
         {
             let sa_ptr = SyncMutPtr::new(sa);
             let counts_ref: &[FastSint] = &counts;
-            run_rayon_with_threads(omp_num_threads, || {
-                (0..omp_num_threads)
-                    .into_par_iter()
-                    .for_each(|omp_thread_num| {
+            for_each_thread(omp_num_threads, |omp_thread_num| {
                         let omp_block_start = omp_thread_num as FastSint * omp_block_stride;
                         let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                             omp_block_stride
@@ -6909,7 +6929,6 @@ pub fn renumber_lms_suffixes_8u_omp(
                             omp_block_size,
                         );
                     });
-            });
         }
         name
     };
@@ -7052,7 +7071,14 @@ pub fn renumber_distinct_lms_suffixes_32s_4k(
     let mut p2;
     let mut p3 = 0;
 
+    let sa_head_ptr = sa_head.as_ptr();
+    let sam_ptr = sam.as_ptr();
     while i < j {
+        libsais_prefetchw(sa_head_ptr.wrapping_add(i + 2 * prefetch_distance));
+        for lookahead in 0..4 {
+            let v = (sa_head[i + prefetch_distance + lookahead] & SAINT_MAX) >> 1;
+            libsais_prefetchw(sam_ptr.wrapping_add(v as usize));
+        }
         p0 = sa_head[i];
         sa_head[i] = p0 & SAINT_MAX;
         sam[(sa_head[i] >> 1) as usize] = name | (p0 & p3 & SAINT_MIN);
@@ -7241,10 +7267,7 @@ pub fn renumber_distinct_lms_suffixes_32s_4k_omp(
         {
             let sa_ptr = SyncMutPtr::new(sa);
             let counts_ref: &[FastSint] = &counts;
-            run_rayon_with_threads(omp_num_threads, || {
-                (0..omp_num_threads)
-                    .into_par_iter()
-                    .for_each(|omp_thread_num| {
+            for_each_thread(omp_num_threads, |omp_thread_num| {
                         let omp_block_start = omp_thread_num * omp_block_stride;
                         let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                             omp_block_stride
@@ -7267,7 +7290,6 @@ pub fn renumber_distinct_lms_suffixes_32s_4k_omp(
                             omp_block_size as FastSint,
                         );
                     });
-            });
         }
         name
     };
@@ -7295,10 +7317,7 @@ pub fn mark_distinct_lms_suffixes_32s_omp(
 
     {
         let sa_ptr = SyncMutPtr::new(sa);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let omp_block_start = omp_thread_num * omp_block_stride;
                     let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
@@ -7314,7 +7333,6 @@ pub fn mark_distinct_lms_suffixes_32s_omp(
                         omp_block_size as FastSint,
                     );
                 });
-        });
     }
 }
 
@@ -7333,10 +7351,7 @@ pub fn clamp_lms_suffixes_length_32s_omp(sa: &mut [SaSint], n: SaSint, m: SaSint
 
     {
         let sa_ptr = SyncMutPtr::new(sa);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let omp_block_start = omp_thread_num * omp_block_stride;
                     let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
@@ -7352,7 +7367,6 @@ pub fn clamp_lms_suffixes_length_32s_omp(sa: &mut [SaSint], n: SaSint, m: SaSint
                         omp_block_size as FastSint,
                     );
                 });
-        });
     }
 }
 
@@ -7528,7 +7542,14 @@ pub fn reconstruct_lms_suffixes(
     let mut i = omp_block_start;
     let mut j = omp_block_start + omp_block_size - prefetch_distance - 3;
 
+    let sa_ptr_ro = sa.as_ptr();
+    let sanm_base = (n - m) as isize;
     while i < j {
+        libsais_prefetchw(sa_ptr_ro.wrapping_offset(i + 2 * prefetch_distance));
+        for lookahead in 0..4 {
+            let v = sa[(i + prefetch_distance + lookahead) as usize] as isize;
+            libsais_prefetchr(sa_ptr_ro.wrapping_offset(sanm_base + v));
+        }
         let iu = i as usize;
         let s0 = sa[iu] as usize;
         let s1 = sa[iu + 1] as usize;
@@ -7565,10 +7586,7 @@ pub fn reconstruct_lms_suffixes_omp(sa: &mut [SaSint], n: SaSint, m: SaSint, thr
 
     {
         let sa_ptr = SyncMutPtr::new(sa);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let omp_block_start = omp_thread_num * omp_block_stride;
                     let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
@@ -7585,7 +7603,6 @@ pub fn reconstruct_lms_suffixes_omp(sa: &mut [SaSint], n: SaSint, m: SaSint, thr
                         omp_block_size as FastSint,
                     );
                 });
-        });
     }
 }
 
@@ -8513,22 +8530,35 @@ pub fn final_bwt_scan_left_to_right_8u_block_omp(
 
     let block_start_usize = usize::try_from(block_start).expect("block_start must be non-negative");
     let omp_block_stride = (block_size_usize / omp_num_threads) & !15usize;
-    for (thread_num, state) in thread_state.iter_mut().take(omp_num_threads).enumerate() {
-        let relative_start = thread_num * omp_block_stride;
-        let size = if thread_num + 1 < omp_num_threads {
-            omp_block_stride
-        } else {
-            block_size_usize - relative_start
-        };
-        state.count = final_bwt_scan_left_to_right_8u_block_prepare(
-            t,
-            sa,
-            k,
-            &mut state.buckets,
-            &mut state.cache,
-            (block_start_usize + relative_start) as FastSint,
-            size as FastSint,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        run_rayon_with_threads(omp_num_threads, || {
+            thread_state[..omp_num_threads]
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(thread_num, state)| {
+                    let relative_start = thread_num * omp_block_stride;
+                    let size = if thread_num + 1 < omp_num_threads {
+                        omp_block_stride
+                    } else {
+                        block_size_usize - relative_start
+                    };
+                    // SAFETY: each thread's prepare pass reads and writes only
+                    // sa within its own sub-block, and those ranges are disjoint
+                    // by construction of omp_block_stride. This is the invariant
+                    // the C original relies on inside `#pragma omp parallel`.
+                    let sa = unsafe { sa_ptr.as_slice() };
+                    state.count = final_bwt_scan_left_to_right_8u_block_prepare(
+                        t,
+                        sa,
+                        k,
+                        &mut state.buckets,
+                        &mut state.cache,
+                        (block_start_usize + relative_start) as FastSint,
+                        size as FastSint,
+                    );
+                });
+        });
     }
 
     for state in thread_state.iter_mut().take(omp_num_threads) {
@@ -8540,13 +8570,24 @@ pub fn final_bwt_scan_left_to_right_8u_block_omp(
         }
     }
 
-    for state in thread_state.iter_mut().take(omp_num_threads) {
-        final_order_scan_left_to_right_8u_block_place(
-            sa,
-            &mut state.buckets,
-            &state.cache,
-            state.count,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        run_rayon_with_threads(omp_num_threads, || {
+            thread_state[..omp_num_threads]
+                .par_iter_mut()
+                .for_each(|state| {
+                    // SAFETY: each thread writes only to sa positions drawn from
+                    // its own state.buckets, which the serial merge above
+                    // partitioned so distinct threads produce disjoint positions.
+                    let sa = unsafe { sa_ptr.as_slice() };
+                    final_order_scan_left_to_right_8u_block_place(
+                        sa,
+                        &mut state.buckets,
+                        &state.cache,
+                        state.count,
+                    );
+                });
+        });
     }
 }
 
@@ -8594,22 +8635,35 @@ pub fn final_bwt_aux_scan_left_to_right_8u_block_omp(
 
     let block_start_usize = usize::try_from(block_start).expect("block_start must be non-negative");
     let omp_block_stride = (block_size_usize / omp_num_threads) & !15usize;
-    for (thread_num, state) in thread_state.iter_mut().take(omp_num_threads).enumerate() {
-        let relative_start = thread_num * omp_block_stride;
-        let size = if thread_num + 1 < omp_num_threads {
-            omp_block_stride
-        } else {
-            block_size_usize - relative_start
-        };
-        state.count = final_bwt_scan_left_to_right_8u_block_prepare(
-            t,
-            sa,
-            k,
-            &mut state.buckets,
-            &mut state.cache,
-            (block_start_usize + relative_start) as FastSint,
-            size as FastSint,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        run_rayon_with_threads(omp_num_threads, || {
+            thread_state[..omp_num_threads]
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(thread_num, state)| {
+                    let relative_start = thread_num * omp_block_stride;
+                    let size = if thread_num + 1 < omp_num_threads {
+                        omp_block_stride
+                    } else {
+                        block_size_usize - relative_start
+                    };
+                    // SAFETY: each thread's prepare pass reads and writes only
+                    // sa within its own sub-block, and those ranges are disjoint
+                    // by construction of omp_block_stride. This is the invariant
+                    // the C original relies on inside `#pragma omp parallel`.
+                    let sa = unsafe { sa_ptr.as_slice() };
+                    state.count = final_bwt_scan_left_to_right_8u_block_prepare(
+                        t,
+                        sa,
+                        k,
+                        &mut state.buckets,
+                        &mut state.cache,
+                        (block_start_usize + relative_start) as FastSint,
+                        size as FastSint,
+                    );
+                });
+        });
     }
 
     for state in thread_state.iter_mut().take(omp_num_threads) {
@@ -8621,15 +8675,30 @@ pub fn final_bwt_aux_scan_left_to_right_8u_block_omp(
         }
     }
 
-    for state in thread_state.iter_mut().take(omp_num_threads) {
-        final_bwt_aux_scan_left_to_right_8u_block_place(
-            sa,
-            rm,
-            i_out,
-            &mut state.buckets,
-            &state.cache,
-            state.count,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        let i_out_ptr = SyncMutPtr::new(i_out);
+        run_rayon_with_threads(omp_num_threads, || {
+            thread_state[..omp_num_threads]
+                .par_iter_mut()
+                .for_each(|state| {
+                    // SAFETY: each thread writes only to sa positions drawn from
+                    // its own state.buckets, which the serial merge above
+                    // partitioned so distinct threads produce disjoint positions.
+                    // i_out is written only at index p / (rm + 1) for
+                    // suffix positions p distinct across threads.
+                    let sa = unsafe { sa_ptr.as_slice() };
+                    let i_out = unsafe { i_out_ptr.as_slice() };
+                    final_bwt_aux_scan_left_to_right_8u_block_place(
+                        sa,
+                        rm,
+                        i_out,
+                        &mut state.buckets,
+                        &state.cache,
+                        state.count,
+                    );
+                });
+        });
     }
 }
 
@@ -8669,8 +8738,7 @@ pub fn final_sorting_scan_left_to_right_8u_block_omp(
     {
         let sa_ptr = SyncMutPtr::new(sa);
         let state_ptr = SyncMutPtr::new(thread_state);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads).into_par_iter().for_each(|thread_num| {
+        for_each_thread(omp_num_threads, |thread_num| {
                 let relative_start = thread_num * omp_block_stride;
                 let size = if thread_num + 1 < omp_num_threads {
                     omp_block_stride
@@ -8693,7 +8761,6 @@ pub fn final_sorting_scan_left_to_right_8u_block_omp(
                     size as FastSint,
                 );
             });
-        });
     }
 
     for state in thread_state.iter_mut().take(omp_num_threads) {
@@ -8708,8 +8775,7 @@ pub fn final_sorting_scan_left_to_right_8u_block_omp(
     {
         let sa_ptr = SyncMutPtr::new(sa);
         let state_ptr = SyncMutPtr::new(thread_state);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads).into_par_iter().for_each(|thread_num| {
+        for_each_thread(omp_num_threads, |thread_num| {
                 // SAFETY: bucket prefixing assigns disjoint SA slots to
                 // each thread's cache entries, matching the C OpenMP
                 // barrier before placement.
@@ -8723,7 +8789,6 @@ pub fn final_sorting_scan_left_to_right_8u_block_omp(
                     state.count,
                 );
             });
-        });
     }
 }
 
@@ -8754,10 +8819,7 @@ pub fn final_sorting_scan_left_to_right_32s_block_omp(
     {
         let sa_ptr = SyncMutPtr::new(sa);
         let cache_ptr = SyncMutPtr::new(cache);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let omp_block_start = omp_thread_num * omp_block_stride;
                     let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
@@ -8777,16 +8839,12 @@ pub fn final_sorting_scan_left_to_right_32s_block_omp(
                         omp_block_size as FastSint,
                     );
                 });
-        });
     }
     final_sorting_scan_left_to_right_32s_block_sort(t, buckets, cache, block_start, block_size);
     {
         let sa_ptr = SyncMutPtr::new(sa);
         let cache_ptr = SyncMutPtr::new(cache);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let omp_block_start = omp_thread_num * omp_block_stride;
                     let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
@@ -8804,7 +8862,6 @@ pub fn final_sorting_scan_left_to_right_32s_block_omp(
                         omp_block_size as FastSint,
                     );
                 });
-        });
     }
 }
 
@@ -9998,8 +10055,7 @@ pub fn final_bwt_scan_right_to_left_8u_block_omp(
     {
         let sa_ptr = SyncMutPtr::new(sa);
         let state_ptr = SyncMutPtr::new(thread_state);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads).into_par_iter().for_each(|thread_num| {
+        for_each_thread(omp_num_threads, |thread_num| {
                 // SAFETY: bucket prefixing assigns disjoint SA slots to
                 // each thread's cache entries, matching the C OpenMP
                 // barrier before placement.
@@ -10013,7 +10069,6 @@ pub fn final_bwt_scan_right_to_left_8u_block_omp(
                     state.count,
                 );
             });
-        });
     }
 }
 
@@ -10052,22 +10107,35 @@ pub fn final_bwt_aux_scan_right_to_left_8u_block_omp(
     }
 
     let omp_block_stride = (block_size_usize / omp_num_threads) & !15usize;
-    for (omp_thread_num, state) in thread_state.iter_mut().take(omp_num_threads).enumerate() {
-        let omp_block_start = omp_thread_num * omp_block_stride;
-        let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
-            omp_block_stride
-        } else {
-            block_size_usize - omp_block_start
-        };
-        state.count = final_bwt_aux_scan_right_to_left_8u_block_prepare(
-            t,
-            sa,
-            k,
-            &mut state.buckets,
-            &mut state.cache,
-            block_start + omp_block_start as FastSint,
-            omp_block_size as FastSint,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        run_rayon_with_threads(omp_num_threads, || {
+            thread_state[..omp_num_threads]
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(omp_thread_num, state)| {
+                    let omp_block_start = omp_thread_num * omp_block_stride;
+                    let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
+                        omp_block_stride
+                    } else {
+                        block_size_usize - omp_block_start
+                    };
+                    // SAFETY: each thread's prepare pass reads and writes only
+                    // sa within its own sub-block, and those ranges are disjoint
+                    // by construction of omp_block_stride. This is the invariant
+                    // the C original relies on inside `#pragma omp parallel`.
+                    let sa = unsafe { sa_ptr.as_slice() };
+                    state.count = final_bwt_aux_scan_right_to_left_8u_block_prepare(
+                        t,
+                        sa,
+                        k,
+                        &mut state.buckets,
+                        &mut state.cache,
+                        block_start + omp_block_start as FastSint,
+                        omp_block_size as FastSint,
+                    );
+                });
+        });
     }
     for state in thread_state.iter_mut().take(omp_num_threads).rev() {
         for c in 0..k_usize {
@@ -10077,15 +10145,30 @@ pub fn final_bwt_aux_scan_right_to_left_8u_block_omp(
             state.buckets[c] = a;
         }
     }
-    for state in thread_state.iter_mut().take(omp_num_threads) {
-        final_bwt_aux_scan_right_to_left_8u_block_place(
-            sa,
-            rm,
-            i_out,
-            &mut state.buckets,
-            &state.cache,
-            state.count,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        let i_out_ptr = SyncMutPtr::new(i_out);
+        run_rayon_with_threads(omp_num_threads, || {
+            thread_state[..omp_num_threads]
+                .par_iter_mut()
+                .for_each(|state| {
+                    // SAFETY: each thread writes only to sa positions drawn from
+                    // its own state.buckets, which the serial merge above
+                    // partitioned so distinct threads produce disjoint positions.
+                    // i_out is written only at index p / (rm + 1) for
+                    // suffix positions p distinct across threads.
+                    let sa = unsafe { sa_ptr.as_slice() };
+                    let i_out = unsafe { i_out_ptr.as_slice() };
+                    final_bwt_aux_scan_right_to_left_8u_block_place(
+                        sa,
+                        rm,
+                        i_out,
+                        &mut state.buckets,
+                        &state.cache,
+                        state.count,
+                    );
+                });
+        });
     }
 }
 
@@ -10117,10 +10200,7 @@ pub fn final_sorting_scan_right_to_left_8u_block_omp(
     {
         let sa_ptr = SyncMutPtr::new(sa);
         let state_ptr = SyncMutPtr::new(thread_state);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let omp_block_start = omp_thread_num * omp_block_stride;
                     let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
@@ -10143,7 +10223,6 @@ pub fn final_sorting_scan_right_to_left_8u_block_omp(
                         omp_block_size as FastSint,
                     );
                 });
-        });
     }
     for state in thread_state.iter_mut().take(omp_num_threads).rev() {
         for c in 0..k_usize {
@@ -10188,22 +10267,35 @@ pub fn final_gsa_scan_right_to_left_8u_block_omp(
     }
 
     let omp_block_stride = (block_size_usize / omp_num_threads) & !15usize;
-    for (omp_thread_num, state) in thread_state.iter_mut().take(omp_num_threads).enumerate() {
-        let omp_block_start = omp_thread_num * omp_block_stride;
-        let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
-            omp_block_stride
-        } else {
-            block_size_usize - omp_block_start
-        };
-        state.count = final_sorting_scan_right_to_left_8u_block_prepare(
-            t,
-            sa,
-            k,
-            &mut state.buckets,
-            &mut state.cache,
-            block_start + omp_block_start as FastSint,
-            omp_block_size as FastSint,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        run_rayon_with_threads(omp_num_threads, || {
+            thread_state[..omp_num_threads]
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(omp_thread_num, state)| {
+                    let omp_block_start = omp_thread_num * omp_block_stride;
+                    let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
+                        omp_block_stride
+                    } else {
+                        block_size_usize - omp_block_start
+                    };
+                    // SAFETY: each thread's prepare pass reads and writes only
+                    // sa within its own sub-block, and those ranges are disjoint
+                    // by construction of omp_block_stride. This is the invariant
+                    // the C original relies on inside `#pragma omp parallel`.
+                    let sa = unsafe { sa_ptr.as_slice() };
+                    state.count = final_sorting_scan_right_to_left_8u_block_prepare(
+                        t,
+                        sa,
+                        k,
+                        &mut state.buckets,
+                        &mut state.cache,
+                        block_start + omp_block_start as FastSint,
+                        omp_block_size as FastSint,
+                    );
+                });
+        });
     }
     for state in thread_state.iter_mut().take(omp_num_threads).rev() {
         for c in 0..k_usize {
@@ -10213,13 +10305,24 @@ pub fn final_gsa_scan_right_to_left_8u_block_omp(
             state.buckets[c] = a;
         }
     }
-    for state in thread_state.iter_mut().take(omp_num_threads) {
-        final_gsa_scan_right_to_left_8u_block_place(
-            sa,
-            &mut state.buckets,
-            &state.cache,
-            state.count,
-        );
+    {
+        let sa_ptr = SyncMutPtr::new(sa);
+        run_rayon_with_threads(omp_num_threads, || {
+            thread_state[..omp_num_threads]
+                .par_iter_mut()
+                .for_each(|state| {
+                    // SAFETY: each thread writes only to sa positions drawn from
+                    // its own state.buckets, which the serial merge above
+                    // partitioned so distinct threads produce disjoint positions.
+                    let sa = unsafe { sa_ptr.as_slice() };
+                    final_gsa_scan_right_to_left_8u_block_place(
+                        sa,
+                        &mut state.buckets,
+                        &state.cache,
+                        state.count,
+                    );
+                });
+        });
     }
 }
 
@@ -10250,10 +10353,7 @@ pub fn final_sorting_scan_right_to_left_32s_block_omp(
     {
         let sa_ptr = SyncMutPtr::new(sa);
         let cache_ptr = SyncMutPtr::new(cache);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let omp_block_start = omp_thread_num * omp_block_stride;
                     let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
@@ -10273,16 +10373,12 @@ pub fn final_sorting_scan_right_to_left_32s_block_omp(
                         omp_block_size as FastSint,
                     );
                 });
-        });
     }
     final_sorting_scan_right_to_left_32s_block_sort(t, buckets, cache, block_start, block_size);
     {
         let sa_ptr = SyncMutPtr::new(sa);
         let cache_ptr = SyncMutPtr::new(cache);
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let omp_block_start = omp_thread_num * omp_block_stride;
                     let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
@@ -10299,7 +10395,6 @@ pub fn final_sorting_scan_right_to_left_32s_block_omp(
                         omp_block_size as FastSint,
                     );
                 });
-        });
     }
 }
 
@@ -10612,8 +10707,7 @@ pub fn clear_lms_suffixes_omp(
         let sa_ptr = SyncMutPtr::new(sa);
         let bucket_start_ref: &[SaSint] = bucket_start;
         let bucket_end_ref: &[SaSint] = bucket_end;
-        run_rayon_with_threads(thread_count, || {
-            (0..thread_count).into_par_iter().for_each(|t| {
+        for_each_thread(thread_count, |t| {
                 let mut c = t;
                 // SAFETY: each c maps to a disjoint sa[bucket_start[c]..bucket_end[c]]
                 // range; threads iterate c with stride thread_count.
@@ -10629,7 +10723,6 @@ pub fn clear_lms_suffixes_omp(
                     c += thread_count;
                 }
             });
-        });
     }
 }
 
@@ -10861,7 +10954,14 @@ pub fn renumber_unique_and_nonunique_lms_suffixes_32s(
     let mut i = omp_block_start as SaSint;
     let mut j = omp_block_start as SaSint + omp_block_size as SaSint - 2 * prefetch_distance - 3;
 
+    let sa_head_ptr = sa_head.as_ptr();
+    let sam_ptr = sam.as_ptr();
     while i < j {
+        libsais_prefetchr(sa_head_ptr.wrapping_offset((i + 3 * prefetch_distance) as isize));
+        for lookahead in 0..4 {
+            let v = sa_head[(i + 2 * prefetch_distance + lookahead) as usize] as SaUint >> 1;
+            libsais_prefetchw(sam_ptr.wrapping_add(v as usize));
+        }
         let p0 = sa_head[i as usize] as SaUint;
         let p0_half = (p0 >> 1) as usize;
         let mut s0 = sam[p0_half];
@@ -11058,10 +11158,7 @@ pub fn renumber_unique_and_nonunique_lms_suffixes_32s_omp(
             let sa_ptr = SyncMutPtr::new(sa);
             let t_ptr = SyncMutPtr::new(t);
             let counts_ref: &[FastSint] = &counts;
-            run_rayon_with_threads(omp_num_threads, || {
-                (0..omp_num_threads)
-                    .into_par_iter()
-                    .for_each(|omp_thread_num| {
+            for_each_thread(omp_num_threads, |omp_thread_num| {
                         let omp_block_start = omp_thread_num * omp_block_stride;
                         let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                             omp_block_stride
@@ -11086,7 +11183,6 @@ pub fn renumber_unique_and_nonunique_lms_suffixes_32s_omp(
                             omp_block_size as FastSint,
                         );
                     });
-            });
         }
         f
     };
@@ -11241,7 +11337,10 @@ pub fn merge_unique_lms_suffixes_32s(
     let block_end =
         i + usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
     let j = block_end.saturating_sub(6);
+    let prefetch_distance = 64usize;
+    let t_ptr = t.as_ptr();
     while i < j {
+        libsais_prefetchr(t_ptr.wrapping_add(i + prefetch_distance));
         let c0 = t[i];
         if c0 < 0 {
             t[i] = c0 & SAINT_MAX;
@@ -11318,7 +11417,10 @@ pub fn merge_nonunique_lms_suffixes_32s(
     let block_end =
         i + usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
     let j = block_end.saturating_sub(3);
+    let prefetch_distance = 64usize;
+    let sa_ptr_ro = sa.as_ptr();
     while i < j {
+        libsais_prefetchr(sa_ptr_ro.wrapping_add(i + prefetch_distance));
         if sa[i] == 0 {
             sa[i] = tmp;
             tmp = sa[src_index];
@@ -11405,10 +11507,7 @@ pub fn merge_unique_lms_suffixes_32s_omp(
         let sa_ptr = SyncMutPtr::new(sa);
         let t_ptr = SyncMutPtr::new(t);
         let counts_ref: &[FastSint] = &counts;
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let omp_block_start = omp_thread_num * omp_block_stride;
                     let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
@@ -11434,7 +11533,6 @@ pub fn merge_unique_lms_suffixes_32s_omp(
                         omp_block_size as FastSint,
                     );
                 });
-        });
     }
 }
 
@@ -11490,10 +11588,7 @@ pub fn merge_nonunique_lms_suffixes_32s_omp(
     {
         let sa_ptr = SyncMutPtr::new(sa);
         let counts_ref: &[FastSint] = &counts;
-        run_rayon_with_threads(omp_num_threads, || {
-            (0..omp_num_threads)
-                .into_par_iter()
-                .for_each(|omp_thread_num| {
+        for_each_thread(omp_num_threads, |omp_thread_num| {
                     let omp_block_start = omp_thread_num * omp_block_stride;
                     let omp_block_size = if omp_thread_num + 1 < omp_num_threads {
                         omp_block_stride
@@ -11517,7 +11612,6 @@ pub fn merge_nonunique_lms_suffixes_32s_omp(
                         omp_block_size as FastSint,
                     );
                 });
-        });
     }
 }
 
@@ -12429,18 +12523,20 @@ fn libsais_main(
         };
         let mut buckets = vec![0; 8 * ALPHABET_SIZE];
 
-        libsais_main_8u(
-            t,
-            sa,
-            &mut buckets,
-            flags,
-            r,
-            i,
-            fs,
-            freq,
-            threads,
-            &mut thread_state,
-        )
+        install_pool(threads as usize, || {
+            libsais_main_8u(
+                t,
+                sa,
+                &mut buckets,
+                flags,
+                r,
+                i,
+                fs,
+                freq,
+                threads,
+                &mut thread_state,
+            )
+        })
     } else {
         let mut thread_state = [];
         let mut buckets = [0; 8 * ALPHABET_SIZE];
@@ -12477,15 +12573,17 @@ fn libsais_main_int(
         Vec::new()
     };
 
-    libsais_main_32s_entry(
-        t,
-        sa,
-        SaSint::try_from(t.len()).expect("input length must fit SaSint"),
-        k,
-        fs,
-        threads,
-        &mut thread_state,
-    )
+    install_pool(threads.max(1) as usize, || {
+        libsais_main_32s_entry(
+            t,
+            sa,
+            SaSint::try_from(t.len()).expect("input length must fit SaSint"),
+            k,
+            fs,
+            threads,
+            &mut thread_state,
+        )
+    })
 }
 
 fn libsais_main_ctx(
@@ -12502,6 +12600,7 @@ fn libsais_main_ctx(
         return -2;
     }
 
+    let threads = ctx.threads as SaSint;
     let mut empty_thread_state = [];
     let thread_state = if ctx.threads > 1 {
         match ctx.thread_state.as_deref_mut() {
@@ -12512,19 +12611,13 @@ fn libsais_main_ctx(
     } else {
         &mut empty_thread_state
     };
+    let buckets = &mut ctx.buckets;
 
-    libsais_main_8u(
-        t,
-        sa,
-        &mut ctx.buckets,
-        flags,
-        r,
-        i,
-        fs,
-        freq,
-        ctx.threads as SaSint,
-        thread_state,
-    )
+    install_pool(threads.max(1) as usize, || {
+        libsais_main_8u(
+            t, sa, buckets, flags, r, i, fs, freq, threads, thread_state,
+        )
+    })
 }
 
 #[cfg(feature = "upstream-c")]
@@ -13485,8 +13578,7 @@ pub fn compute_phi_omp(sa: &[SaSint], plcp: &mut [SaSint], n: SaSint, threads: S
     let plcp_addr = plcp.as_mut_ptr() as usize;
     let n_usize = usize::try_from(n).expect("n must be non-negative");
 
-    run_rayon_with_threads(threads_usize, || {
-        (0..threads_usize).into_par_iter().for_each(|thread| {
+    for_each_thread(threads_usize, |thread| {
             let block_start = thread as FastSint * block_stride;
             let block_size = if thread + 1 < threads_usize {
                 block_stride
@@ -13535,7 +13627,6 @@ pub fn compute_phi_omp(sa: &[SaSint], plcp: &mut [SaSint], n: SaSint, threads: S
                 i += 1;
             }
         });
-    });
 }
 
 /// Internal helper: compute plcp.
@@ -15111,8 +15202,7 @@ pub fn unbwt_decode_omp(
     let r_usize = usize::try_from(r).expect("r must be non-negative");
 
     let u_ptr = SyncMutPtr::new(u);
-    run_rayon_with_threads(max_threads, || {
-        (0..max_threads).into_par_iter().for_each(|thread| {
+    for_each_thread(max_threads, |thread| {
             let block_size = block_stride + usize::from(thread < block_remainder);
             let block_start = block_stride * thread + thread.min(block_remainder);
             let u = unsafe { u_ptr.as_slice() };
@@ -15132,7 +15222,6 @@ pub fn unbwt_decode_omp(
                 },
             );
         });
-    });
     u[usize::try_from(n).expect("n must be non-negative") - 1] = lastc;
 }
 
@@ -20843,5 +20932,156 @@ mod tests {
             })
             .collect();
         assert!(results.iter().all(|&rc| rc == 0));
+    }
+}
+/// Thread-count identity and pool-nesting tests for the `*_omp` entry points.
+///
+/// Deliberately gated on `test` alone, not on `upstream-c`: these check the
+/// parallel paths against this crate's own serial paths, so they must stay
+/// runnable on a machine with no C toolchain.
+#[cfg(test)]
+mod omp_scaling_tests {
+    /// Repetitive small-alphabet text: the case libsais is built for, and the
+    /// case where a mismerged per-thread bucket actually shows up.
+    fn dna_like(n: usize, seed: u64) -> Vec<u8> {
+        let mut state = seed | 1;
+        (0..n)
+            .map(|i| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                // Long exact repeats every so often, which is what drives the
+                // deeper recursion levels.
+                if (i / 4096) % 3 == 0 {
+                    (i % 4) as u8
+                } else {
+                    (state >> 33) as u8 & 3
+                }
+            })
+            .collect()
+    }
+
+    const THREAD_COUNTS: [i32; 3] = [4, 8, 16];
+
+    #[test]
+    fn libsais_omp_thread_sweep_matches_single_thread_on_large_input() {
+        let text = dna_like(4_000_000, 0x2545_F491_4F6C_DD1D);
+        let mut expected = vec![0i32; text.len()];
+        assert_eq!(crate::libsais(&text, &mut expected, 0, None), 0);
+
+        for threads in THREAD_COUNTS {
+            let mut sa = vec![0i32; text.len()];
+            assert_eq!(crate::libsais_omp(&text, &mut sa, 0, None, threads), 0);
+            assert_eq!(sa, expected, "libsais_omp diverged at {threads} threads");
+        }
+    }
+
+    #[test]
+    fn libsais64_omp_thread_sweep_matches_single_thread_on_large_input() {
+        let text = dna_like(4_000_000, 0x9E37_79B9_7F4A_7C15);
+        let mut expected = vec![0i64; text.len()];
+        assert_eq!(crate::libsais64::libsais64(&text, &mut expected, 0, None), 0);
+
+        for threads in THREAD_COUNTS {
+            let mut sa = vec![0i64; text.len()];
+            assert_eq!(
+                crate::libsais64::libsais64_omp(&text, &mut sa, 0, None, threads as i64),
+                0
+            );
+            assert_eq!(sa, expected, "libsais64_omp diverged at {threads} threads");
+        }
+    }
+
+    /// Full-scale identity check on a real 10 to 100 MB genome.
+    ///
+    /// Ignored by default: it needs an input prepared by
+    /// `tools/prepare_chr21.sh` and pointed at by `LIBSAIS_BENCH_INPUT`. Skips
+    /// cleanly when absent so `cargo test -- --ignored` still runs elsewhere.
+    #[test]
+    #[ignore = "needs LIBSAIS_BENCH_INPUT, see tools/prepare_chr21.sh"]
+    fn libsais64_omp_thread_sweep_matches_single_thread_on_genome_scale_input() {
+        let Ok(path) = std::env::var("LIBSAIS_BENCH_INPUT") else {
+            eprintln!("LIBSAIS_BENCH_INPUT unset, skipping");
+            return;
+        };
+        let Ok(text) = std::fs::read(&path) else {
+            eprintln!("{path} unreadable, skipping");
+            return;
+        };
+        assert!(
+            text.len() >= 10_000_000,
+            "genome-scale input must be at least 10 MB, got {}",
+            text.len()
+        );
+
+        let mut expected = vec![0i64; text.len()];
+        assert_eq!(crate::libsais64::libsais64(&text, &mut expected, 0, None), 0);
+
+        for threads in THREAD_COUNTS {
+            let mut sa = vec![0i64; text.len()];
+            assert_eq!(
+                crate::libsais64::libsais64_omp(&text, &mut sa, 0, None, threads as i64),
+                0
+            );
+            assert_eq!(sa, expected, "diverged at {threads} threads on {path}");
+        }
+    }
+
+    /// The requested thread count must win over an ambient pool, and installing
+    /// into a foreign pool must not deadlock at any outer size.
+    #[test]
+    fn omp_honours_requested_threads_inside_a_foreign_pool() {
+        for outer_threads in [1usize, 2, 16] {
+            let outer = rayon::ThreadPoolBuilder::new()
+                .num_threads(outer_threads)
+                .build()
+                .expect("outer pool must build");
+            for requested in [4usize, 8, 16] {
+                let observed =
+                    outer.install(|| crate::install_pool(requested, rayon::current_num_threads));
+                assert_eq!(
+                    observed, requested,
+                    "outer={outer_threads} requested={requested}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn install_pool_reuses_an_ambient_pool_of_matching_size() {
+        let outer = rayon::ThreadPoolBuilder::new()
+            .num_threads(4)
+            .build()
+            .expect("outer pool must build");
+        let (inner_id, outer_id) = outer.install(|| {
+            let outer_id = rayon::current_thread_index();
+            let inner_id = crate::install_pool(4, rayon::current_thread_index);
+            (inner_id, outer_id)
+        });
+        assert_eq!(
+            inner_id, outer_id,
+            "a matching ambient pool must be reused, not rebuilt"
+        );
+    }
+
+    #[test]
+    fn libsais_omp_matches_serial_when_called_from_inside_a_rayon_pool() {
+        let text = dna_like(400_000, 0xDEAD_BEEF_CAFE_1234);
+        let mut expected = vec![0i32; text.len()];
+        assert_eq!(crate::libsais(&text, &mut expected, 0, None), 0);
+
+        for outer_threads in [1usize, 2, 16] {
+            let outer = rayon::ThreadPoolBuilder::new()
+                .num_threads(outer_threads)
+                .build()
+                .expect("outer pool must build");
+            for threads in THREAD_COUNTS {
+                let mut sa = vec![0i32; text.len()];
+                let rc =
+                    outer.install(|| crate::libsais_omp(&text, &mut sa, 0, None, threads));
+                assert_eq!(rc, 0, "outer={outer_threads} inner={threads}");
+                assert_eq!(sa, expected, "outer={outer_threads} inner={threads}");
+            }
+        }
     }
 }
