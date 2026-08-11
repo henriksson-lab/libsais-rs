@@ -17,41 +17,19 @@ pub enum Phase {
     InducePartialOrder = 2,
     RenumberAndGatherLms = 3,
     Recursion = 4,
-    InduceFinalOrder = 5,
-    Rec32sCountGather = 6,
-    Rec32sRadixSort = 7,
-    Rec32sInducePartial = 8,
-    Rec32sRenumber = 9,
-    Rec32sCompact = 10,
-    Rec32sInduceFinal = 11,
-    Rec32sBuckets = 12,
-    Rec32sReconstruct = 13,
-    Rec32sMisc = 14,
-    Rec32sFill = 15,
-    Rec32sDeeper = 16,
-    GatherAndReconstructLms = 17,
+    GatherAndReconstructLms = 5,
+    InduceFinalOrder = 6,
 }
 
 #[cfg_attr(not(feature = "profile"), allow(dead_code))]
-pub const PHASES: [Phase; 18] = [
+pub const PHASES: [Phase; 7] = [
     Phase::CountAndGatherLms,
     Phase::RadixSortLms,
     Phase::InducePartialOrder,
     Phase::RenumberAndGatherLms,
     Phase::Recursion,
-    Phase::InduceFinalOrder,
-    Phase::Rec32sCountGather,
-    Phase::Rec32sRadixSort,
-    Phase::Rec32sInducePartial,
-    Phase::Rec32sRenumber,
-    Phase::Rec32sCompact,
-    Phase::Rec32sInduceFinal,
-    Phase::Rec32sBuckets,
-    Phase::Rec32sReconstruct,
-    Phase::Rec32sMisc,
-    Phase::Rec32sFill,
-    Phase::Rec32sDeeper,
     Phase::GatherAndReconstructLms,
+    Phase::InduceFinalOrder,
 ];
 
 impl Phase {
@@ -63,19 +41,8 @@ impl Phase {
             Phase::InducePartialOrder => "induce partial order",
             Phase::RenumberAndGatherLms => "renumber+gather LMS",
             Phase::Recursion => "recursion",
-            Phase::InduceFinalOrder => "induce final order",
-            Phase::Rec32sCountGather => "  32s count+gather",
-            Phase::Rec32sRadixSort => "  32s radix sort",
-            Phase::Rec32sInducePartial => "  32s induce partial",
-            Phase::Rec32sRenumber => "  32s renumber+mark",
-            Phase::Rec32sCompact => "  32s compact LMS",
-            Phase::Rec32sInduceFinal => "  32s induce final",
-            Phase::Rec32sBuckets => "  32s buckets+place",
-            Phase::Rec32sReconstruct => "  32s reconstruct",
-            Phase::Rec32sMisc => "  32s misc",
-            Phase::Rec32sFill => "  32s zero-fill",
-            Phase::Rec32sDeeper => "  32s deeper levels",
             Phase::GatherAndReconstructLms => "gather+reconstruct LMS",
+            Phase::InduceFinalOrder => "induce final order",
         }
     }
 }
@@ -88,8 +55,8 @@ mod imp {
 
     #[allow(clippy::declare_interior_mutable_const)]
     const ZERO: AtomicU64 = AtomicU64::new(0);
-    static NANOS: [AtomicU64; 18] = [ZERO; 18];
-    static CALLS: [AtomicU64; 18] = [ZERO; 18];
+    static NANOS: [AtomicU64; 7] = [ZERO; 7];
+    static CALLS: [AtomicU64; 7] = [ZERO; 7];
     static POOL_BUILDS: AtomicU64 = AtomicU64::new(0);
 
     // Time is attributed exclusively: a phase is charged only for what it does

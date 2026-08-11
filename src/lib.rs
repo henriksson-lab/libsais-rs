@@ -12431,7 +12431,10 @@ fn libsais_main_8u(
     let n_usize = usize::try_from(n).expect("n must be non-negative");
     let fs = fs.min(SAINT_MAX - n);
 
-    let m = count_and_gather_lms_suffixes_8u_omp(t, sa, n, buckets, threads, thread_state);
+    let m = {
+        let _g = crate::profile::scope(crate::profile::Phase::CountAndGatherLms);
+        count_and_gather_lms_suffixes_8u_omp(t, sa, n, buckets, threads, thread_state)
+    };
     let k = initialize_buckets_start_and_end_8u(buckets, freq);
 
     if (flags & LIBSAIS_FLAGS_GSA) != 0 && (buckets[0] != 0 || buckets[2] != 0 || buckets[3] != 1) {
@@ -12444,12 +12447,15 @@ fn libsais_main_8u(
         let left_suffixes_count =
             initialize_buckets_for_lms_suffixes_radix_sort_8u(t, buckets, first_lms_suffix);
 
-        if threads > 1 && n >= 65_536 {
-            sa[..n_usize - m_usize].fill(0);
-        }
-        radix_sort_lms_suffixes_8u_omp(t, sa, n, m, flags, buckets, threads, thread_state);
-        if threads > 1 && n >= 65_536 {
-            sa[n_usize - m_usize..n_usize].fill(0);
+        {
+            let _g = crate::profile::scope(crate::profile::Phase::RadixSortLms);
+            if threads > 1 && n >= 65_536 {
+                sa[..n_usize - m_usize].fill(0);
+            }
+            radix_sort_lms_suffixes_8u_omp(t, sa, n, m, flags, buckets, threads, thread_state);
+            if threads > 1 && n >= 65_536 {
+                sa[n_usize - m_usize..n_usize].fill(0);
+            }
         }
 
         initialize_buckets_for_partial_sorting_8u(
@@ -12458,41 +12464,54 @@ fn libsais_main_8u(
             first_lms_suffix,
             left_suffixes_count,
         );
-        induce_partial_order_8u_omp(
-            t,
-            sa,
-            n,
-            k,
-            flags,
-            buckets,
-            first_lms_suffix,
-            left_suffixes_count,
-            threads,
-            thread_state,
-        );
+        {
+            let _g = crate::profile::scope(crate::profile::Phase::InducePartialOrder);
+            induce_partial_order_8u_omp(
+                t,
+                sa,
+                n,
+                k,
+                flags,
+                buckets,
+                first_lms_suffix,
+                left_suffixes_count,
+                threads,
+                thread_state,
+            );
+        }
 
-        let names = renumber_and_gather_lms_suffixes_omp(sa, n, m, fs, threads, thread_state);
+        let names = {
+            let _g = crate::profile::scope(crate::profile::Phase::RenumberAndGatherLms);
+            renumber_and_gather_lms_suffixes_omp(sa, n, m, fs, threads, thread_state)
+        };
         if names < m {
             let recursive_text_start =
                 n_usize + usize::try_from(fs).expect("fs must be non-negative") - m_usize;
             let recursive_fs = fs + n - 2 * m;
 
-            let index = libsais_main_32s_entry(
-                unsafe {
-                    std::slice::from_raw_parts_mut(sa[recursive_text_start..].as_mut_ptr(), m_usize)
-                },
-                sa,
-                m,
-                names,
-                recursive_fs,
-                threads,
-                thread_state,
-            );
+            let index = {
+                let _g = crate::profile::scope(crate::profile::Phase::Recursion);
+                libsais_main_32s_entry(
+                    unsafe {
+                        std::slice::from_raw_parts_mut(
+                            sa[recursive_text_start..].as_mut_ptr(),
+                            m_usize,
+                        )
+                    },
+                    sa,
+                    m,
+                    names,
+                    recursive_fs,
+                    threads,
+                    thread_state,
+                )
+            };
 
             if index != 0 {
                 return -2;
             }
 
+            let _g = crate::profile::scope(crate::profile::Phase::GatherAndReconstructLms);
             gather_lms_suffixes_8u_omp(t, sa, n, threads, thread_state);
             reconstruct_lms_suffixes_omp(sa, n, m, threads);
         }
@@ -12502,6 +12521,7 @@ fn libsais_main_8u(
         sa[..n_usize].fill(0);
     }
 
+    let _g = crate::profile::scope(crate::profile::Phase::InduceFinalOrder);
     induce_final_order_8u_omp(t, sa, n, k, flags, r, i, buckets, threads, thread_state)
 }
 

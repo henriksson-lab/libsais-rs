@@ -33,3 +33,10 @@ jobs:
 
       - name: Build
         run: cargo build --all-targets
+
+      # The threaded paths are checked against this crate's own serial paths, so
+      # this needs no C toolchain and runs without the upstream-c feature.
+      # macos-latest runners are arm64 and ubuntu-latest is x86_64, so the
+      # architecture-specific prefetch paths are both executed here.
+      - name: Test
+        run: cargo test --release --lib
