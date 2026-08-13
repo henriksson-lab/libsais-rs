@@ -78,6 +78,47 @@ Run the local Rust-vs-C benchmark example with:
 cargo run --release --features upstream-c --example bench_vs_c
 ```
 
+### Measuring a change
+
+Wall-clock on a laptop is not precise enough for the optimisations that are
+left. Repeated runs of the same binary on the same input move by roughly 8%
+here, and the remaining wins in the induce and recursion phases are worth about
+that much each. Three tools, in the order they are useful:
+
+1. **Where the time goes, by phase.** Exact, and the number to quote:
+
+   ```bash
+   cargo run --release --features profile --example scaling_report -- <input> 8
+   ```
+
+2. **Where the time goes, by function.** [`tools/profile.sh`](tools/profile.sh)
+   records a profile with [samply](https://github.com/mstange/samply) and prints
+   self time per symbol. Note that it deliberately builds without cross-crate
+   LTO: with `lto = "fat"` about 40% of samples land in an inlined `main` and
+   attribution is useless.
+
+   ```bash
+   cargo install samply
+   tools/profile.sh <input>
+   ```
+
+3. **Did this change do less work.** [`benches/induce.rs`](benches/induce.rs)
+   counts instructions and cache misses under Callgrind, which is deterministic:
+   same code, same input, same numbers on every run and every machine. Linux
+   only, and the whole suite takes a few seconds.
+
+   ```bash
+   cargo install iai-callgrind-runner --version 0.16.1
+   cargo bench --features bench --bench induce -- --save-baseline=before
+   # ... make the change ...
+   cargo bench --features bench --bench induce -- --baseline=before
+   ```
+
+   An instruction count answers "less work", not "faster". A prefetch that
+   removes a stall adds an instruction and reads as a regression here while
+   being a win in wall-clock, so read the cache-miss counters next to it and
+   confirm end-to-end with 1.
+
 ## Using the `upstream-c` developer feature
 
 The `upstream-c` Cargo feature builds the original C `libsais` alongside the Rust translation and exposes `libsais*_upstream_c*` wrappers around it. It is also what gates the differential test suite. **The upstream C source is not bundled in the crate**, so anyone — contributor or downstream user — who wants this feature must fetch it themselves.

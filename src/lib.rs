@@ -43,7 +43,7 @@ pub const UNBWT_FASTBITS: usize = 17;
 /// allocation (or null) is safe, the CPU just ignores the hint.
 #[inline(always)]
 pub(crate) fn libsais_prefetchr<T>(ptr: *const T) {
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", not(miri)))]
     unsafe {
         std::arch::x86_64::_mm_prefetch(ptr as *const i8, std::arch::x86_64::_MM_HINT_T0);
     }
@@ -52,7 +52,7 @@ pub(crate) fn libsais_prefetchr<T>(ptr: *const T) {
     // `__builtin_prefetch` upstream compiles to on this target. A prefetch is a
     // hint: it cannot fault, cannot change registers or memory, and cannot
     // alter results, only when a cache line arrives.
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(target_arch = "aarch64", not(miri)))]
     unsafe {
         std::arch::asm!(
             "prfm pldl1keep, [{ptr}]",
@@ -60,7 +60,10 @@ pub(crate) fn libsais_prefetchr<T>(ptr: *const T) {
             options(nostack, readonly, preserves_flags),
         );
     }
-    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    // Miri models no cache and rejects both `_mm_prefetch` and inline assembly,
+    // so under Miri the hint compiles away. Dropping it is sound for the same
+    // reason it is only a hint: it cannot alter results.
+    #[cfg(any(miri, not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
     {
         let _ = ptr;
     }
@@ -71,7 +74,7 @@ pub(crate) fn libsais_prefetchr<T>(ptr: *const T) {
 /// adequate for the libsais usage and keeps behavior portable across CPUs.
 #[inline(always)]
 pub(crate) fn libsais_prefetchw<T>(ptr: *const T) {
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", not(miri)))]
     unsafe {
         std::arch::x86_64::_mm_prefetch(ptr as *const i8, std::arch::x86_64::_MM_HINT_T0);
     }
@@ -80,7 +83,7 @@ pub(crate) fn libsais_prefetchw<T>(ptr: *const T) {
     // `__builtin_prefetch` upstream compiles to on this target. A prefetch is a
     // hint: it cannot fault, cannot change registers or memory, and cannot
     // alter results, only when a cache line arrives.
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(target_arch = "aarch64", not(miri)))]
     unsafe {
         std::arch::asm!(
             "prfm pstl1keep, [{ptr}]",
@@ -88,7 +91,8 @@ pub(crate) fn libsais_prefetchw<T>(ptr: *const T) {
             options(nostack, readonly, preserves_flags),
         );
     }
-    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    // See `libsais_prefetchr`: Miri cannot execute either form of the hint.
+    #[cfg(any(miri, not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
     {
         let _ = ptr;
     }
