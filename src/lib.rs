@@ -6756,9 +6756,16 @@ pub fn renumber_lms_suffixes_8u(
 
     let m_usize = usize::try_from(m).expect("m must be non-negative");
     let (sa_head, sam) = sa.split_at_mut(m_usize);
+    // The look-ahead below reads `sa_head[i0 + prefetch_distance + lookahead]`
+    // with `lookahead` in `0..4`, so the unrolled loop must stop
+    // `prefetch_distance + 3` short of the end of the block. Deriving that guard
+    // from `prefetch_distance` keeps the two in step: while the distance was
+    // spelled out as a literal in the bound, raising it panicked with an
+    // out-of-bounds index instead of just prefetching further ahead.
     let prefetch_distance = 64usize;
+    let prefetch_guard = prefetch_distance as FastSint + 3;
     let mut i = omp_block_start;
-    let mut j = omp_block_start + omp_block_size - 64 - 3;
+    let mut j = omp_block_start + omp_block_size - prefetch_guard;
 
     let sa_head_ptr = sa_head.as_ptr();
     let sam_ptr = sam.as_ptr();
@@ -6792,7 +6799,7 @@ pub fn renumber_lms_suffixes_8u(
         i += 4;
     }
 
-    j += 64 + 3;
+    j += prefetch_guard;
     while i < j {
         let p = sa_head[i as usize];
         let d = ((p & SAINT_MAX) >> 1) as usize;
@@ -21102,6 +21109,40 @@ mod omp_scaling_tests {
                 assert_eq!(rc, 0, "outer={outer_threads} inner={threads}");
                 assert_eq!(sa, expected, "outer={outer_threads} inner={threads}");
             }
+        }
+    }
+
+    /// `renumber_lms_suffixes_8u` primes the cache by reading
+    /// `prefetch_distance` elements past the cursor, so its unrolled loop has to
+    /// stop exactly that far from the end of the block. The distance and the
+    /// bound used to be written independently, one as a named binding and one as
+    /// a literal `64`, so raising the distance panicked with an out-of-bounds
+    /// index instead of prefetching further ahead. Sweeping the block size
+    /// across the guard boundary pins the two together.
+    #[test]
+    fn renumber_lms_suffixes_8u_stays_in_bounds_across_the_prefetch_guard() {
+        for m in 1..300usize {
+            // The first half holds LMS entries whose payload `(p & MAX) >> 1`
+            // indexes the second half; a negative entry starts a new name.
+            let mut sa = vec![0i32; 2 * m];
+            for (k, slot) in sa[..m].iter_mut().enumerate() {
+                let d = (m - 1 - k) as i32;
+                *slot = (d << 1) | if k % 3 == 0 { crate::SAINT_MIN } else { 0 };
+            }
+
+            let mut expected = vec![0i32; m];
+            let mut expected_name = 0;
+            for k in 0..m {
+                let p = sa[k];
+                let d = ((p & crate::SAINT_MAX) >> 1) as usize;
+                expected[d] = expected_name | crate::SAINT_MIN;
+                expected_name += i32::from(p < 0);
+            }
+
+            let name = crate::renumber_lms_suffixes_8u(&mut sa, m as i32, 0, 0, m as isize);
+
+            assert_eq!(name, expected_name, "m={m}");
+            assert_eq!(&sa[m..], &expected[..], "m={m}");
         }
     }
 }
