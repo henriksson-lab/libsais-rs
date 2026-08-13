@@ -3099,6 +3099,14 @@ pub fn partial_sorting_scan_left_to_right_8u(
     let induction_offset = 4 * ALPHABET_SIZE;
     let distinct_offset = 2 * ALPHABET_SIZE;
     let prefetch_distance = 64 as FastSint;
+    // Checked once so the look-ahead reads in the loop below do not have to be.
+    // See the SAFETY note there.
+    if omp_block_size > 0 {
+        assert!(
+            (omp_block_start + omp_block_size) as usize <= sa.len(),
+            "block must lie inside the suffix array"
+        );
+    }
     let mut i = omp_block_start;
     let mut j = if omp_block_size > prefetch_distance + 1 {
         omp_block_start + omp_block_size - prefetch_distance - 1
@@ -3112,10 +3120,18 @@ pub fn partial_sorting_scan_left_to_right_8u(
     while i < j {
         let i_us = i as usize;
         libsais_prefetchr(sa_ptr.wrapping_add(i_us + 2 * prefetch_distance_us));
-        let pf0 = (sa[i_us + prefetch_distance_us] & SAINT_MAX) as usize;
+        // SAFETY: the loop runs while `i < j` and `j` is at most
+        // `omp_block_start + omp_block_size - prefetch_distance - 1`, so the
+        // largest index formed here is `omp_block_start + omp_block_size - 1`,
+        // which the assertion above puts inside `sa`. These two reads exist only
+        // to compute prefetch addresses, and they are the hottest reads in the
+        // crate: keeping their bounds checks costs 3% of all instructions
+        // executed for a construction.
+        let pf0 = (unsafe { *sa.get_unchecked(i_us + prefetch_distance_us) } & SAINT_MAX) as usize;
         libsais_prefetchr(t_ptr.wrapping_add(pf0).wrapping_sub(1));
         libsais_prefetchr(t_ptr.wrapping_add(pf0).wrapping_sub(2));
-        let pf1 = (sa[i_us + prefetch_distance_us + 1] & SAINT_MAX) as usize;
+        let pf1 =
+            (unsafe { *sa.get_unchecked(i_us + prefetch_distance_us + 1) } & SAINT_MAX) as usize;
         libsais_prefetchr(t_ptr.wrapping_add(pf1).wrapping_sub(1));
         libsais_prefetchr(t_ptr.wrapping_add(pf1).wrapping_sub(2));
 
@@ -4145,6 +4161,11 @@ pub fn partial_sorting_scan_right_to_left_8u(
 
     let start = usize::try_from(omp_block_start).expect("omp_block_start must be non-negative");
     let size = usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
+    // Checked once so the look-ahead reads in the loop below do not have to be.
+    assert!(
+        start + size <= sa.len(),
+        "block must lie inside the suffix array"
+    );
     let mut i = start + size - 1;
     let mut j = start + prefetch_distance + 1;
 
@@ -4152,10 +4173,15 @@ pub fn partial_sorting_scan_right_to_left_8u(
     let t_ptr = t.as_ptr();
     while i >= j {
         libsais_prefetchr(sa_ptr.wrapping_add(i.wrapping_sub(2 * prefetch_distance)));
-        let pf0 = (sa[i - prefetch_distance] & SAINT_MAX) as usize;
+        // SAFETY: scanning downwards, `i` starts at `start + size - 1`, which
+        // the assertion above puts inside `sa`, and the loop condition keeps
+        // `i >= start + prefetch_distance + 1`, so the smallest index formed
+        // here is `start`. These two reads only compute prefetch addresses; see
+        // `partial_sorting_scan_left_to_right_8u` for what the checks cost.
+        let pf0 = (unsafe { *sa.get_unchecked(i - prefetch_distance) } & SAINT_MAX) as usize;
         libsais_prefetchr(t_ptr.wrapping_add(pf0).wrapping_sub(1));
         libsais_prefetchr(t_ptr.wrapping_add(pf0).wrapping_sub(2));
-        let pf1 = (sa[i - prefetch_distance - 1] & SAINT_MAX) as usize;
+        let pf1 = (unsafe { *sa.get_unchecked(i - prefetch_distance - 1) } & SAINT_MAX) as usize;
         libsais_prefetchr(t_ptr.wrapping_add(pf1).wrapping_sub(1));
         libsais_prefetchr(t_ptr.wrapping_add(pf1).wrapping_sub(2));
 
@@ -7968,6 +7994,12 @@ pub fn final_sorting_scan_left_to_right_8u(
     let start = usize::try_from(omp_block_start).expect("omp_block_start must be non-negative");
     let size = usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
 
+    // Checked once so the look-ahead reads in the loop below do not have to be.
+    assert!(
+        start + size <= sa.len(),
+        "block must lie inside the suffix array"
+    );
+
     let mut i = start;
     let mut j = if size > prefetch_distance + 1 {
         start + size - (prefetch_distance + 1)
@@ -7978,11 +8010,16 @@ pub fn final_sorting_scan_left_to_right_8u(
     let t_ptr = t.as_ptr();
     while i < j {
         libsais_prefetchw(sa_ptr.wrapping_add(i + 2 * prefetch_distance));
-        let s0 = sa[i + prefetch_distance];
+        // SAFETY: `j` stops `prefetch_distance + 1` short of `start + size`, so
+        // the largest index formed by these two reads is `start + size - 1`,
+        // which the assertion above puts inside `sa`. Both reads exist only to
+        // compute prefetch addresses; see
+        // `partial_sorting_scan_left_to_right_8u` for what the checks cost.
+        let s0 = unsafe { *sa.get_unchecked(i + prefetch_distance) };
         let ts0 = if s0 > 0 { s0 as usize } else { 2 };
         libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(1));
         libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(2));
-        let s1 = sa[i + prefetch_distance + 1];
+        let s1 = unsafe { *sa.get_unchecked(i + prefetch_distance + 1) };
         let ts1 = if s1 > 0 { s1 as usize } else { 2 };
         libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(1));
         libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(2));
@@ -8048,6 +8085,11 @@ pub fn final_sorting_scan_left_to_right_32s(
     }
 
     let prefetch_distance: FastSint = 64;
+    // Checked once so the look-ahead reads in the loop below do not have to be.
+    assert!(
+        (omp_block_start + omp_block_size) as usize <= sa.len(),
+        "block must lie inside the suffix array"
+    );
     let mut i = omp_block_start;
     let mut j = omp_block_start + omp_block_size - 2 * prefetch_distance - 1;
 
@@ -8057,19 +8099,26 @@ pub fn final_sorting_scan_left_to_right_32s(
     while i < j {
         let i_us = i as usize;
         libsais_prefetchw(sa_ptr.wrapping_add(i_us + 3 * prefetch_distance_us));
-        let s0 = sa[i_us + 2 * prefetch_distance_us];
+        // SAFETY: `j` stops `2 * prefetch_distance + 1` short of
+        // `omp_block_start + omp_block_size`, so the largest index these four
+        // reads form is `omp_block_start + omp_block_size - 1`, which the
+        // assertion above puts inside `sa`. They exist only to compute prefetch
+        // addresses; see `partial_sorting_scan_left_to_right_8u` for the cost of
+        // checking them. The `t[..]` reads below stay checked: their indices
+        // come from the suffix array contents, not from the loop bound.
+        let s0 = unsafe { *sa.get_unchecked(i_us + 2 * prefetch_distance_us) };
         let ts0 = if s0 > 0 { s0 as usize } else { 1 };
         libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(1));
-        let s1 = sa[i_us + 2 * prefetch_distance_us + 1];
+        let s1 = unsafe { *sa.get_unchecked(i_us + 2 * prefetch_distance_us + 1) };
         let ts1 = if s1 > 0 { s1 as usize } else { 1 };
         libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(1));
-        let s2 = sa[i_us + prefetch_distance_us];
+        let s2 = unsafe { *sa.get_unchecked(i_us + prefetch_distance_us) };
         if s2 > 0 {
             let s2u = s2 as usize;
             libsais_prefetchw(induction_bucket.as_ptr().wrapping_add(t[s2u - 1] as usize));
             libsais_prefetchr(t_ptr.wrapping_add(s2u).wrapping_sub(2));
         }
-        let s3 = sa[i_us + prefetch_distance_us + 1];
+        let s3 = unsafe { *sa.get_unchecked(i_us + prefetch_distance_us + 1) };
         if s3 > 0 {
             let s3u = s3 as usize;
             libsais_prefetchw(induction_bucket.as_ptr().wrapping_add(t[s3u - 1] as usize));
@@ -9329,6 +9378,11 @@ pub fn final_sorting_scan_right_to_left_8u(
     let prefetch_distance = 64usize;
     let start = usize::try_from(omp_block_start).expect("omp_block_start must be non-negative");
     let size = usize::try_from(omp_block_size).expect("omp_block_size must be non-negative");
+    // Checked once so the look-ahead reads in the loop below do not have to be.
+    assert!(
+        start + size <= sa.len(),
+        "block must lie inside the suffix array"
+    );
     let mut i = start + size - 1;
     let mut j = start + prefetch_distance + 1;
 
@@ -9336,11 +9390,16 @@ pub fn final_sorting_scan_right_to_left_8u(
     let t_ptr = t.as_ptr();
     while i >= j {
         libsais_prefetchw(sa_ptr.wrapping_add(i.wrapping_sub(2 * prefetch_distance)));
-        let s0 = sa[i - prefetch_distance];
+        // SAFETY: scanning downwards from `start + size - 1`, which the
+        // assertion above puts inside `sa`, with the loop condition keeping
+        // `i >= start + prefetch_distance + 1`, so the smallest index formed
+        // here is `start`. Both reads only compute prefetch addresses; see
+        // `partial_sorting_scan_left_to_right_8u` for what the checks cost.
+        let s0 = unsafe { *sa.get_unchecked(i - prefetch_distance) };
         let ts0 = if s0 > 0 { s0 as usize } else { 2 };
         libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(1));
         libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(2));
-        let s1 = sa[i - prefetch_distance - 1];
+        let s1 = unsafe { *sa.get_unchecked(i - prefetch_distance - 1) };
         let ts1 = if s1 > 0 { s1 as usize } else { 2 };
         libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(1));
         libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(2));
@@ -9448,6 +9507,11 @@ pub fn final_sorting_scan_right_to_left_32s(
     }
 
     let prefetch_distance: FastSint = 64;
+    // Checked once so the look-ahead reads in the loop below do not have to be.
+    assert!(
+        (omp_block_start + omp_block_size) as usize <= sa.len(),
+        "block must lie inside the suffix array"
+    );
     let mut i = omp_block_start + omp_block_size - 1;
     let mut j = omp_block_start + 2 * prefetch_distance + 1;
 
@@ -9457,19 +9521,25 @@ pub fn final_sorting_scan_right_to_left_32s(
     while i >= j {
         let i_us = i as usize;
         libsais_prefetchw(sa_ptr.wrapping_add(i_us.wrapping_sub(3 * prefetch_distance_us)));
-        let s0 = sa[i_us - 2 * prefetch_distance_us];
+        // SAFETY: scanning downwards from `omp_block_start + omp_block_size - 1`,
+        // which the assertion above puts inside `sa`, with the loop condition
+        // keeping `i >= omp_block_start + 2 * prefetch_distance + 1`, so the
+        // smallest index these four reads form is `omp_block_start`. They only
+        // compute prefetch addresses; the `t[..]` reads below stay checked,
+        // since their indices come from the suffix array contents.
+        let s0 = unsafe { *sa.get_unchecked(i_us - 2 * prefetch_distance_us) };
         let ts0 = if s0 > 0 { s0 as usize } else { 1 };
         libsais_prefetchr(t_ptr.wrapping_add(ts0).wrapping_sub(1));
-        let s1 = sa[i_us - 2 * prefetch_distance_us - 1];
+        let s1 = unsafe { *sa.get_unchecked(i_us - 2 * prefetch_distance_us - 1) };
         let ts1 = if s1 > 0 { s1 as usize } else { 1 };
         libsais_prefetchr(t_ptr.wrapping_add(ts1).wrapping_sub(1));
-        let s2 = sa[i_us - prefetch_distance_us];
+        let s2 = unsafe { *sa.get_unchecked(i_us - prefetch_distance_us) };
         if s2 > 0 {
             let s2u = s2 as usize;
             libsais_prefetchw(induction_bucket.as_ptr().wrapping_add(t[s2u - 1] as usize));
             libsais_prefetchr(t_ptr.wrapping_add(s2u).wrapping_sub(2));
         }
-        let s3 = sa[i_us - prefetch_distance_us - 1];
+        let s3 = unsafe { *sa.get_unchecked(i_us - prefetch_distance_us - 1) };
         if s3 > 0 {
             let s3u = s3 as usize;
             libsais_prefetchw(induction_bucket.as_ptr().wrapping_add(t[s3u - 1] as usize));
@@ -21113,6 +21183,28 @@ mod omp_scaling_tests {
                 assert_eq!(rc, 0, "outer={outer_threads} inner={threads}");
                 assert_eq!(sa, expected, "outer={outer_threads} inner={threads}");
             }
+        }
+    }
+
+    /// End-to-end correctness against a sort-based reference, at sizes that
+    /// straddle the point where the induce scans switch from their tail loop to
+    /// their unrolled, prefetching loop (`prefetch_distance + 1`, so 65). That
+    /// unrolled loop reads past the cursor without a bounds check, and every
+    /// other end-to-end test in this crate is gated behind `upstream-c` and so
+    /// never runs in CI. Small enough to run under Miri.
+    #[test]
+    fn libsais_matches_a_sort_based_reference_on_small_texts() {
+        fn reference(text: &[u8]) -> Vec<i32> {
+            let mut sa: Vec<i32> = (0..text.len() as i32).collect();
+            sa.sort_by(|&l, &r| text[l as usize..].cmp(&text[r as usize..]));
+            sa
+        }
+
+        for n in 0..300usize {
+            let text = dna_like(n, 0x1234_5678_9ABC_DEF0);
+            let mut sa = vec![0i32; n];
+            assert_eq!(crate::libsais(&text, &mut sa, 0, None), 0, "n={n}");
+            assert_eq!(sa, reference(&text), "n={n}");
         }
     }
 
