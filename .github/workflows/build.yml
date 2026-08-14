@@ -40,3 +40,33 @@ jobs:
       # architecture-specific prefetch paths are both executed here.
       - name: Test
         run: cargo test --release --lib
+
+  semver:
+    name: Semver (public API vs the published crate)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal --no-self-update
+
+      - name: Select Rust
+        run: rustup default stable
+
+      # `only-explicit-features` matters here: the default feature group turns on
+      # every feature, including upstream-c, which needs the C sources at
+      # ./libsais/. Those are deliberately not shipped in the crate, so the
+      # baseline pulled from crates.io cannot build and the check dies with a
+      # confusing `clang: error: unsupported option '-fopenmp'`.
+      #
+      # Scope: this compares the public API surface only. It cannot see a
+      # behaviour change. 0.2.3 changed how `threads` interacts with an ambient
+      # rayon pool without touching a single signature, and this check passes it
+      # cleanly, as it should. Treat it as a guard against accidental API breaks,
+      # not as a release gate on its own.
+      - name: cargo-semver-checks
+        uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          feature-group: only-explicit-features
