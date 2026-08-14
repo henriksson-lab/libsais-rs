@@ -70,3 +70,53 @@ jobs:
         uses: obi1kenobi/cargo-semver-checks-action@v2
         with:
           feature-group: only-explicit-features
+
+  bench:
+    name: Instruction counts (Callgrind)
+    runs-on: ubuntu-latest
+    # Only meaningful against a base to compare with.
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal --no-self-update
+
+      - name: Select Rust
+        run: rustup default stable
+
+      - name: Install Valgrind
+        run: sudo apt-get update && sudo apt-get install -y valgrind
+
+      # Must match the iai-callgrind version in Cargo.toml exactly; the runner
+      # and the library speak a versioned protocol to each other.
+      - name: Install the Callgrind runner
+        run: cargo install iai-callgrind-runner --version 0.16.1
+
+      # Counts are deterministic, so the base run and the PR run are directly
+      # comparable even though they happen on different runner instances. That
+      # is the whole point of measuring instructions rather than time: wall
+      # clock on a shared CI runner is worthless at this resolution.
+      #
+      # Tolerated to fail: a base commit older than these benchmarks has nothing
+      # to run, and the comparison below then simply reports no baseline.
+      - name: Measure the base commit
+        continue-on-error: true
+        run: |
+          git checkout --detach ${{ github.event.pull_request.base.sha }}
+          cargo bench --features bench --bench induce -- --save-baseline=base
+
+      - name: Compare this branch against it
+        run: |
+          git checkout --detach ${{ github.sha }}
+          cargo bench --features bench --bench induce -- --baseline=base
+
+      # Reporting only, deliberately not a gate. A prefetch that removes a stall
+      # adds an instruction and would read as a regression here while being a
+      # win in wall-clock. Add `--regression=ir=N` to the compare step above to
+      # make it fail a PR once the numbers are understood.
+

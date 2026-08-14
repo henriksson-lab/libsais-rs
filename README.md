@@ -78,6 +78,107 @@ Run the local Rust-vs-C benchmark example with:
 cargo run --release --features upstream-c --example bench_vs_c
 ```
 
+### Measuring a change
+
+Wall-clock on a laptop is not precise enough for the optimisations that are
+left. Repeated runs of the same binary on the same input move by roughly 8%
+here, and the remaining wins in the induce and recursion phases are worth about
+that much each. Three tools, in the order they are useful:
+
+1. **Where the time goes, by phase.** Exact, and the number to quote:
+
+   ```bash
+   cargo run --release --features profile --example scaling_report -- <input> 8
+   ```
+
+2. **Where the time goes, by function.** [`tools/profile.sh`](tools/profile.sh)
+   records a profile with [samply](https://github.com/mstange/samply) and prints
+   self time per symbol. Note that it deliberately builds without cross-crate
+   LTO: with `lto = "fat"` about 40% of samples land in an inlined `main` and
+   attribution is useless.
+
+   ```bash
+   cargo install samply
+   tools/profile.sh <input>
+   ```
+
+3. **Did this change do less work.** [`benches/induce.rs`](benches/induce.rs)
+   counts instructions and cache misses under Callgrind, which is deterministic:
+   same code, same input, same numbers on every run and every machine. Linux
+   only, and the whole suite takes a few seconds.
+
+   ```bash
+   cargo install iai-callgrind-runner --version 0.16.1
+   cargo bench --features bench --bench induce -- --save-baseline=before
+   # ... make the change ...
+   cargo bench --features bench --bench induce -- --baseline=before
+   ```
+
+   An instruction count answers "less work", not "faster". A prefetch that
+   removes a stall adds an instruction and reads as a regression here while
+   being a win in wall-clock, so read the cache-miss counters next to it and
+   confirm end-to-end with 1.
+
+### Where the time goes
+
+Self time on chr21 (80 MB, forward ++ reverse complement, serial, one arm64
+machine), from `tools/profile.sh`:
+
+| function | share |
+| --- | --- |
+| `final_sorting_scan_right_to_left_8u` | 15.8% |
+| `final_sorting_scan_left_to_right_8u` | 12.6% |
+| `final_sorting_scan_right_to_left_32s` | 7.8% |
+| `partial_sorting_scan_right_to_left_8u` | 6.6% |
+| `partial_sorting_scan_left_to_right_8u` | 6.1% |
+| `final_sorting_scan_left_to_right_32s` | 6.1% |
+| `partial_sorting_scan_*_32s_6k` | 6.1% |
+
+**Induction is 61% of the program.** The `32s` entries are the same scans
+running inside the recursion, which is why the recursion phase is 45% of
+parallel time yet only scales 1.45x: it is mostly induction too, and there is no
+separate recursion problem to solve.
+
+Per phase, and this is the ceiling that matters (`profile` feature, chr21):
+
+| phase | serial | 8 threads | speedup |
+| --- | --- | --- | --- |
+| count+gather LMS | 0.075 s | 0.014 s | 5.4x |
+| radix sort LMS | 0.045 s | 0.013 s | 3.5x |
+| induce partial order | 0.175 s | 0.097 s | 1.80x |
+| renumber+gather LMS | 0.074 s | 0.019 s | 3.9x |
+| recursion | 0.450 s | 0.310 s | 1.45x |
+| gather+reconstruct LMS | 0.108 s | 0.020 s | 5.4x |
+| induce final order | 0.357 s | 0.219 s | 1.63x |
+| **total** | **1.285 s** | **0.691 s** | **1.87x** |
+
+Recursion and the two induce phases are 91% of the parallel time. Driving the
+other four phases to zero would take the total from 1.87x to 2.11x, so anything
+outside those three is worth at most 10%.
+
+### Things that were tried and did not work
+
+Recorded so they are not retried blind.
+
+- **Raising the assertion instead of using `get_unchecked`.** Establishing the
+  block bound once and hoping the compiler would then elide the per-iteration
+  bounds checks in the induce scans: +0.09% instructions, the cost of the
+  assertion with none of the benefit.
+- **`-C target-cpu=native` on aarch64.** 1.284 s against 1.285 s. Expected: the
+  code has no SIMD and NEON is already in the aarch64 baseline. It may still
+  matter on x86-64, where the crates.io baseline is SSE2.
+- **Transparent huge pages for the suffix array.** `MADV_HUGEPAGE` on a 305 MB
+  suffix array, Linux arm64, eight paired rounds: median 1.603 s against 1.524 s
+  for `MADV_NOHUGEPAGE`, slower in all eight. Measured inside a VM with nested
+  paging, so treat it as "no evidence of a win here" rather than settled; worth
+  redoing on bare metal. Note the crate cannot do this itself in any case, since
+  the suffix array belongs to the caller.
+- **Prefetch distance 32.** Serial chr21 1.366 s against 1.285 s at 64.
+  Distance 128 is neutral. 64 stays.
+- **The 32-bit entry point for its memory traffic.** `libsais` against
+  `libsais64` on the same 80 MB input: 1.03x, inside the noise. The 32-bit path
+  is worth choosing for its footprint (305 MB against 611 MB), not its speed.
+
 ## Using the `upstream-c` developer feature
 
 The `upstream-c` Cargo feature builds the original C `libsais` alongside the Rust translation and exposes `libsais*_upstream_c*` wrappers around it. It is also what gates the differential test suite. **The upstream C source is not bundled in the crate**, so anyone — contributor or downstream user — who wants this feature must fetch it themselves.
