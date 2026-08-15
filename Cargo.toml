@@ -29,6 +29,14 @@ path = "src/lib.rs"
 name = "bench_vs_c"
 required-features = ["upstream-c"]
 
+# Instruction-count benchmarks. Gated behind `bench` because they need Valgrind
+# to run and so are Linux-only, and because gating keeps `cargo build
+# --all-targets` on macOS and Windows from having to compile the harness.
+[[bench]]
+name = "induce"
+harness = false
+required-features = ["bench"]
+
 [features]
 default = []
 # Build and link the upstream C libsais (with OpenMP) and expose
@@ -39,6 +47,9 @@ default = []
 # has `./libsais/` populated (see README). Requires GCC with OpenMP
 # (libgomp); other toolchains are not supported.
 upstream-c = ["dep:cc"]
+# Developer-only: enables the Callgrind benchmarks under `benches/`. Needs
+# Valgrind and the matching `iai-callgrind-runner` on PATH, so Linux only.
+bench = []
 # Developer-only: accumulate per-phase wall-clock time and rayon pool build
 # counts, printed via `libsais_rs::profile::report()`. Adds timing overhead;
 # never enable it in a release dependency.
@@ -49,6 +60,10 @@ rayon = "1.10"
 
 [build-dependencies]
 cc = { version = "1", optional = true }
+
+[dev-dependencies]
+# Only ever built for the `induce` bench, which is gated on the `bench` feature.
+iai-callgrind = "0.16.1"
 
 [profile.release]
 codegen-units = 1
